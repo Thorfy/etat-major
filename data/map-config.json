@@ -1,0 +1,36 @@
+{
+  "sovereignRoots": {
+    "US1": "USA",
+    "FR1": "FRA",
+    "GB1": "GBR",
+    "NL1": "NLD",
+    "DN1": "DNK",
+    "AU1": "AUS",
+    "NZ1": "NZL",
+    "CH1": "CHN",
+    "FI1": "FIN",
+    "CU1": "CUB",
+    "KA1": "KAZ",
+    "IS1": "ISR"
+  },
+  "aliases": {
+    "USG": "USA"
+  },
+  "separateNations": ["KOS", "PSX", "SAH"],
+  "unclaimed": ["BRI", "CNM", "SPI", "BRT", "KAS", "PGA", "BJN", "SER", "SCR"],
+  "excluded": ["ATA"],
+  "nameOverrides": {
+    "CHN": "Chine",
+    "COD": "RD Congo",
+    "COG": "Congo",
+    "CAF": "Centrafrique",
+    "FSM": "Micronésie"
+  },
+  "minNationCells": 4,
+  "nearestNationRadiusCells": 150,
+  "minProvinceCells": 60,
+  "maxProvinceCells": 2500,
+  "splitTargetCells": 1600,
+  "lakeMaxScalerank": 4,
+  "excludedLakes": ["Lake Eyre North", "Lake Eyre South", "Lake Torrens", "Lake Gairdner"]
+}

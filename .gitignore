@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.vite/
+
+# Données sources téléchargées par `npm run map:fetch` (~60 Mo).
+# La carte générée dans public/map/ reste versionnée.
+data/raw/
