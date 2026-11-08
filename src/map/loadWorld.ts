@@ -8,6 +8,8 @@ export interface LoadedWorld {
   provinceGrid: Uint16Array;
   /** Propriétaire de chaque cellule (0 = eau, sinon indice de nation + 1). */
   ownerGrid: Uint16Array;
+  /** Type de terrain de chaque cellule (voir terrain.ts). */
+  terrainGrid: Uint8Array;
 }
 
 async function fetchOk(path: string): Promise<Response> {
@@ -17,19 +19,26 @@ async function fetchOk(path: string): Promise<Response> {
 }
 
 export async function loadWorld(): Promise<LoadedWorld> {
-  const [json, dat] = await Promise.all([fetchOk('map/world.json'), fetchOk('map/provinces.dat')]);
+  const [json, provincesDat, terrainDat] = await Promise.all([
+    fetchOk('map/world.json'),
+    fetchOk('map/provinces.dat'),
+    fetchOk('map/terrain.dat'),
+  ]);
   const data = (await json.json()) as WorldData;
-  const stream = dat.body!.pipeThrough(new DecompressionStream('deflate'));
-  const buffer = await new Response(stream).arrayBuffer();
+  const inflate = async (response: Response) =>
+    new Uint16Array(await new Response(response.body!.pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+  const cellCount = data.width * data.height;
+  const [provinceRle, terrainRle] = await Promise.all([inflate(provincesDat), inflate(terrainDat)]);
 
-  const provinceGrid = decodeRle(new Uint16Array(buffer), data.width * data.height);
+  const provinceGrid = decodeRle(provinceRle, cellCount);
+  const terrainGrid = Uint8Array.from(decodeRle(terrainRle, cellCount));
   const ownerOfProvince = new Uint16Array(data.provinces.length + 1);
   data.provinces.forEach((province, index) => {
     ownerOfProvince[index + 1] = province.nation + 1;
   });
   const ownerGrid = new Uint16Array(provinceGrid.length);
   for (let i = 0; i < provinceGrid.length; i++) ownerGrid[i] = ownerOfProvince[provinceGrid[i]];
-  return { data, provinceGrid, ownerGrid };
+  return { data, provinceGrid, ownerGrid, terrainGrid };
 }
 
 /** Portée du dégradé côtier, en cellules de la grille à demi-résolution. */

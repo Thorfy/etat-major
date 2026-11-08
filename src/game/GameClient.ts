@@ -2,14 +2,17 @@
 import { findLandNeighbors } from '../map/adjacency.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import type { MapView } from '../render/MapView.ts';
-import { DEFAULT_ALLOCATION, TICKS_PER_SECOND } from '../sim/balance.ts';
-import type { FrontSnapshot, SimCommand, SimSnapshot, Stance, ToWorker, WorkerInit, WorkerUpdate } from '../sim/protocol.ts';
+import { DEFAULT_ALLOCATION, DEFAULT_OFFENSIVE_SHARE, MAX_OFFENSIVES_PER_NATION, OFFENSIVE_MIN_FORCE, TICKS_PER_SECOND } from '../sim/balance.ts';
+import type { FrontSnapshot, OffensiveSnapshot, SimCommand, SimSnapshot, Stance, ToWorker, WorkerInit, WorkerUpdate } from '../sim/protocol.ts';
 import { rebalance } from './allocation.ts';
 
 export interface FrontOrder {
   allocation: number;
   stance: Stance;
 }
+
+export const GAME_SPEEDS = [1, 2, 4] as const;
+const MESSAGE_MS = 3500;
 
 export class GameClient {
   readonly player: number;
@@ -19,6 +22,10 @@ export class GameClient {
   maxTickMs = 0;
   flipsPerSecond = 0;
   error: string | null = null;
+  /** 0 = pause. */
+  speed = 1;
+  offensiveShare = DEFAULT_OFFENSIVE_SHARE;
+  message: string | null = null;
 
   private readonly worker: Worker;
   private readonly world: LoadedWorld;
@@ -30,6 +37,8 @@ export class GameClient {
   private frontCount = 0;
   private flipsWindow = 0;
   private windowStart = performance.now();
+  private speedBeforePause = 1;
+  private messageTimer = 0;
 
   constructor(world: LoadedWorld, view: MapView, player: number, enemy: number, seed: number, onChange: () => void) {
     this.world = world;
@@ -51,18 +60,20 @@ export class GameClient {
 
     const provinceGrid = world.provinceGrid.slice();
     const ownerGrid = world.ownerGrid.slice();
+    const terrainGrid = world.terrainGrid.slice();
     const init: WorkerInit = {
       type: 'init',
       width: world.data.width,
       height: world.data.height,
       nations: world.data.nations.map(({ population, gdpMusd }) => ({ population, gdpMusd })),
-      provinces: world.data.provinces.map(({ nation, areaKm2 }) => ({ nation, areaKm2 })),
+      provinces: world.data.provinces.map(({ nation, areaKm2, x, y }) => ({ nation, areaKm2, x, y })),
       provinceGrid,
       ownerGrid,
+      terrainGrid,
       seed,
       player,
     };
-    this.post(init, [provinceGrid.buffer, ownerGrid.buffer]);
+    this.post(init, [provinceGrid.buffer, ownerGrid.buffer, terrainGrid.buffer]);
     this.command({ type: 'declareWars', pairs: [[player, enemy]] });
     this.orders.set(enemy, { allocation: DEFAULT_ALLOCATION, stance: 'hold' });
   }
@@ -95,6 +106,7 @@ export class GameClient {
         this.frontCount = update.snapshot.fronts.length;
         this.view.setWars(update.snapshot.fronts.map((front) => [front.a, front.b]));
       }
+      this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets);
       this.onChange();
     }
   }
@@ -109,6 +121,10 @@ export class GameClient {
 
   playerFronts(): FrontSnapshot[] {
     return (this.snapshot?.fronts ?? []).filter((front) => front.a === this.player || front.b === this.player);
+  }
+
+  playerOffensives(): OffensiveSnapshot[] {
+    return (this.snapshot?.offensives ?? []).filter((offensive) => offensive.nation === this.player);
   }
 
   orderFor(enemy: number): FrontOrder {
@@ -145,6 +161,56 @@ export class GameClient {
     this.orders.set(enemy, { allocation, stance: 'hold' });
     this.command({ type: 'declareWars', pairs: [[this.player, enemy]] });
     this.command({ type: 'setFront', nation: this.player, enemy, allocation, stance: 'hold' });
+    this.onChange();
+  }
+
+  setOffensiveShare(share: number): void {
+    this.offensiveShare = share;
+    this.onChange();
+  }
+
+  /** Vérifie l'ordre pour expliquer un refus : la simulation l'ignorerait sans rien dire. */
+  launchOffensive(fromX: number, fromY: number, toX: number, toY: number): void {
+    const { ownerGrid, data } = this.world;
+    const stats = this.snapshot?.nations.find((nation) => nation.id === this.player);
+    const target = ownerGrid[toY * data.width + toX];
+    if (ownerGrid[fromY * data.width + fromX] !== this.player) {
+      this.notify('Une offensive doit partir de ton territoire.');
+    } else if (target === 0) {
+      this.notify('La cible doit être sur la terre ferme.');
+    } else if (target !== this.player && !this.isAtWarWith(target)) {
+      this.notify('Tu n\'es pas en guerre contre ce pays.');
+    } else if (this.playerOffensives().length >= MAX_OFFENSIVES_PER_NATION) {
+      this.notify(`${MAX_OFFENSIVES_PER_NATION} offensives au plus en même temps.`);
+    } else if (!stats || stats.reserve * this.offensiveShare < OFFENSIVE_MIN_FORCE) {
+      this.notify('Réserve insuffisante : baisse les forces engagées sur les fronts.');
+    } else {
+      this.command({ type: 'launchOffensive', nation: this.player, fromX, fromY, toX, toY, share: this.offensiveShare });
+    }
+  }
+
+  cancelOffensive(id: number): void {
+    this.command({ type: 'cancelOffensive', nation: this.player, id });
+  }
+
+  setSpeed(speed: number): void {
+    if (speed !== 0) this.speedBeforePause = speed;
+    this.speed = speed;
+    this.post({ type: 'speed', speed });
+    this.onChange();
+  }
+
+  togglePause(): void {
+    this.setSpeed(this.speed === 0 ? this.speedBeforePause : 0);
+  }
+
+  private notify(text: string): void {
+    this.message = text;
+    clearTimeout(this.messageTimer);
+    this.messageTimer = window.setTimeout(() => {
+      this.message = null;
+      this.onChange();
+    }, MESSAGE_MS);
     this.onChange();
   }
 

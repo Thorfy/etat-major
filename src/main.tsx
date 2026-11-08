@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { GameClient } from './game/GameClient.ts';
+import { GAME_SPEEDS, GameClient } from './game/GameClient.ts';
 import { findLandNeighbors } from './map/adjacency.ts';
 import type { LoadedWorld } from './map/loadWorld.ts';
 import { loadWorld } from './map/loadWorld.ts';
@@ -28,7 +28,8 @@ async function start(): Promise<void> {
   message('Chargement de la carte…');
   const world = await loadWorld();
   const neighbors = neighborsOf(world);
-  const state: UiState = { hover: 0, hoverOwner: 0, selected: 0, selectedOwner: 0, debug: false, game: null };
+  const noCell = { province: 0, owner: 0, terrain: 0 };
+  const state: UiState = { hover: noCell, selected: noCell, debug: false, aiming: false, game: null };
 
   let view: MapView | null = null;
   const refresh = () => {
@@ -42,7 +43,9 @@ async function start(): Promise<void> {
     const dx = wrapDeltaX(a.x, b.x);
     const span = Math.max(Math.hypot(dx, b.y - a.y) * 2.2, 160);
     view!.focus(a.x + dx / 2, (a.y + b.y) / 2, span);
-    state.game = new GameClient(world, view!, player, enemy, Date.now() >>> 0, refresh);
+    const game = new GameClient(world, view!, player, enemy, Date.now() >>> 0, refresh);
+    state.game = game;
+    view!.setPlayer(player, (nation) => game.isAtWarWith(nation));
     refresh();
   };
 
@@ -51,22 +54,42 @@ async function start(): Promise<void> {
     document.getElementById('labels') as HTMLCanvasElement,
     world,
     {
-      onHover(province, owner) {
-        state.hover = province;
-        state.hoverOwner = owner;
+      onHover(cell) {
+        state.hover = cell;
         refresh();
       },
-      onSelect(province, owner) {
-        state.selected = province;
-        state.selectedOwner = owner;
+      onSelect(cell) {
+        state.selected = cell;
         refresh();
       },
       onToggleDebug() {
         state.debug = !state.debug;
         refresh();
       },
+      onOffensive(fromX, fromY, toX, toY) {
+        state.game?.launchOffensive(fromX, fromY, toX, toY);
+      },
+      onAimingChange(aiming) {
+        state.aiming = aiming;
+        refresh();
+      },
     },
   );
+
+  window.addEventListener('keydown', (event) => {
+    const { target } = event;
+    if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
+    const game = state.game;
+    if (!game) return;
+    // Sur un bouton, Espace reste réservé au bouton.
+    if (event.code === 'Space' && !(target instanceof HTMLButtonElement)) {
+      event.preventDefault();
+      game.togglePause();
+    } else if (event.key >= '1' && event.key <= '3') {
+      game.setSpeed(GAME_SPEEDS[Number(event.key) - 1]);
+    }
+  });
+
   render(null, ui);
   refresh();
   if (import.meta.env.DEV) Object.assign(window, { __game: { view, world, state } });

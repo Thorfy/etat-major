@@ -20,6 +20,7 @@ uniform sampler2D uPalette;
 uniform sampler2D uCoast;
 uniform usampler2D uProvinceHome;
 uniform sampler2D uWars;
+uniform sampler2D uTerrain;
 uniform vec2 uCenter;
 uniform vec2 uResolution;
 uniform float uZoom;        // pixels physiques par cellule
@@ -87,6 +88,25 @@ float graticule(vec2 p) {
   return max(lineAlpha(dx, 0.5), lineAlpha(dy, 0.5));
 }
 
+// Relief discret : il se lit sans jamais masquer la couleur du pays.
+vec3 applyTerrain(vec3 color, vec2 p) {
+  int id = int(texelFetch(uTerrain, wrapCell(ivec2(floor(p))), 0).r * 255.0 + 0.5);
+  if (id == 1) {
+    color *= 0.87;
+    float line = abs(fract((p.x + p.y * 0.6) / 2.7) - 0.5) * 2.0;
+    color *= 1.0 - 0.12 * smoothstep(0.72, 0.95, line) * smoothstep(1.0, 2.0, uZoom);
+  } else if (id == 2) {
+    color *= 0.95;
+  } else if (id == 3) {
+    color = mix(color, vec3(0.93, 0.84, 0.62), 0.14);
+  } else if (id == 4) {
+    color = mix(color, vec3(0.93, 0.95, 0.97), 0.13);
+  } else if (id == 5) {
+    color = mix(color, vec3(0.20, 0.36, 0.20), 0.15);
+  }
+  return color;
+}
+
 vec3 shade(vec2 p, float gratAlpha) {
   vec2 q = p - 0.5;
   vec2 base = floor(q);
@@ -126,6 +146,7 @@ vec3 shade(vec2 p, float gratAlpha) {
     color = mix(color, SEA_LINE, 0.28 * gratAlpha);
   } else {
     color = texelFetch(uPalette, ivec2(int(owner), 0), 0).rgb;
+    color = applyTerrain(color, p);
     // Territoire occupé : hachures aux couleurs de son pays d'origine.
     uint home = texelFetch(uProvinceHome, ivec2(int(province), 0), 0).r;
     if (home != 0u && home != owner) {

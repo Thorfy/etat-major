@@ -4,38 +4,70 @@ import {
   AI_ATTACK_RATIO,
   AI_ENGAGED_SHARE,
   AI_INTERVAL_TICKS,
+  AI_MAX_OFFENSIVES,
+  AI_OFFENSIVE_CHANCE,
+  AI_OFFENSIVE_MIN_RESERVE,
+  AI_OFFENSIVE_SHARE,
+  AI_OUTNUMBERED_SHARE,
+  AI_TARGET_MAX_DISTANCE,
+  AI_TARGET_MIN_DISTANCE,
   ATTRITION_PER_TICK,
   DEFAULT_ALLOCATION,
   DEFENSE_MULTIPLIER,
   FLIP_STEEPNESS,
+  HOME_DEFENSE,
   INITIAL_MOBILIZATION,
   LOSS_MULTIPLIER,
+  LOST_PROVINCE_RETAINED,
   MAX_FLIP_CHANCE,
+  MAX_OFFENSIVES_PER_NATION,
+  MAX_OFFENSIVE_LENGTH,
   MIN_FRONT_LENGTH,
   NEIGHBOR_WEIGHT,
   OCCUPIED_VALUE,
+  OFFENSIVE_ATTRITION,
+  OFFENSIVE_CELL_BASE_COST,
+  OFFENSIVE_CELL_COST,
+  OFFENSIVE_DEFENDER_LOSS,
+  OFFENSIVE_DEPTH_FADE,
+  OFFENSIVE_EDGE_FALLOFF,
+  OFFENSIVE_HALF_WIDTH,
+  OFFENSIVE_MIN_FORCE,
+  OFFENSIVE_SPEED,
+  OFFENSIVE_STALL_TICKS,
+  POCKET_DRAIN,
+  POCKET_EDGE,
+  POCKET_MIN_CELLS_SHOWN,
+  POCKET_SPEED,
   REINFORCE_PER_TICK,
   RETREAT_ADVANTAGE,
   SECTOR_CHURN,
   SECTOR_NOISE,
   SECTOR_SHIFT,
+  SUPPLY_INTERVAL_TICKS,
+  TERRAIN_DEFENSE,
+  TERRAIN_SPEED,
   TRANSFER_RATE,
   baseCapacity,
 } from './balance.ts';
-import type { FrontSnapshot, SimCommand, SimSnapshot, Stance } from './protocol.ts';
+import type { FrontSnapshot, PocketSnapshot, SimCommand, SimSnapshot, Stance } from './protocol.ts';
 
 export interface SimConfig {
   width: number;
   height: number;
   nations: { population: number; gdpMusd: number }[];
   /** Le propriétaire initial d'une province est `nation + 1`. */
-  provinces: { nation: number; areaKm2: number }[];
+  provinces: { nation: number; areaKm2: number; x: number; y: number }[];
   provinceGrid: Uint16Array;
   /** Copiée : la simulation possède sa propre grille. */
   ownerGrid: Uint16Array;
+  /** Plaine partout si absente. */
+  terrainGrid?: Uint8Array;
   seed: number;
   /** Nation pilotée par le joueur (0 si toutes sont pilotées par l'IA). */
   player: number;
+  /** Faux : les autres nations n'agissent que sur ordre (utile pour les tests). */
+  ai?: boolean;
 }
 
 interface FrontSide {
@@ -43,6 +75,10 @@ interface FrontSide {
   stance: Stance;
   force: number;
   captured: number;
+  /** Forces par cellule de front, sans la posture. */
+  rawDensity: number;
+  /** Forces par cellule de front, posture comprise. */
+  density: number;
 }
 
 interface Front {
@@ -51,6 +87,23 @@ interface Front {
   sides: [FrontSide, FrontSide];
   length: number;
   logRatio: number;
+}
+
+interface Offensive {
+  id: number;
+  nation: number;
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  /** Vecteur du couloir, bouclage pris en compte. */
+  dx: number;
+  dy: number;
+  lengthSquared: number;
+  force: number;
+  startForce: number;
+  captured: number;
+  stalledTicks: number;
 }
 
 const INITIAL_LIST_CAPACITY = 1 << 14;
@@ -65,12 +118,19 @@ export class Simulation {
 
   private readonly stride: number;
   private readonly nationCount: number;
+  private readonly aiEnabled: boolean;
   private rngState: number;
+  private readonly terrain: Uint8Array | null;
 
   readonly fronts: Front[] = [];
   private readonly frontIndex: Int32Array;
   private readonly advantage: Float32Array;
   private readonly lengthCounts: Int32Array;
+
+  readonly offensives: Offensive[] = [];
+  private readonly offensivesByNation: Offensive[][];
+  private nextOffensiveId = 1;
+  private matchedOffensive: Offensive | null = null;
 
   private frontier: Int32Array = new Int32Array(INITIAL_LIST_CAPACITY);
   private frontierCount = 0;
@@ -82,15 +142,31 @@ export class Simulation {
   private readonly reserve: Float64Array;
   private readonly capacity: Float64Array;
   private readonly cellCounts: Int32Array;
+  private readonly armies: Float64Array;
 
+  private readonly provinces: SimConfig['provinces'];
   private readonly provinceHome: Uint16Array;
   private readonly provinceCells: Int32Array;
   private readonly provinceValue: Float64Array;
   private readonly controller: Uint16Array;
   private readonly provinceCounts: (Map<number, number> | null)[];
 
+  // Ravitaillement.
+  private readonly landCells: Int32Array;
+  private readonly visited: Uint8Array;
+  private readonly visitOrder: Int32Array;
+  private readonly pocket: Uint8Array;
+  private pocketList: number[] = [];
+  private readonly pocketCounts: Int32Array;
+  private pockets: PocketSnapshot[] = [];
+  /** Cellule d'ancrage par territoire d'origine : l'Alaska n'est pas une poche. */
+  private readonly anchorOwner = new Map<number, number>();
+  private readonly isAnchor: Uint8Array;
+  private supplyDirty = false;
+
   private flipCells: Int32Array = new Int32Array(1024);
   private flipOwners: Uint16Array = new Uint16Array(1024);
+  private flipOffensives: Int32Array = new Int32Array(1024);
   private flipCount = 0;
   private pendingCells: number[] = [];
   private pendingOwners: number[] = [];
@@ -101,8 +177,11 @@ export class Simulation {
     this.height = config.height;
     this.owners = config.ownerGrid.slice();
     this.provinceGrid = config.provinceGrid;
+    this.terrain = config.terrainGrid ?? null;
     this.player = config.player;
+    this.aiEnabled = config.ai ?? true;
     this.rngState = config.seed >>> 0 || 1;
+    this.provinces = config.provinces;
 
     this.nationCount = config.nations.length;
     this.stride = this.nationCount + 1;
@@ -111,6 +190,7 @@ export class Simulation {
     this.advantage = new Float32Array(pairs).fill(-Infinity);
     this.lengthCounts = new Int32Array(pairs);
     this.frontierPosition = new Int32Array(this.owners.length).fill(-1);
+    this.offensivesByNation = Array.from({ length: this.stride }, () => []);
 
     this.sectorColumns = (this.width >> SECTOR_SHIFT) + 1;
     const sectorRows = (this.height >> SECTOR_SHIFT) + 1;
@@ -127,10 +207,24 @@ export class Simulation {
     this.reserve = new Float64Array(this.stride);
     this.capacity = new Float64Array(this.stride);
     this.cellCounts = new Int32Array(this.stride);
+    this.armies = new Float64Array(this.stride);
+    this.pocketCounts = new Int32Array(this.stride);
+
+    let land = 0;
     for (let i = 0; i < this.owners.length; i++) {
       this.cellCounts[this.owners[i]]++;
       this.provinceCells[this.provinceGrid[i]]++;
+      if (this.owners[i] !== 0) land++;
     }
+    this.landCells = new Int32Array(land);
+    for (let i = 0, k = 0; i < this.owners.length; i++) {
+      if (this.owners[i] !== 0) this.landCells[k++] = i;
+    }
+    this.visited = new Uint8Array(this.owners.length);
+    this.visitOrder = new Int32Array(land);
+    this.pocket = new Uint8Array(this.owners.length);
+    this.isAnchor = new Uint8Array(this.owners.length);
+    this.placeAnchors();
 
     // La capacité militaire se répartit entre les provinces (racine de la surface
     // pour ne pas tout donner aux déserts) : elle change de camp avec elles.
@@ -159,14 +253,27 @@ export class Simulation {
     return this.rngState / 4294967296;
   }
 
-  /** Total d'une nation : réserve et forces engagées. */
+  private wrapDelta(from: number, to: number): number {
+    const W = this.width;
+    let d = (to - from) % W;
+    if (d > W / 2) d -= W;
+    if (d < -W / 2) d += W;
+    return d;
+  }
+
+  /** Total d'une nation : réserve, forces engagées et offensives en cours. */
   armyOf(nation: number): number {
     let total = this.reserve[nation];
     for (const front of this.fronts) {
       if (front.a === nation) total += front.sides[0].force;
       else if (front.b === nation) total += front.sides[1].force;
     }
+    for (const offensive of this.offensivesByNation[nation]) total += offensive.force;
     return total;
+  }
+
+  reserveOf(nation: number): number {
+    return this.reserve[nation];
   }
 
   cellsOf(nation: number): number {
@@ -175,6 +282,10 @@ export class Simulation {
 
   controllerOf(province: number): number {
     return this.controller[province];
+  }
+
+  isPocket(cell: number): boolean {
+    return this.pocket[cell] === 1;
   }
 
   get frontierSize(): number {
@@ -194,6 +305,12 @@ export class Simulation {
       case 'setFront':
         this.setFront(command.nation, command.enemy, command.allocation, command.stance);
         break;
+      case 'launchOffensive':
+        this.launchOffensive(command.nation, command.fromX, command.fromY, command.toX, command.toY, command.share);
+        break;
+      case 'cancelOffensive':
+        this.cancelOffensive(command.nation, command.id);
+        break;
     }
   }
 
@@ -203,7 +320,7 @@ export class Simulation {
       if (x === y || x <= 0 || y <= 0 || this.frontOf(x, y)) continue;
       const a = Math.min(x, y);
       const b = Math.max(x, y);
-      const side = (): FrontSide => ({ allocation: 0, stance: 'hold', force: 0, captured: 0 });
+      const side = (): FrontSide => ({ allocation: 0, stance: 'hold', force: 0, captured: 0, rawDensity: 0, density: 0 });
       const index = this.fronts.push({ a, b, sides: [side(), side()], length: 0, logRatio: 0 }) - 1;
       this.frontIndex[a * this.stride + b] = index;
       this.frontIndex[b * this.stride + a] = index;
@@ -211,6 +328,7 @@ export class Simulation {
     }
     if (!added) return;
     this.rebuildFrontier();
+    this.supplyDirty = true;
     if (this.player) {
       for (const front of this.fronts) {
         const side = front.a === this.player ? front.sides[0] : front.b === this.player ? front.sides[1] : null;
@@ -220,7 +338,7 @@ export class Simulation {
         }
       }
     }
-    this.runAi();
+    if (this.aiEnabled) this.decideAllocations();
   }
 
   /** La somme des allocations d'une nation ne dépasse jamais 100 %. */
@@ -238,6 +356,64 @@ export class Simulation {
     side.stance = stance;
   }
 
+  /**
+   * Engage une part de la réserve dans un couloir. Le départ doit être sur le
+   * territoire de la nation. Renvoie l'identifiant, ou 0 si l'offensive est refusée.
+   */
+  launchOffensive(nation: number, fromX: number, fromY: number, toX: number, toY: number, share: number): number {
+    const W = this.width;
+    const H = this.height;
+    const inside = (x: number, y: number) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < W && y >= 0 && y < H;
+    if (!inside(fromX, fromY) || !inside(toX, toY)) return 0;
+    if (this.owners[fromY * W + fromX] !== nation) return 0;
+    const list = this.offensivesByNation[nation];
+    if (!list || list.length >= MAX_OFFENSIVES_PER_NATION) return 0;
+    const force = this.reserve[nation] * Math.max(0, Math.min(1, share));
+    if (force < OFFENSIVE_MIN_FORCE) return 0;
+    let dx = this.wrapDelta(fromX, toX);
+    let dy = toY - fromY;
+    const length = Math.hypot(dx, dy);
+    if (length === 0) return 0;
+    if (length > MAX_OFFENSIVE_LENGTH) {
+      dx = Math.round((dx / length) * MAX_OFFENSIVE_LENGTH);
+      dy = Math.round((dy / length) * MAX_OFFENSIVE_LENGTH);
+    }
+
+    this.reserve[nation] -= force;
+    const offensive: Offensive = {
+      id: this.nextOffensiveId++,
+      nation,
+      fromX,
+      fromY,
+      toX: ((fromX + dx) % W + W) % W,
+      toY: fromY + dy,
+      dx,
+      dy,
+      lengthSquared: dx * dx + dy * dy,
+      force,
+      startForce: force,
+      captured: 0,
+      stalledTicks: 0,
+    };
+    this.offensives.push(offensive);
+    list.push(offensive);
+    return offensive.id;
+  }
+
+  cancelOffensive(nation: number, id: number): void {
+    const offensive = this.offensives.find((entry) => entry.id === id && entry.nation === nation);
+    if (offensive) this.endOffensive(offensive);
+  }
+
+  /** Les forces restantes retournent en réserve. */
+  private endOffensive(offensive: Offensive): void {
+    this.reserve[offensive.nation] += offensive.force;
+    offensive.force = 0;
+    this.offensives.splice(this.offensives.indexOf(offensive), 1);
+    const list = this.offensivesByNation[offensive.nation];
+    list.splice(list.indexOf(offensive), 1);
+  }
+
   // -------------------------------------------------------------------------
   // Tick
   // -------------------------------------------------------------------------
@@ -245,11 +421,17 @@ export class Simulation {
   step(): void {
     this.tick++;
     this.evolveSectors();
-    if (this.tick % AI_INTERVAL_TICKS === 0) this.runAi();
+    if (this.aiEnabled && this.tick % AI_INTERVAL_TICKS === 0) {
+      this.decideAllocations();
+      this.decideOffensives();
+    }
+    this.computeArmies();
     this.updateFronts();
     this.reinforce();
+    this.updateOffensives();
     this.scanFrontier();
     this.applyFlips();
+    if (this.tick % SUPPLY_INTERVAL_TICKS === 0 && this.supplyDirty) this.updateSupply();
   }
 
   private evolveSectors(): void {
@@ -260,11 +442,16 @@ export class Simulation {
     }
   }
 
-  private runAi(): void {
+  private decideAllocations(): void {
     const lengths = new Float64Array(this.stride);
+    const opposing = new Float64Array(this.stride);
     for (const front of this.fronts) {
       lengths[front.a] += front.length;
       lengths[front.b] += front.length;
+      if (front.length > 0) {
+        opposing[front.a] += front.sides[1].force;
+        opposing[front.b] += front.sides[0].force;
+      }
     }
     for (const front of this.fronts) {
       for (let s = 0; s < 2; s++) {
@@ -272,11 +459,76 @@ export class Simulation {
         if (nation === this.player) continue;
         const side = front.sides[s];
         const enemy = front.sides[1 - s];
-        side.allocation = lengths[nation] > 0 ? (AI_ENGAGED_SHARE * front.length) / lengths[nation] : 0;
-        const planned = this.armyOf(nation) * side.allocation;
+        const army = this.armyOf(nation);
+        const share = opposing[nation] > army * AI_ENGAGED_SHARE ? AI_OUTNUMBERED_SHARE : AI_ENGAGED_SHARE;
+        side.allocation = lengths[nation] > 0 ? (share * front.length) / lengths[nation] : 0;
+        const planned = army * side.allocation;
         side.stance = planned > enemy.force * AI_ATTACK_RATIO ? 'attack' : 'hold';
       }
     }
+  }
+
+  private decideOffensives(): void {
+    if (this.frontierCount === 0) return;
+    const attempted = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      if (front.length === 0) continue;
+      for (const nation of [front.a, front.b]) {
+        if (nation === this.player || attempted[nation]) continue;
+        attempted[nation] = 1;
+        if (this.random() >= AI_OFFENSIVE_CHANCE) continue;
+        if (this.offensivesByNation[nation].length >= AI_MAX_OFFENSIVES) continue;
+        if (this.reserve[nation] < this.armyOf(nation) * AI_OFFENSIVE_MIN_RESERVE) continue;
+        this.launchAiOffensive(nation);
+      }
+    }
+  }
+
+  /** Part d'une cellule de front au hasard, vers une province ennemie de valeur à portée. */
+  private launchAiOffensive(nation: number): void {
+    const { owners, width: W, height: H } = this;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const cell = this.frontier[Math.floor(this.random() * this.frontierCount)];
+      if (owners[cell] !== nation) continue;
+      const x = cell % W;
+      const y = (cell - x) / W;
+      const around = [
+        owners[y * W + (x + 1) % W],
+        owners[y * W + (x + W - 1) % W],
+        y > 0 ? owners[cell - W] : 0,
+        y < H - 1 ? owners[cell + W] : 0,
+      ];
+      const enemy = around.find((other) => other !== 0 && other !== nation && this.frontOf(nation, other));
+      if (!enemy) continue;
+
+      let best = -1;
+      let bestScore = 0;
+      for (let province = 1; province < this.controller.length; province++) {
+        if (this.controller[province] !== enemy) continue;
+        const data = this.provinces[province - 1];
+        const distance = Math.hypot(this.wrapDelta(x, data.x), data.y - y);
+        if (distance < AI_TARGET_MIN_DISTANCE || distance > AI_TARGET_MAX_DISTANCE) continue;
+        const score = this.provinceValue[province] * (0.4 + this.random());
+        if (score > bestScore) {
+          bestScore = score;
+          best = province;
+        }
+      }
+      if (best < 0) continue;
+      const target = this.provinces[best - 1];
+      this.launchOffensive(nation, x, y, Math.floor(target.x), Math.floor(target.y), AI_OFFENSIVE_SHARE);
+      return;
+    }
+  }
+
+  private computeArmies(): void {
+    const { armies } = this;
+    for (let n = 1; n < this.stride; n++) armies[n] = this.reserve[n];
+    for (const front of this.fronts) {
+      armies[front.a] += front.sides[0].force;
+      armies[front.b] += front.sides[1].force;
+    }
+    for (const offensive of this.offensives) armies[offensive.nation] += offensive.force;
   }
 
   private updateFronts(): void {
@@ -287,9 +539,11 @@ export class Simulation {
       this.moveForces(front.b, sideB);
 
       const length = Math.max(front.length, MIN_FRONT_LENGTH);
-      const densityA = (sideA.force * DEFENSE_MULTIPLIER[sideA.stance]) / length;
-      const densityB = (sideB.force * DEFENSE_MULTIPLIER[sideB.stance]) / length;
-      const logRatio = Math.log((densityA + 1e-3) / (densityB + 1e-3));
+      sideA.rawDensity = sideA.force / length;
+      sideB.rawDensity = sideB.force / length;
+      sideA.density = sideA.rawDensity * DEFENSE_MULTIPLIER[sideA.stance];
+      sideB.density = sideB.rawDensity * DEFENSE_MULTIPLIER[sideB.stance];
+      const logRatio = Math.log((sideA.density + 1e-3) / (sideB.density + 1e-3));
       front.logRatio = logRatio;
 
       const aRetreats = sideA.stance === 'retreat';
@@ -319,7 +573,7 @@ export class Simulation {
 
   /** Les forces rejoignent ou quittent le front progressivement. */
   private moveForces(nation: number, side: FrontSide): void {
-    const army = this.armyOf(nation);
+    const army = this.armies[nation];
     const target = army * side.allocation;
     const limit = army * TRANSFER_RATE;
     if (side.force < target) {
@@ -334,23 +588,62 @@ export class Simulation {
   }
 
   private reinforce(): void {
-    const armies = new Float64Array(this.stride);
-    for (let n = 1; n < this.stride; n++) armies[n] = this.reserve[n];
-    for (const front of this.fronts) {
-      armies[front.a] += front.sides[0].force;
-      armies[front.b] += front.sides[1].force;
-    }
+    this.computeArmies();
     for (let n = 1; n < this.stride; n++) {
-      const missing = this.capacity[n] - armies[n];
+      const missing = this.capacity[n] - this.armies[n];
       if (missing > 0) this.reserve[n] += missing * REINFORCE_PER_TICK;
     }
   }
 
+  private updateOffensives(): void {
+    const { owners, width: W } = this;
+    for (let i = this.offensives.length - 1; i >= 0; i--) {
+      const offensive = this.offensives[i];
+      offensive.force *= 1 - OFFENSIVE_ATTRITION;
+      offensive.stalledTicks++;
+      const reached = owners[offensive.toY * W + offensive.toX] === offensive.nation;
+      if (reached || offensive.force < OFFENSIVE_MIN_FORCE || offensive.stalledTicks > OFFENSIVE_STALL_TICKS) {
+        this.endOffensive(offensive);
+      }
+    }
+  }
+
+  /**
+   * Avantage de la meilleure offensive de `attacker` qui couvre cette cellule,
+   * -Infinity si aucune. Laisse l'offensive retenue dans matchedOffensive.
+   */
+  private offensiveEdge(attacker: number, front: Front, x: number, y: number): number {
+    let best = -Infinity;
+    this.matchedOffensive = null;
+    const own = front.a === attacker ? front.sides[0] : front.sides[1];
+    const enemy = front.a === attacker ? front.sides[1] : front.sides[0];
+    for (const offensive of this.offensivesByNation[attacker]) {
+      const px = this.wrapDelta(offensive.fromX, x);
+      const py = y - offensive.fromY;
+      const t = Math.max(0, Math.min(1, (px * offensive.dx + py * offensive.dy) / offensive.lengthSquared));
+      const ex = px - t * offensive.dx;
+      const ey = py - t * offensive.dy;
+      const squared = ex * ex + ey * ey;
+      if (squared > OFFENSIVE_HALF_WIDTH * OFFENSIVE_HALF_WIDTH) continue;
+      const pressure = own.rawDensity + offensive.force / (2 * OFFENSIVE_HALF_WIDTH);
+      const depth = t * Math.sqrt(offensive.lengthSquared);
+      const edge =
+        Math.log((pressure + 1e-3) / (enemy.density + 1e-3)) -
+        (Math.sqrt(squared) / OFFENSIVE_HALF_WIDTH) * OFFENSIVE_EDGE_FALLOFF -
+        depth / OFFENSIVE_DEPTH_FADE;
+      if (edge > best) {
+        best = edge;
+        this.matchedOffensive = offensive;
+      }
+    }
+    return best;
+  }
+
   private scanFrontier(): void {
-    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, sectors, sectorColumns } = this;
+    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, sectors, sectorColumns, terrain, pocket, fronts, offensivesByNation, provinceHome, provinceGrid } = this;
     const list = this.frontier;
     const count = this.frontierCount;
-    for (const front of this.fronts) {
+    for (const front of fronts) {
       lengthCounts[front.a * stride + front.b] = 0;
       lengthCounts[front.b * stride + front.a] = 0;
     }
@@ -366,9 +659,14 @@ export class Simulation {
       const n2 = y > 0 ? owners[cell - W] : 0;
       const n3 = y < H - 1 ? owners[cell + W] : 0;
       const sector = sectors[(y >> SECTOR_SHIFT) * sectorColumns + (x >> SECTOR_SHIFT)];
+      const terrainId = terrain ? terrain[cell] : 0;
+      const onHomeSoil = provinceHome[provinceGrid[cell]] === defender;
+      const local = sector - TERRAIN_DEFENSE[terrainId] - (onHomeSoil ? HOME_DEFENSE : 0);
+      const encircled = pocket[cell] === 1;
 
       let best = 0;
       let bestChance = 0;
+      let bestOffensive: Offensive | null = null;
       for (let j = 0; j < 4; j++) {
         const attacker = j === 0 ? n0 : j === 1 ? n1 : j === 2 ? n2 : n3;
         if (attacker === 0 || attacker === defender) continue;
@@ -376,54 +674,93 @@ export class Simulation {
         if (j > 1 && attacker === n1) continue;
         if (j > 2 && attacker === n2) continue;
         const key = attacker * stride + defender;
-        if (frontIndex[key] < 0) continue;
+        const index = frontIndex[key];
+        if (index < 0) continue;
         lengthCounts[key]++;
-        const edge = advantage[key] + sector;
+
+        let edge = advantage[key];
+        let speed = 1;
+        let matched: Offensive | null = null;
+        if (offensivesByNation[attacker].length > 0) {
+          const offensiveEdge = this.offensiveEdge(attacker, fronts[index], x, y);
+          if (offensiveEdge > -Infinity) {
+            matched = this.matchedOffensive;
+            speed = OFFENSIVE_SPEED;
+            if (offensiveEdge > edge) edge = offensiveEdge;
+          }
+        }
+        if (encircled) {
+          if (edge < POCKET_EDGE) edge = POCKET_EDGE;
+          speed *= POCKET_SPEED;
+        }
+        edge += local;
         if (edge <= 0) continue;
         const neighbors = (n0 === attacker ? 1 : 0) + (n1 === attacker ? 1 : 0) + (n2 === attacker ? 1 : 0) + (n3 === attacker ? 1 : 0);
-        const chance = MAX_FLIP_CHANCE * (1 - Math.exp(-FLIP_STEEPNESS * edge)) * NEIGHBOR_WEIGHT[neighbors];
+        const chance = MAX_FLIP_CHANCE * (1 - Math.exp(-FLIP_STEEPNESS * edge)) * NEIGHBOR_WEIGHT[neighbors] * speed * TERRAIN_SPEED[terrainId];
         if (chance > bestChance) {
           bestChance = chance;
           best = attacker;
+          bestOffensive = matched;
         }
       }
       if (best !== 0 && this.random() < bestChance) {
         if (this.flipCount === this.flipCells.length) this.growFlips();
         this.flipCells[this.flipCount] = cell;
         this.flipOwners[this.flipCount] = best;
+        this.flipOffensives[this.flipCount] = bestOffensive ? bestOffensive.id : 0;
         this.flipCount++;
       }
     }
 
-    for (const front of this.fronts) {
+    for (const front of fronts) {
       front.length = (lengthCounts[front.a * stride + front.b] + lengthCounts[front.b * stride + front.a]) / 2;
     }
   }
 
   private growFlips(): void {
-    const cells = new Int32Array(this.flipCells.length * 2);
+    const size = this.flipCells.length * 2;
+    const cells = new Int32Array(size);
     cells.set(this.flipCells);
     this.flipCells = cells;
-    const owners = new Uint16Array(this.flipOwners.length * 2);
+    const owners = new Uint16Array(size);
     owners.set(this.flipOwners);
     this.flipOwners = owners;
+    const offensives = new Int32Array(size);
+    offensives.set(this.flipOffensives);
+    this.flipOffensives = offensives;
   }
 
   private applyFlips(): void {
     const { owners, width: W, height: H } = this;
+    if (this.flipCount > 0) this.supplyDirty = true;
     for (let i = 0; i < this.flipCount; i++) {
       const cell = this.flipCells[i];
       const attacker = this.flipOwners[i];
       const defender = owners[cell];
       owners[cell] = attacker;
+      this.pocket[cell] = 0;
       this.cellCounts[defender]--;
       this.cellCounts[attacker]++;
       this.pendingCells.push(cell);
       this.pendingOwners.push(attacker);
 
       const front = this.frontOf(attacker, defender)!;
-      front.sides[front.a === attacker ? 0 : 1].captured++;
+      const attackerIndex = front.a === attacker ? 0 : 1;
+      front.sides[attackerIndex].captured++;
       this.transferProvinceCell(this.provinceGrid[cell], defender, attacker);
+
+      const offensiveId = this.flipOffensives[i];
+      if (offensiveId !== 0) {
+        const offensive = this.offensivesByNation[attacker].find((entry) => entry.id === offensiveId);
+        if (offensive) {
+          const enemySide = front.sides[1 - attackerIndex];
+          const cost = OFFENSIVE_CELL_BASE_COST + OFFENSIVE_CELL_COST * enemySide.density;
+          offensive.force = Math.max(0, offensive.force - cost);
+          offensive.captured++;
+          offensive.stalledTicks = 0;
+          enemySide.force = Math.max(0, enemySide.force - cost * OFFENSIVE_DEFENDER_LOSS);
+        }
+      }
     }
     for (let i = 0; i < this.flipCount; i++) {
       const cell = this.flipCells[i];
@@ -448,8 +785,13 @@ export class Simulation {
     counts.set(to, held);
     if (held * 2 > this.provinceCells[province] && this.controller[province] !== to) {
       const previous = this.controller[province];
+      const home = this.provinceHome[province];
+      const retained = this.provinceValue[province] * LOST_PROVINCE_RETAINED;
       this.capacity[previous] -= this.provinceWorth(province, previous);
       this.capacity[to] += this.provinceWorth(province, to);
+      // Le pays d'origine garde une part de la valeur tant que la province est perdue.
+      if (previous === home) this.capacity[home] += retained;
+      if (to === home) this.capacity[home] -= retained;
       this.controller[province] = to;
       this.pendingProvinces.push(province, to);
     }
@@ -458,6 +800,140 @@ export class Simulation {
   private provinceWorth(province: number, holder: number): number {
     const value = this.provinceValue[province];
     return holder === this.provinceHome[province] ? value : value * OCCUPIED_VALUE;
+  }
+
+  // -------------------------------------------------------------------------
+  // Ravitaillement : une partie du territoire coupée du reste et au contact d'un
+  // ennemi est une poche. Elle s'effrite, même si l'ennemi ne fait que tenir.
+  // -------------------------------------------------------------------------
+
+  /** Un point d'ancrage par territoire d'origine : les exclaves restent ravitaillées. */
+  private placeAnchors(): void {
+    const { landCells, owners, visited, visitOrder } = this;
+    visited.fill(0);
+    let cursor = 0;
+    for (let k = 0; k < landCells.length; k++) {
+      const seed = landCells[k];
+      if (visited[seed]) continue;
+      const start = cursor;
+      cursor = this.floodFill(seed, cursor, null);
+      const anchor = visitOrder[start + ((cursor - start) >> 1)];
+      this.isAnchor[anchor] = 1;
+      this.anchorOwner.set(anchor, owners[seed]);
+    }
+  }
+
+  /**
+   * Remplit la zone d'un même propriétaire. Les cellules sont écrites à la suite dans
+   * visitOrder ; renvoie la fin de la zone. Si `flags` est fourni, flags.touchesEnemy
+   * et flags.anchored décrivent la zone.
+   */
+  private floodFill(seed: number, begin: number, flags: { touchesEnemy: boolean; anchored: boolean } | null): number {
+    const { owners, visited, visitOrder, width: W, height: H, frontIndex, stride, isAnchor, anchorOwner } = this;
+    const owner = owners[seed];
+    let head = begin;
+    let tail = begin;
+    visitOrder[tail++] = seed;
+    visited[seed] = 1;
+    while (head < tail) {
+      const cell = visitOrder[head++];
+      const x = cell % W;
+      const y = (cell - x) / W;
+      if (flags && isAnchor[cell] && anchorOwner.get(cell) === owner) flags.anchored = true;
+      for (let j = 0; j < 4; j++) {
+        let next: number;
+        if (j === 0) next = x > 0 ? cell - 1 : cell + W - 1;
+        else if (j === 1) next = x < W - 1 ? cell + 1 : cell - W + 1;
+        else if (j === 2) {
+          if (y === 0) continue;
+          next = cell - W;
+        } else {
+          if (y === H - 1) continue;
+          next = cell + W;
+        }
+        const other = owners[next];
+        if (other === owner) {
+          if (!visited[next]) {
+            visited[next] = 1;
+            visitOrder[tail++] = next;
+          }
+        } else if (flags && other !== 0 && frontIndex[other * stride + owner] >= 0) {
+          flags.touchesEnemy = true;
+        }
+      }
+    }
+    return tail;
+  }
+
+  private updateSupply(): void {
+    const { owners, landCells, visited, visitOrder, pocket, pocketCounts } = this;
+    this.supplyDirty = false;
+
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+    }
+
+    for (const cell of this.pocketList) pocket[cell] = 0;
+    this.pocketList = [];
+    pocketCounts.fill(0);
+    this.pockets = [];
+    visited.fill(0);
+
+    const zones: { owner: number; start: number; end: number; touchesEnemy: boolean; anchored: boolean }[] = [];
+    const largest = new Int32Array(this.stride);
+    let cursor = 0;
+    for (let k = 0; k < landCells.length; k++) {
+      const seed = landCells[k];
+      const owner = owners[seed];
+      if (visited[seed] || !atWar[owner]) continue;
+      const flags = { touchesEnemy: false, anchored: false };
+      const start = cursor;
+      cursor = this.floodFill(seed, cursor, flags);
+      zones.push({ owner, start, end: cursor, ...flags });
+      if (cursor - start > largest[owner]) largest[owner] = cursor - start;
+    }
+
+    const mainClaimed = new Uint8Array(this.stride);
+    for (const zone of zones) {
+      const size = zone.end - zone.start;
+      // La première zone de taille maximale est le cœur du pays.
+      if (size === largest[zone.owner] && !mainClaimed[zone.owner]) {
+        mainClaimed[zone.owner] = 1;
+        continue;
+      }
+      if (zone.anchored || !zone.touchesEnemy) continue;
+      let sumX = 0;
+      let sumY = 0;
+      const anchorX = visitOrder[zone.start] % this.width;
+      for (let i = zone.start; i < zone.end; i++) {
+        const cell = visitOrder[i];
+        pocket[cell] = 1;
+        this.pocketList.push(cell);
+        const x = cell % this.width;
+        sumX += this.wrapDelta(anchorX, x);
+        sumY += (cell - x) / this.width;
+      }
+      if (size >= POCKET_MIN_CELLS_SHOWN) {
+        pocketCounts[zone.owner] += size;
+        this.pockets.push({
+          nation: zone.owner,
+          x: anchorX + sumX / size,
+          y: sumY / size,
+          cells: size,
+        });
+      }
+    }
+
+    for (const front of this.fronts) {
+      for (let s = 0; s < 2; s++) {
+        const nation = s === 0 ? front.a : front.b;
+        if (pocketCounts[nation] === 0) continue;
+        const share = pocketCounts[nation] / Math.max(1, this.cellCounts[nation]);
+        front.sides[s].force *= 1 - share * POCKET_DRAIN;
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -506,9 +982,7 @@ export class Simulation {
   }
 
   private rebuildFrontier(): void {
-    for (let cell = 0; cell < this.owners.length; cell++) {
-      if (this.owners[cell] !== 0) this.refreshFrontier(cell);
-    }
+    for (let k = 0; k < this.landCells.length; k++) this.refreshFrontier(this.landCells[k]);
   }
 
   // -------------------------------------------------------------------------
@@ -529,13 +1003,16 @@ export class Simulation {
   }
 
   snapshot(): SimSnapshot {
-    const fronts: FrontSnapshot[] = this.fronts.map((front) => ({
-      a: front.a,
-      b: front.b,
-      length: front.length,
-      logRatio: front.logRatio,
-      sides: [{ ...front.sides[0] }, { ...front.sides[1] }],
-    }));
+    const fronts: FrontSnapshot[] = this.fronts.map((front) => {
+      const side = (s: FrontSide) => ({ allocation: s.allocation, stance: s.stance, force: s.force, captured: s.captured });
+      return {
+        a: front.a,
+        b: front.b,
+        length: front.length,
+        logRatio: front.logRatio,
+        sides: [side(front.sides[0]), side(front.sides[1])],
+      };
+    });
     const participants = new Set<number>();
     if (this.player) participants.add(this.player);
     for (const front of this.fronts) {
@@ -552,7 +1029,12 @@ export class Simulation {
         reserve: this.reserve[id],
         capacity: this.capacity[id],
         cells: this.cellCounts[id],
+        pocketCells: this.pocketCounts[id],
       })),
+      offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured }) => ({
+        id, nation, fromX, fromY, toX, toY, force, startForce, captured,
+      })),
+      pockets: this.pockets,
     };
   }
 
@@ -567,6 +1049,7 @@ export class Simulation {
       mix(Math.round(front.sides[0].force * 1000));
       mix(Math.round(front.sides[1].force * 1000));
     }
+    for (const offensive of this.offensives) mix(Math.round(offensive.force * 1000));
     mix(this.rngState);
     return hash;
   }

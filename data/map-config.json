@@ -32,5 +32,54 @@
   "maxProvinceCells": 2500,
   "splitTargetCells": 1600,
   "lakeMaxScalerank": 4,
-  "excludedLakes": ["Lake Eyre North", "Lake Eyre South", "Lake Torrens", "Lake Gairdner"]
+  "excludedLakes": ["Lake Eyre North", "Lake Eyre South", "Lake Torrens", "Lake Gairdner"],
+  "arcticLatitude": 66,
+  "terrainClasses": {
+    "Range/mtn": "mountain",
+    "Foothills": "highland",
+    "Plateau": "highland",
+    "Desert": "desert",
+    "Tundra": "arctic",
+    "Wetlands": "jungle"
+  },
+  "terrainByName": {
+    "AMAZON BASIN": "jungle",
+    "CONGO BASIN": "jungle",
+    "SELVAS": "jungle",
+    "YUNGAS": "jungle",
+    "PIEDMONT": "plain",
+    "CANADIAN SHIELD": "plain"
+  },
+  "terrainExtras": [
+    {
+      "name": "Carpates (contour approximatif)",
+      "terrain": "mountain",
+      "ring": [[19.5, 49.6], [22.5, 49.6], [25.0, 48.0], [26.2, 46.6], [26.3, 45.5], [24.0, 45.2], [22.5, 45.2], [22.8, 46.2], [24.2, 47.0], [23.5, 48.0], [21.5, 48.9], [19.5, 49.0], [19.5, 49.6]]
+    },
+    {
+      "name": "Apennins (contour approximatif)",
+      "terrain": "mountain",
+      "ring": [[9.3, 44.6], [11.8, 44.2], [13.6, 42.8], [15.4, 41.2], [16.2, 39.8], [15.6, 39.8], [14.6, 41.0], [12.9, 42.3], [11.0, 43.4], [9.3, 44.2], [9.3, 44.6]]
+    },
+    {
+      "name": "Massif central (contour approximatif)",
+      "terrain": "highland",
+      "ring": [[1.8, 46.0], [4.2, 46.0], [4.4, 44.6], [3.4, 43.7], [2.0, 44.2], [1.5, 45.2], [1.8, 46.0]]
+    },
+    {
+      "name": "Alpes scandinaves (contour approximatif)",
+      "terrain": "mountain",
+      "ring": [[6.5, 60.5], [9.5, 62.0], [12.5, 64.5], [15.5, 66.5], [19.5, 68.5], [20.5, 68.0], [17.0, 65.5], [14.0, 63.0], [12.5, 61.0], [8.0, 59.0], [6.5, 60.5]]
+    },
+    {
+      "name": "Sahara (contour approximatif)",
+      "terrain": "desert",
+      "ring": [[-13.0, 27.0], [-5.0, 31.0], [3.0, 32.0], [11.0, 31.0], [20.0, 29.0], [32.0, 29.0], [33.0, 22.0], [32.0, 16.5], [20.0, 16.5], [10.0, 17.0], [0.0, 17.0], [-12.0, 18.5], [-13.0, 27.0]]
+    },
+    {
+      "name": "Arabie (contour approximatif)",
+      "terrain": "desert",
+      "ring": [[37.0, 30.5], [46.0, 29.5], [51.0, 24.5], [55.0, 22.5], [53.5, 18.5], [47.0, 17.5], [44.0, 20.0], [39.0, 25.5], [37.0, 30.5]]
+    }
+  ]
 }

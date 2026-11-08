@@ -64,7 +64,7 @@ export class MapRenderer {
     gl.useProgram(program);
     gl.bindVertexArray(gl.createVertexArray());
     for (const name of [
-      'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uCenter', 'uResolution', 'uZoom',
+      'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
       'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
@@ -95,6 +95,7 @@ export class MapRenderer {
 
     const size = nations.length + 1;
     this.bindDataTexture(5, 'uWars', gl.R8, size, size, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(size * size));
+    this.bindDataTexture(6, 'uTerrain', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, world.terrainGrid);
   }
 
   /** Reporte les bascules dans la grille ; l'envoi au GPU se fait au prochain rendu. */

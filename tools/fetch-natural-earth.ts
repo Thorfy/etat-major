@@ -10,6 +10,7 @@ const FILES = [
   'geojson/ne_10m_admin_0_countries.geojson',
   'geojson/ne_10m_admin_1_states_provinces.geojson',
   'geojson/ne_10m_lakes.geojson',
+  'geojson/ne_10m_geography_regions_polys.geojson',
   'LICENSE.md',
 ];
 

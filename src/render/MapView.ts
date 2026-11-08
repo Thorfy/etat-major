@@ -1,18 +1,33 @@
 // Relie la carte aux entrées du joueur : déplacement, zoom, survol, clic.
 import type { LoadedWorld } from '../map/loadWorld.ts';
+import { wrapDeltaX } from '../map/projection.ts';
+import { MAX_OFFENSIVE_LENGTH } from '../sim/balance.ts';
+import type { OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
+import { type ArrowDraft, drawCampaign } from './Overlay.ts';
 
 const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
 
-export interface MapEvents {
-  onHover(province: number, owner: number): void;
-  onSelect(province: number, owner: number): void;
-  onToggleDebug(): void;
+export interface CellInfo {
+  province: number;
+  owner: number;
+  terrain: number;
 }
+
+export interface MapEvents {
+  onHover(cell: CellInfo): void;
+  onSelect(cell: CellInfo): void;
+  onToggleDebug(): void;
+  onOffensive(fromX: number, fromY: number, toX: number, toY: number): void;
+  onAimingChange(aiming: boolean): void;
+}
+
+const NO_CELL: CellInfo = { province: 0, owner: 0, terrain: 0 };
+const MIN_ARROW_CELLS = 3;
 
 export interface FrameStats {
   frameMs: number;
@@ -40,6 +55,14 @@ export class MapView {
   private lastPointer: { x: number; y: number } | null = null;
   private hoverProvince = 0;
   private hoverOwner = 0;
+  private hoverTerrain = 0;
+  private player = 0;
+  private atWar: (nation: number) => boolean = () => false;
+  private offensives: readonly OffensiveSnapshot[] = [];
+  private pockets: readonly PocketSnapshot[] = [];
+  private draft: ArrowDraft | null = null;
+  private draftPointer = -1;
+  private aimingMode = false;
   private selectedProvince = 0;
   private selectedOwner = 0;
   /** Force un rendu à chaque image, pour mesurer les performances. */
@@ -62,11 +85,45 @@ export class MapView {
     return { frameMs: this.frameMs, gpuMs: this.renderer.gpuMs, zoom: this.camera.zoom };
   }
 
-  select(province: number, owner = 0): void {
-    this.selectedProvince = province;
-    this.selectedOwner = owner;
+  select(cell: CellInfo = NO_CELL): void {
+    this.selectedProvince = cell.province;
+    this.selectedOwner = cell.owner;
     this.dirty = true;
-    this.events.onSelect(province, owner);
+    this.events.onSelect(cell);
+  }
+
+  /** Active le tracé des offensives pour la nation du joueur. */
+  setPlayer(player: number, atWar: (nation: number) => boolean): void {
+    this.player = player;
+    this.atWar = atWar;
+    this.dirty = true;
+  }
+
+  setCampaign(offensives: readonly OffensiveSnapshot[], pockets: readonly PocketSnapshot[]): void {
+    this.offensives = offensives;
+    this.pockets = pockets;
+    this.dirty = true;
+  }
+
+  get aiming(): boolean {
+    return this.aimingMode;
+  }
+
+  setAiming(aiming: boolean): void {
+    if (aiming === this.aimingMode) return;
+    this.aimingMode = aiming;
+    this.canvas.classList.toggle('aiming', aiming);
+    this.events.onAimingChange(aiming);
+  }
+
+  private cancelDraft(): void {
+    this.draft = null;
+    this.draftPointer = -1;
+    this.dirty = true;
+  }
+
+  private isOwnCell(x: number, y: number): boolean {
+    return this.world.ownerGrid[y * this.world.data.width + x] === this.player;
   }
 
   applyOwnerChanges(cells: Uint32Array, owners: Uint16Array): void {
@@ -88,11 +145,15 @@ export class MapView {
     this.dirty = true;
   }
 
-  private cellAt(sx: number, sy: number): { province: number; owner: number } {
+  private cellAt(sx: number, sy: number): CellInfo {
     const cell = this.camera.screenToCell(sx, sy);
-    if (!cell) return { province: 0, owner: 0 };
+    if (!cell) return NO_CELL;
     const index = cell.y * this.world.data.width + cell.x;
-    return { province: this.world.provinceGrid[index], owner: this.world.ownerGrid[index] };
+    return {
+      province: this.world.provinceGrid[index],
+      owner: this.world.ownerGrid[index],
+      terrain: this.world.terrainGrid[index],
+    };
   }
 
   private resize(): void {
@@ -105,17 +166,18 @@ export class MapView {
     this.dirty = true;
   }
 
-  private setHover(province: number, owner: number): void {
-    if (province === this.hoverProvince && owner === this.hoverOwner) return;
-    if (province !== this.hoverProvince) this.dirty = true;
-    this.hoverProvince = province;
-    this.hoverOwner = owner;
-    this.events.onHover(province, owner);
+  private setHover(cell: CellInfo): void {
+    const unchanged = cell.province === this.hoverProvince && cell.owner === this.hoverOwner && cell.terrain === this.hoverTerrain;
+    if (unchanged) return;
+    if (cell.province !== this.hoverProvince) this.dirty = true;
+    this.hoverProvince = cell.province;
+    this.hoverOwner = cell.owner;
+    this.hoverTerrain = cell.terrain;
+    this.events.onHover(cell);
   }
 
   private hoverAt(sx: number, sy: number): void {
-    const { province, owner } = this.cellAt(sx, sy);
-    this.setHover(province, owner);
+    this.setHover(this.cellAt(sx, sy));
   }
 
   private bindInputs(): void {
@@ -125,6 +187,17 @@ export class MapView {
 
     canvas.addEventListener('pointerdown', (event) => {
       canvas.setPointerCapture(event.pointerId);
+      const wantsArrow = this.player !== 0 && (event.button === 2 || (this.aimingMode && event.button === 0));
+      if (wantsArrow) {
+        const start = this.camera.screenToCell(event.clientX, event.clientY);
+        if (start) {
+          this.draft = { fromX: start.x, fromY: start.y, toX: start.x, toY: start.y, valid: this.isOwnCell(start.x, start.y) };
+          this.draftPointer = event.pointerId;
+          this.zoomTarget = null;
+          this.dirty = true;
+        }
+        return;
+      }
       this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       this.dragDistance = 0;
       this.pinchDistance = 0;
@@ -134,6 +207,25 @@ export class MapView {
 
     canvas.addEventListener('pointermove', (event) => {
       this.lastPointer = { x: event.clientX, y: event.clientY };
+      if (this.draft && event.pointerId === this.draftPointer) {
+        const end = this.camera.screenToCell(event.clientX, event.clientY);
+        if (end) {
+          // Le tracé montre la portée réelle : au-delà, la flèche s'arrête.
+          const { fromX, fromY } = this.draft;
+          const dx = wrapDeltaX(fromX, end.x);
+          const dy = end.y - fromY;
+          const length = Math.hypot(dx, dy);
+          const scale = length > MAX_OFFENSIVE_LENGTH ? MAX_OFFENSIVE_LENGTH / length : 1;
+          const { width } = this.world.data;
+          this.draft = {
+            ...this.draft,
+            toX: ((fromX + Math.round(dx * scale)) % width + width) % width,
+            toY: fromY + Math.round(dy * scale),
+          };
+          this.dirty = true;
+        }
+        return;
+      }
       const previous = this.pointers.get(event.pointerId);
       if (!previous) {
         this.hoverAt(event.clientX, event.clientY);
@@ -159,19 +251,28 @@ export class MapView {
     });
 
     const release = (event: PointerEvent) => {
+      if (this.draft && event.pointerId === this.draftPointer) {
+        const { fromX, fromY, toX, toY } = this.draft;
+        this.cancelDraft();
+        const length = Math.hypot(wrapDeltaX(fromX, toX), toY - fromY);
+        if (event.type === 'pointerup' && length >= MIN_ARROW_CELLS) {
+          this.events.onOffensive(fromX, fromY, toX, toY);
+          this.setAiming(false);
+        }
+        return;
+      }
       if (!this.pointers.delete(event.pointerId)) return;
       this.pinchDistance = 0;
       if (this.pointers.size === 0) canvas.classList.remove('dragging');
       if (event.type === 'pointerup' && this.dragDistance < CLICK_TOLERANCE_PX) {
-        const { province, owner } = this.cellAt(event.clientX, event.clientY);
-        this.select(province, owner);
+        this.select(this.cellAt(event.clientX, event.clientY));
       }
     };
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('pointerleave', () => {
       this.lastPointer = null;
-      if (this.pointers.size === 0) this.setHover(0, 0);
+      if (this.pointers.size === 0) this.setHover(NO_CELL);
     });
 
     canvas.addEventListener(
@@ -197,7 +298,9 @@ export class MapView {
         event.preventDefault();
         this.events.onToggleDebug();
       } else if (key === 'escape') {
-        this.select(0);
+        if (this.draft) this.cancelDraft();
+        else if (this.aimingMode) this.setAiming(false);
+        else this.select();
       } else if (key === '+' || key === '=' || key === '-') {
         const from = this.zoomTarget?.zoom ?? this.camera.zoom;
         this.zoomTarget = {
@@ -254,6 +357,9 @@ export class MapView {
         selectedOwner: this.selectedOwner,
       });
       this.labels.draw(this.camera);
+      if (this.player !== 0) {
+        drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
+      }
       this.dirty = false;
     }
     requestAnimationFrame((next) => this.tick(next));

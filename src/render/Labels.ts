@@ -31,6 +31,10 @@ export class Labels {
       .sort((a, b) => b.label.r - a.label.r);
   }
 
+  get context(): CanvasRenderingContext2D {
+    return this.ctx;
+  }
+
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
     this.canvas.width = Math.round(cssWidth * dpr);
     this.canvas.height = Math.round(cssHeight * dpr);

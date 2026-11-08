@@ -403,6 +403,126 @@ canvas {
   accent-color: var(--accent);
 }
 
+#map.aiming {
+  cursor: crosshair;
+}
+
+.speeds {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.speeds button {
+  min-height: 28px;
+  padding: 2px 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.speeds button:hover,
+.speeds button:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+
+.speeds button.on {
+  border-color: var(--accent);
+  background: rgba(224, 184, 79, 0.18);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.offensives {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.offensives h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.offensives .action {
+  margin-top: 0;
+}
+
+.action.armed {
+  background: var(--accent);
+  color: #1c1a12;
+}
+
+.offensive {
+  margin-top: 8px;
+}
+
+.offensive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.offensive-row small {
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.close-inline {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.close-inline:hover,
+.close-inline:focus-visible {
+  color: var(--ink);
+}
+
+.gauge {
+  height: 4px;
+  background: rgba(208, 196, 164, 0.18);
+}
+
+.gauge div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms linear;
+}
+
+.alert {
+  margin: 8px 0 0;
+  color: #ec8f7c;
+}
+
+.toast {
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 24px);
+  padding: 8px 14px;
+  border-color: var(--accent);
+  pointer-events: none;
+  text-align: center;
+}
+
 .fullscreen-message {
   position: absolute;
   inset: 0;

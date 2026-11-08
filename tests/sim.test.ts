@@ -18,8 +18,14 @@ function makeSim(seed = 7, player = 0) {
       provinceGrid[y * W + x] = (owner - 1) * 4 + Math.floor(y / 12) + 1;
     }
   }
-  const provinces = Array.from({ length: 8 }, (_, i) => ({ nation: i < 4 ? 0 : 1, areaKm2: 1000 }));
+  const provinces = Array.from({ length: 8 }, (_, i) => ({
+    nation: i < 4 ? 0 : 1,
+    areaKm2: 1000,
+    x: i < 4 ? W / 4 : (3 * W) / 4,
+    y: (i % 4) * 12 + 6,
+  }));
   return new Simulation({
+    ai: false,
     width: W,
     height: H,
     nations: [

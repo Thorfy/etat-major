@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { encodeRle } from '../src/map/codec.ts';
 import { distanceToBoundary } from '../src/map/distance.ts';
-import { MAP_HEIGHT as H, MAP_WIDTH as W, cellAreaKm2, wrapDeltaX } from '../src/map/projection.ts';
+import { MAP_HEIGHT as H, MAP_WIDTH as W, cellAreaKm2, latToY, wrapDeltaX } from '../src/map/projection.ts';
+import { TERRAIN_IDS, TERRAIN_NAMES, type TerrainKey } from '../src/map/terrain.ts';
 import type { NationData, ProvinceData, WorldData } from '../src/map/types.ts';
-import { type GeoGeometry, polygonsOf, rasterizePolygon } from './lib/rasterize.ts';
+import { type GeoGeometry, type GeoPolygon, polygonsOf, rasterizePolygon } from './lib/rasterize.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const rawDir = join(root, 'data', 'raw', 'natural-earth');
@@ -644,7 +645,42 @@ const nationData: NationData[] = nationList.map((n, i) => ({
 }));
 const world: WorldData = { width: W, height: H, nations: nationData, provinces };
 
+// Terrain : du moins prioritaire au plus prioritaire, les montagnes l'emportent.
+const terrainGrid = new Uint16Array(W * H);
+{
+  const regions = load('ne_10m_geography_regions_polys.geojson');
+  const terrainOf = (p: Record<string, any>): TerrainKey | null =>
+    config.terrainByName[p.NAME] ?? config.terrainClasses[p.FEATURECLA] ?? null;
+  // Limite ondulée : une latitude droite se verrait comme une règle posée sur la carte.
+  const arcticRow = latToY(config.arcticLatitude);
+  for (let x = 0; x < W; x++) {
+    const limit = Math.round(arcticRow + 26 * Math.sin(x * 0.011) + 13 * Math.sin(x * 0.037 + 1.7) + 6 * Math.sin(x * 0.11 + 0.4));
+    for (let y = 0; y < limit; y++) terrainGrid[y * W + x] = TERRAIN_IDS.arctic;
+  }
+  const groups: { terrain: TerrainKey; polygons: GeoPolygon[] }[] = [];
+  for (const f of regions) {
+    const terrain = terrainOf(f.properties);
+    if (terrain) groups.push({ terrain, polygons: polygonsOf(f.geometry) });
+  }
+  for (const extra of config.terrainExtras as { terrain: TerrainKey; ring: number[][] }[]) {
+    groups.push({ terrain: extra.terrain, polygons: [[extra.ring]] });
+  }
+  for (const key of ['highland', 'desert', 'jungle', 'arctic', 'plain', 'mountain'] as const) {
+    for (const group of groups) {
+      if (group.terrain !== key) continue;
+      for (const polygon of group.polygons) rasterizePolygon(terrainGrid, W, H, polygon, TERRAIN_IDS[key], false);
+    }
+  }
+  // Plaine écrit 0 : rien à faire de plus. L'eau n'a pas de terrain.
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === 0) terrainGrid[i] = 0;
+  }
+}
+
 mkdirSync(outDir, { recursive: true });
+const terrainRle = encodeRle(terrainGrid);
+const terrainCompressed = deflateSync(Buffer.from(terrainRle.buffer, terrainRle.byteOffset, terrainRle.byteLength), { level: 9 });
+writeFileSync(join(outDir, 'terrain.dat'), terrainCompressed);
 const rle = encodeRle(grid);
 const compressed = deflateSync(Buffer.from(rle.buffer, rle.byteOffset, rle.byteLength), { level: 9 });
 writeFileSync(join(outDir, 'provinces.dat'), compressed);
@@ -656,6 +692,13 @@ writeFileSync(join(outDir, 'world.json'), json);
 // ---------------------------------------------------------------------------
 
 const land = nationCells.reduce((a, b) => a + b, 0);
+{
+  const shares = new Array<number>(TERRAIN_NAMES.length).fill(0);
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] !== 0) shares[terrainGrid[i]]++;
+  }
+  console.log(`Terrain : ${shares.map((count, id) => `${TERRAIN_NAMES[id]} ${((count / land) * 100).toFixed(1)} %`).join(', ')}, terrain.dat ${(terrainCompressed.length / 1024).toFixed(0)} Ko`);
+}
 const sizes = provinces.map((p) => p.cells).sort((a, b) => a - b);
 console.log(`\n${nationData.length} nations, ${provinces.length} provinces, ${land} cellules de terre (${((land / grid.length) * 100).toFixed(1)} %)`);
 console.log(`Taille des provinces : min ${sizes[0]}, médiane ${sizes[sizes.length >> 1]}, max ${sizes[sizes.length - 1]}`);
