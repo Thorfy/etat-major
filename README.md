@@ -22,6 +22,7 @@ Puis ouvrir http://localhost:5173. La carte générée est versionnée dans `pub
 | `npm run dev` | Serveur de développement |
 | `npm test` | Tests unitaires |
 | `npm run build` | Vérification des types et build de production dans `dist/` |
+| `npm run bench` | Mesure le rythme d'un duel et le pire cas de la simulation, sans navigateur |
 | `npm run map:fetch` | Télécharge Natural Earth 5.1.2 dans `data/raw/` (environ 60 Mo) |
 | `npm run map:build` | Régénère `public/map/` depuis ces données |
 

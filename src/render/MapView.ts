@@ -9,8 +9,8 @@ const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
 
 export interface MapEvents {
-  onHover(province: number): void;
-  onSelect(province: number): void;
+  onHover(province: number, owner: number): void;
+  onSelect(province: number, owner: number): void;
   onToggleDebug(): void;
 }
 
@@ -39,6 +39,7 @@ export class MapView {
   private zoomTarget: { zoom: number; x: number; y: number } | null = null;
   private lastPointer: { x: number; y: number } | null = null;
   private hoverProvince = 0;
+  private hoverOwner = 0;
   private selectedProvince = 0;
   private selectedOwner = 0;
   /** Force un rendu à chaque image, pour mesurer les performances. */
@@ -61,16 +62,37 @@ export class MapView {
     return { frameMs: this.frameMs, gpuMs: this.renderer.gpuMs, zoom: this.camera.zoom };
   }
 
-  select(province: number): void {
+  select(province: number, owner = 0): void {
     this.selectedProvince = province;
-    this.selectedOwner = province ? this.world.data.provinces[province - 1].nation + 1 : 0;
+    this.selectedOwner = owner;
     this.dirty = true;
-    this.events.onSelect(province);
+    this.events.onSelect(province, owner);
   }
 
-  private provinceAt(sx: number, sy: number): number {
+  applyOwnerChanges(cells: Uint32Array, owners: Uint16Array): void {
+    if (cells.length === 0) return;
+    this.renderer.updateOwners(cells, owners);
+    this.dirty = true;
+  }
+
+  setWars(pairs: [number, number][]): void {
+    this.renderer.setWars(pairs);
+    this.dirty = true;
+  }
+
+  /** Cadre un point de la carte avec la largeur voulue, en cellules. */
+  focus(x: number, y: number, spanCells: number): void {
+    const { viewWidth, viewHeight } = this.camera;
+    this.zoomTarget = null;
+    this.camera.centerOn(x, y, Math.min(viewWidth, viewHeight) / spanCells);
+    this.dirty = true;
+  }
+
+  private cellAt(sx: number, sy: number): { province: number; owner: number } {
     const cell = this.camera.screenToCell(sx, sy);
-    return cell ? this.world.provinceGrid[cell.y * this.world.data.width + cell.x] : 0;
+    if (!cell) return { province: 0, owner: 0 };
+    const index = cell.y * this.world.data.width + cell.x;
+    return { province: this.world.provinceGrid[index], owner: this.world.ownerGrid[index] };
   }
 
   private resize(): void {
@@ -83,11 +105,17 @@ export class MapView {
     this.dirty = true;
   }
 
-  private setHover(province: number): void {
-    if (province === this.hoverProvince) return;
+  private setHover(province: number, owner: number): void {
+    if (province === this.hoverProvince && owner === this.hoverOwner) return;
+    if (province !== this.hoverProvince) this.dirty = true;
     this.hoverProvince = province;
-    this.dirty = true;
-    this.events.onHover(province);
+    this.hoverOwner = owner;
+    this.events.onHover(province, owner);
+  }
+
+  private hoverAt(sx: number, sy: number): void {
+    const { province, owner } = this.cellAt(sx, sy);
+    this.setHover(province, owner);
   }
 
   private bindInputs(): void {
@@ -108,7 +136,7 @@ export class MapView {
       this.lastPointer = { x: event.clientX, y: event.clientY };
       const previous = this.pointers.get(event.pointerId);
       if (!previous) {
-        this.setHover(this.provinceAt(event.clientX, event.clientY));
+        this.hoverAt(event.clientX, event.clientY);
         return;
       }
       const dx = event.clientX - previous.x;
@@ -135,14 +163,15 @@ export class MapView {
       this.pinchDistance = 0;
       if (this.pointers.size === 0) canvas.classList.remove('dragging');
       if (event.type === 'pointerup' && this.dragDistance < CLICK_TOLERANCE_PX) {
-        this.select(this.provinceAt(event.clientX, event.clientY));
+        const { province, owner } = this.cellAt(event.clientX, event.clientY);
+        this.select(province, owner);
       }
     };
     canvas.addEventListener('pointerup', release);
     canvas.addEventListener('pointercancel', release);
     canvas.addEventListener('pointerleave', () => {
       this.lastPointer = null;
-      if (this.pointers.size === 0) this.setHover(0);
+      if (this.pointers.size === 0) this.setHover(0, 0);
     });
 
     canvas.addEventListener(
@@ -161,6 +190,8 @@ export class MapView {
     );
 
     window.addEventListener('keydown', (event) => {
+      // Les flèches d'un curseur ou d'une liste ne doivent pas déplacer la carte.
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
       const key = event.key.toLowerCase();
       if (key === 'f3') {
         event.preventDefault();
@@ -215,7 +246,7 @@ export class MapView {
 
     if (this.dirty || this.continuous) {
       if (this.lastPointer && this.pointers.size === 0) {
-        this.setHover(this.provinceAt(this.lastPointer.x, this.lastPointer.y));
+        this.hoverAt(this.lastPointer.x, this.lastPointer.y);
       }
       this.renderer.draw(this.camera, this.dpr, {
         hoverProvince: this.hoverProvince,

@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "map:fetch": "node tools/fetch-natural-earth.ts",
-    "map:build": "node tools/build-map.ts"
+    "map:build": "node tools/build-map.ts",
+    "bench": "node tools/bench-sim.ts"
   },
   "dependencies": {
     "preact": "^11.2.0"

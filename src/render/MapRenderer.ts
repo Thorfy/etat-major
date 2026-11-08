@@ -3,6 +3,9 @@ import { buildCoastField } from '../map/loadWorld.ts';
 import type { Camera } from './Camera.ts';
 import { FRAGMENT_SHADER, VERTEX_SHADER } from './shaders.ts';
 
+/** Les bascules sont envoyées au GPU par tuiles de 64×64 cellules. */
+const TILE_SHIFT = 6;
+
 export interface Highlights {
   hoverProvince: number;
   selectedProvince: number;
@@ -31,6 +34,7 @@ export class MapRenderer {
   private readonly uniforms = new Map<string, WebGLUniformLocation | null>();
   private readonly timerExt: object | null;
   private query: WebGLQuery | null = null;
+  private readonly dirtyTiles = new Set<number>();
   /** Dernière durée GPU mesurée, en ms (null si le navigateur ne l'expose pas). */
   gpuMs: number | null = null;
 
@@ -60,7 +64,7 @@ export class MapRenderer {
     gl.useProgram(program);
     gl.bindVertexArray(gl.createVertexArray());
     for (const name of [
-      'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uCenter', 'uResolution', 'uZoom',
+      'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uCenter', 'uResolution', 'uZoom',
       'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
@@ -82,6 +86,63 @@ export class MapRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+
+    const homes = new Uint16Array(world.data.provinces.length + 1);
+    world.data.provinces.forEach((province, index) => {
+      homes[index + 1] = province.nation + 1;
+    });
+    this.bindDataTexture(4, 'uProvinceHome', gl.R16UI, homes.length, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, homes);
+
+    const size = nations.length + 1;
+    this.bindDataTexture(5, 'uWars', gl.R8, size, size, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(size * size));
+  }
+
+  /** Reporte les bascules dans la grille ; l'envoi au GPU se fait au prochain rendu. */
+  updateOwners(cells: Uint32Array, owners: Uint16Array): void {
+    const { width } = this.world.data;
+    const grid = this.world.ownerGrid;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      grid[cell] = owners[i];
+      const x = cell % width;
+      const y = (cell - x) / width;
+      this.dirtyTiles.add((y >> TILE_SHIFT) * 65536 + (x >> TILE_SHIFT));
+    }
+  }
+
+  private flushOwners(): void {
+    if (this.dirtyTiles.size === 0) return;
+    const { gl, world } = this;
+    const { width, height } = world.data;
+    const size = 1 << TILE_SHIFT;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, width);
+    for (const tile of this.dirtyTiles) {
+      const x = (tile & 0xffff) << TILE_SHIFT;
+      const y = (tile >>> 16) << TILE_SHIFT;
+      gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, x);
+      gl.pixelStorei(gl.UNPACK_SKIP_ROWS, y);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D, 0, x, y, Math.min(size, width - x), Math.min(size, height - y),
+        gl.RED_INTEGER, gl.UNSIGNED_SHORT, world.ownerGrid,
+      );
+    }
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    this.dirtyTiles.clear();
+  }
+
+  setWars(pairs: [number, number][]): void {
+    const { gl } = this;
+    const size = this.world.data.nations.length + 1;
+    const matrix = new Uint8Array(size * size);
+    for (const [a, b] of pairs) {
+      matrix[a * size + b] = 255;
+      matrix[b * size + a] = 255;
+    }
+    gl.activeTexture(gl.TEXTURE5);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, size, size, gl.RED, gl.UNSIGNED_BYTE, matrix);
   }
 
   private bindDataTexture(
@@ -113,6 +174,7 @@ export class MapRenderer {
 
   draw(camera: Camera, dpr: number, highlights: Highlights): void {
     const { gl, uniforms } = this;
+    this.flushOwners();
     gl.uniform2f(uniforms.get('uCenter')!, camera.x, camera.y);
     gl.uniform2f(uniforms.get('uResolution')!, this.canvas.width, this.canvas.height);
     gl.uniform1f(uniforms.get('uZoom')!, camera.zoom * dpr);

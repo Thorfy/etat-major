@@ -18,6 +18,8 @@ uniform usampler2D uOwners;
 uniform usampler2D uProvinces;
 uniform sampler2D uPalette;
 uniform sampler2D uCoast;
+uniform usampler2D uProvinceHome;
+uniform sampler2D uWars;
 uniform vec2 uCenter;
 uniform vec2 uResolution;
 uniform float uZoom;        // pixels physiques par cellule
@@ -38,6 +40,8 @@ const vec3 COAST_LINE = vec3(0.075, 0.106, 0.122);
 const vec3 NATION_LINE = vec3(0.145, 0.129, 0.110);
 const vec3 PROVINCE_LINE = vec3(0.235, 0.212, 0.180);
 const vec3 HIGHLIGHT = vec3(0.961, 0.784, 0.286);
+const vec3 FRONT_LINE = vec3(0.847, 0.169, 0.102);
+const vec3 FRONT_GLOW = vec3(0.984, 0.553, 0.294);
 
 ivec2 wrapCell(ivec2 c) {
   return ivec2(c.x & (MAP_W - 1), clamp(c.y, 0, MAP_H - 1));
@@ -46,7 +50,7 @@ ivec2 wrapCell(ivec2 c) {
 // Parmi 4 cellules pondérées, garde l'identifiant de plus fort poids. L'écart avec
 // le deuxième tient lieu de distance à la frontière : les contours sont lissés
 // au lieu de montrer l'escalier des cellules.
-void pickWinner(uvec4 ids, vec4 w, out uint best, out float margin) {
+void pickWinner(uvec4 ids, vec4 w, out uint best, out uint rival, out float margin) {
   vec4 sums = vec4(0.0);
   for (int i = 0; i < 4; i++) {
     for (int j = 0; j < 4; j++) {
@@ -59,8 +63,12 @@ void pickWinner(uvec4 ids, vec4 w, out uint best, out float margin) {
   }
   best = ids[top];
   float second = 0.0;
+  rival = best;
   for (int i = 0; i < 4; i++) {
-    if (ids[i] != best) second = max(second, sums[i]);
+    if (ids[i] != best && sums[i] > second) {
+      second = sums[i];
+      rival = ids[i];
+    }
   }
   margin = sums[top] - second;
 }
@@ -98,10 +106,10 @@ vec3 shade(vec2 p, float gratAlpha) {
     texelFetch(uProvinces, c0, 0).r, texelFetch(uProvinces, c1, 0).r,
     texelFetch(uProvinces, c2, 0).r, texelFetch(uProvinces, c3, 0).r);
 
-  uint owner, province;
+  uint owner, ownerRival, province, provinceRival;
   float ownerMargin, provinceMargin;
-  pickWinner(owners, w, owner, ownerMargin);
-  pickWinner(provinces, w, province, provinceMargin);
+  pickWinner(owners, w, owner, ownerRival, ownerMargin);
+  pickWinner(provinces, w, province, provinceRival, provinceMargin);
 
   float ownerDist = ownerMargin * uZoom * 0.5;
   float provinceDist = provinceMargin * uZoom * 0.5;
@@ -118,6 +126,12 @@ vec3 shade(vec2 p, float gratAlpha) {
     color = mix(color, SEA_LINE, 0.28 * gratAlpha);
   } else {
     color = texelFetch(uPalette, ivec2(int(owner), 0), 0).rgb;
+    // Territoire occupé : hachures aux couleurs de son pays d'origine.
+    uint home = texelFetch(uProvinceHome, ivec2(int(province), 0), 0).r;
+    if (home != 0u && home != owner) {
+      float stripe = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 12.0));
+      color = mix(color, texelFetch(uPalette, ivec2(int(home), 0), 0).rgb, 0.55 * stripe);
+    }
     color = mix(color, NATION_LINE, 0.07 * gratAlpha);
     if (owner == uSelectedOwner) color = mix(color, vec3(1.0), 0.20);
     if (province == uHoverProvince) color = mix(color, vec3(1.0), 0.16);
@@ -131,7 +145,12 @@ vec3 shade(vec2 p, float gratAlpha) {
 
   if (hasOwnerEdge) {
     float zoomWidth = clamp(uZoom * 0.14, 0.45, 1.3);
-    if (hasCoast) {
+    bool atWar = owner != 0u && ownerRival != 0u
+      && texelFetch(uWars, ivec2(int(owner), int(ownerRival)), 0).r > 0.5;
+    if (atWar) {
+      color = mix(color, FRONT_GLOW, 0.5 * lineAlpha(ownerDist, zoomWidth * 3.2));
+      color = mix(color, FRONT_LINE, lineAlpha(ownerDist, max(zoomWidth * 1.3, 0.9)));
+    } else if (hasCoast) {
       color = mix(color, COAST_LINE, 0.9 * lineAlpha(ownerDist, zoomWidth * 0.85));
     } else {
       color = mix(color, NATION_LINE, 0.95 * lineAlpha(ownerDist, zoomWidth));

@@ -584,8 +584,8 @@ const nationArea = new Float64Array(nationList.length);
 
 // Coloration gloutonne : deux nations voisines n'ont jamais la même teinte.
 const PALETTE = [
-  '#c9b48a', '#a9b98c', '#c79a7b', '#8fa8ab', '#d3c27a', '#a58f9e',
-  '#b9c7a0', '#bd8f8a', '#93a37c', '#c6a765', '#9c9fb8', '#b5a58f',
+  '#c4a884', '#a9b98c', '#cf9a72', '#8fa8ab', '#dcc66f', '#a58f9e',
+  '#b9c7a0', '#bd8f8a', '#8e9f76', '#d9a84e', '#9c9fb8', '#b3a998',
 ];
 const colors = new Array<string>(nationList.length);
 {

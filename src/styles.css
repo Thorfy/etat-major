@@ -1,5 +1,5 @@
 :root {
-  --panel: rgba(21, 28, 33, 0.92);
+  --panel: rgba(21, 28, 33, 0.985);
   --panel-line: rgba(208, 196, 164, 0.24);
   --ink: #e8e2d0;
   --ink-soft: #a7a593;
@@ -181,6 +181,228 @@ canvas {
   white-space: pre;
 }
 
+.hover .occupied {
+  color: var(--accent);
+}
+
+.action {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(224, 184, 79, 0.14);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.action:hover,
+.action:focus-visible {
+  background: rgba(224, 184, 79, 0.28);
+}
+
+.setup {
+  top: 12px;
+  right: 12px;
+  width: 290px;
+  max-width: calc(100vw - 24px);
+  padding: 14px 16px;
+}
+
+.setup h2 {
+  margin: 0 0 10px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.setup label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ink-soft);
+}
+
+.setup select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
+  background: #11171b;
+  color: var(--ink);
+  font: inherit;
+}
+
+.fronts {
+  top: 52px;
+  left: 12px;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel-line) transparent;
+  padding: 12px 14px;
+}
+
+.fronts .nation {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.fronts h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.fronts .clock {
+  color: var(--ink-soft);
+  font-family: var(--mono);
+}
+
+.fronts .swatch,
+.info .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+}
+
+.fronts dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 12px;
+  margin: 0;
+}
+
+.fronts dt {
+  color: var(--ink-soft);
+}
+
+.fronts dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.front {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.front header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.front h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.front .ratio {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.front-note {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+}
+
+.ahead {
+  color: #9bcf86;
+}
+
+.behind {
+  color: #ec8f7c;
+}
+
+.balance {
+  height: 6px;
+  margin-bottom: 10px;
+  background: #d8432f;
+}
+
+.balance div {
+  height: 100%;
+  background: #7fb56b;
+  transition: width 200ms linear;
+}
+
+.stances {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.stances button {
+  min-height: 32px;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.stances button:hover,
+.stances button:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+
+.stances button.on {
+  border-color: var(--accent);
+  background: rgba(224, 184, 79, 0.18);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.allocation {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--ink-soft);
+}
+
+.allocation span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.allocation b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.allocation input {
+  display: block;
+  width: 100%;
+  margin: 4px 0 0;
+  accent-color: var(--accent);
+}
+
 .fullscreen-message {
   position: absolute;
   inset: 0;
@@ -198,11 +420,16 @@ canvas {
     display: none;
   }
 
-  .info {
+  .info,
+  .setup {
     top: auto;
     bottom: 52px;
     left: 12px;
     right: 12px;
     width: auto;
+  }
+
+  .fronts {
+    max-height: 45vh;
   }
 }

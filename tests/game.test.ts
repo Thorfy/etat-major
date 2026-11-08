@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'vitest';
+import { rebalance } from '../src/game/allocation.ts';
+import { areLandNeighbors, findLandNeighbors } from '../src/map/adjacency.ts';
+import { formatClock, formatRatio } from '../src/ui/format.ts';
+
+const total = (map: Map<number, number>) => [...map.values()].reduce((a, b) => a + b, 0);
+
+describe('répartition des forces', () => {
+  it('ne touche pas aux autres fronts s\'il reste de la place', () => {
+    const next = rebalance(new Map([[1, 0.2], [2, 0.3]]), 2, 0.5);
+    expect(next.get(1)).toBe(0.2);
+    expect(next.get(2)).toBe(0.5);
+  });
+
+  it('reprend le manque proportionnellement sur les autres fronts', () => {
+    const next = rebalance(new Map([[1, 0.6], [2, 0.2], [3, 0.2]]), 3, 0.6);
+    expect(next.get(3)).toBe(0.6);
+    expect(next.get(1)).toBeCloseTo(0.3, 10);
+    expect(next.get(2)).toBeCloseTo(0.1, 10);
+    expect(total(next)).toBeCloseTo(1, 10);
+  });
+
+  it('peut prendre tout ce qu\'un front engagé à 100 % occupe', () => {
+    const next = rebalance(new Map([[1, 1], [2, 0]]), 2, 1);
+    expect(next.get(1)).toBe(0);
+    expect(next.get(2)).toBe(1);
+  });
+
+  it('borne les valeurs demandées', () => {
+    expect(rebalance(new Map([[1, 0.5]]), 1, 3).get(1)).toBe(1);
+    expect(rebalance(new Map([[1, 0.5]]), 1, -3).get(1)).toBe(0);
+  });
+});
+
+describe('voisinages', () => {
+  // 1 1 0 2
+  // 3 3 0 2   la colonne 3 touche la colonne 0 par le bouclage
+  const grid = Uint16Array.from([1, 1, 0, 2, 3, 3, 0, 2]);
+
+  it('trouve chaque paire une fois, à travers le bouclage', () => {
+    const pairs = findLandNeighbors(grid, 4, 2).map((pair) => pair.join('-')).sort();
+    expect(pairs).toEqual(['1-2', '1-3', '2-3']);
+  });
+
+  it('teste une paire dans les deux sens', () => {
+    expect(areLandNeighbors(grid, 4, 2, 1, 2)).toBe(true);
+    expect(areLandNeighbors(grid, 4, 2, 2, 1)).toBe(true);
+    expect(areLandNeighbors(Uint16Array.from([1, 0, 2, 0]), 4, 1, 1, 2)).toBe(false);
+  });
+});
+
+describe('affichage', () => {
+  it('écrit le rapport de force du côté du joueur et plafonne les extrêmes', () => {
+    expect(formatRatio(1)).toBe('1 : 1');
+    expect(formatRatio(2.5)).toBe('2,5 : 1');
+    expect(formatRatio(0.5)).toBe('1 : 2');
+    expect(formatRatio(1986)).toBe('> 20 : 1');
+    expect(formatRatio(1 / 1986)).toBe('1 : > 20');
+  });
+
+  it('formate le temps écoulé', () => {
+    expect(formatClock(0)).toBe('0:00');
+    expect(formatClock(92.7)).toBe('1:32');
+  });
+});

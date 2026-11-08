@@ -37,6 +37,13 @@ export class Camera {
     this.normalize();
   }
 
+  centerOn(x: number, y: number, zoom: number): void {
+    this.zoom = Math.min(MAX_ZOOM, Math.max(this.minZoom, zoom));
+    this.x = x;
+    this.y = y;
+    this.normalize();
+  }
+
   panPixels(dx: number, dy: number): void {
     this.x -= dx / this.zoom;
     this.y -= dy / this.zoom;
