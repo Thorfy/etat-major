@@ -677,12 +677,12 @@ canvas {
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  width: 220px;
+  width: 300px;
   padding: 6px;
 }
 
 .map-mode .speeds {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 0.8fr 1fr 1.3fr;
   margin-bottom: 0;
 }
 
@@ -700,6 +700,10 @@ canvas {
   height: 8px;
   border-radius: 2px;
   background: linear-gradient(90deg, #ddd5be, #c9804d 55%, #6b1b13);
+}
+
+.legend .ramp.supply {
+  background: linear-gradient(90deg, #c63026, #e2a436 50%, #55964f);
 }
 
 .legend span:last-of-type {
@@ -754,6 +758,6 @@ canvas {
     left: auto;
     right: 12px;
     transform: none;
-    width: 170px;
+    width: 250px;
   }
 }

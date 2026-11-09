@@ -4,6 +4,23 @@ import { findLandNeighbors } from '../map/adjacency.ts';
 import { distanceToBoundary } from '../map/distance.ts';
 import {
   ADJACENCY_INTERVAL_TICKS,
+  LAND_NEIGHBORS_TICK,
+  SEA_NEIGHBORS_TICK,
+  AI_MIN_LAUNCH_SUPPLY,
+  CONSOLIDATED_COST,
+  CONSOLIDATION_SECONDS,
+  INFRASTRUCTURE_COST_MAX,
+  INFRASTRUCTURE_COST_MIN,
+  MIN_SUPPLY,
+  OFFENSIVE_SUPPLY_ATTRITION,
+  SEA_SUPPLY_COST,
+  SUPPLY_ATTACK_PENALTY,
+  SUPPLY_ATTRITION,
+  SUPPLY_COST_SCALE,
+  SUPPLY_DEFENSE_PENALTY,
+  SUPPLY_FADE_RANGE,
+  SUPPLY_FREE_RANGE,
+  TERRAIN_SUPPLY_COST,
   AI_AMPHIBIOUS_CHANCE,
   AI_ATTACK_RATIO,
   AI_ENGAGED_SHARE,
@@ -43,6 +60,7 @@ import {
   ATTRITION_PER_TICK,
   BEACHHEAD_RADIUS,
   CAPITULATION_INTERVAL_TICKS,
+  CAPITULATION_TICK,
   CAPITULATION_SHARE,
   DEFAULT_ALLOCATION,
   DEFENSE_MULTIPLIER,
@@ -82,6 +100,7 @@ import {
   SECTOR_CHURN,
   SECTOR_NOISE,
   SECTOR_SHIFT,
+  SUPPLY_GROUPS,
   SUPPLY_INTERVAL_TICKS,
   TERRAIN_DEFENSE,
   TERRAIN_SPEED,
@@ -124,6 +143,8 @@ export interface SimConfig {
   player: number;
   /** Faux : les autres nations n'agissent que sur ordre (utile pour les tests). */
   ai?: boolean;
+  /** Faux : tout est ravitaillé partout, pour mesurer l'effet de la logistique. */
+  logistics?: boolean;
   /** Partie à reprendre. */
   saved?: SimSave;
 }
@@ -137,6 +158,8 @@ interface FrontSide {
   rawDensity: number;
   /** Forces par cellule de front, posture comprise. */
   density: number;
+  /** Ravitaillement moyen de ses cellules de front, de 0 à 1. */
+  supply: number;
 }
 
 interface Front {
@@ -171,9 +194,19 @@ interface Offensive {
   seaLoss: number;
   targetX: number;
   targetY: number;
+  /** Ravitaillement de l'offensive, mesuré au tick précédent sur son couloir. */
+  supply: number;
+  supplySum: number;
+  supplyCount: number;
 }
 
 const INITIAL_LIST_CAPACITY = 1 << 14;
+/** Niveau de ravitaillement de chaque octet de la grille : 0 vaut plein (sol national). */
+const SUPPLY_LEVELS = Float32Array.from({ length: 256 }, (_, value) => (value === 0 ? 1 : (value - 1) / 254));
+const UNREACHED = 0xffff;
+/** Un bit par groupe de nations dont les poches et le ravitaillement sont à recalculer. */
+const ALL_SUPPLY_GROUPS = (1 << SUPPLY_GROUPS) - 1;
+const SUPPLY_PHASE_TICKS = SUPPLY_INTERVAL_TICKS / SUPPLY_GROUPS;
 
 export class Simulation {
   readonly width: number;
@@ -185,6 +218,7 @@ export class Simulation {
 
   private readonly stride: number;
   private readonly aiEnabled: boolean;
+  private readonly logisticsEnabled: boolean;
   private rngState: number;
   private readonly terrain: Uint8Array | null;
 
@@ -245,13 +279,30 @@ export class Simulation {
   private readonly visited: Uint8Array;
   private readonly visitOrder: Int32Array;
   private readonly pocket: Uint8Array;
-  private pocketList: number[] = [];
+  /** Cellules en poche, par groupe de nations qui les a trouvées. */
+  private pocketLists: number[][] = Array.from({ length: SUPPLY_GROUPS }, () => []);
   private readonly pocketCounts: Int32Array;
   private pockets: PocketSnapshot[] = [];
   /** Cellule d'ancrage par territoire d'origine : l'Alaska n'est pas une poche. */
   private readonly anchorOwner = new Map<number, number>();
   private readonly isAnchor: Uint8Array;
-  private supplyDirty = false;
+  private supplyDirty = 0;
+
+  // Logistique.
+  /** Ravitaillement de chaque cellule : 0 sur le sol national, sinon 1 + 254 × niveau. */
+  readonly supply: Uint8Array;
+  /** Cellules dont le ravitaillement n'est pas plein. */
+  private supplyList: number[] = [];
+  /** 1 pour les cellules de supplyList (marque de travail pendant le calcul). */
+  private readonly supplyListed: Uint8Array;
+  private readonly supplyDistance: Uint16Array;
+  private readonly supplyCost: Uint8Array;
+  /** Consolidation de chaque province occupée, de 0 à 1. */
+  readonly consolidation: Float64Array;
+  /** Somme du ravitaillement des cellules de front, par paire (attaquant, défenseur). */
+  private readonly supplySums: Float64Array;
+  private pendingSupplyCells: number[] = [];
+  private pendingSupplyValues: number[] = [];
 
   // Voisinages, pour les déclarations de guerre de l'IA.
   private landNeighbors: number[][];
@@ -276,6 +327,7 @@ export class Simulation {
     this.terrain = config.terrainGrid ?? null;
     this.player = config.saved ? config.saved.state.player : config.player;
     this.aiEnabled = config.ai ?? true;
+    this.logisticsEnabled = config.logistics ?? true;
     this.rngState = config.seed >>> 0 || 1;
     this.provinces = config.provinces;
 
@@ -284,6 +336,7 @@ export class Simulation {
     this.frontIndex = new Int32Array(pairs).fill(-1);
     this.advantage = new Float32Array(pairs).fill(-Infinity);
     this.lengthCounts = new Int32Array(pairs);
+    this.supplySums = new Float64Array(pairs);
     this.frontierPosition = new Int32Array(this.owners.length).fill(-1);
     this.offensivesByNation = Array.from({ length: this.stride }, () => []);
     this.landNeighbors = Array.from({ length: this.stride }, () => []);
@@ -299,6 +352,7 @@ export class Simulation {
     this.provinceCells = new Int32Array(provinceCount);
     this.provinceValue = new Float64Array(provinceCount);
     this.controller = new Uint16Array(provinceCount);
+    this.consolidation = new Float64Array(provinceCount);
     this.provinceCounts = new Array(provinceCount).fill(null);
 
     this.reserve = new Float64Array(this.stride);
@@ -340,6 +394,10 @@ export class Simulation {
     this.visitOrder = new Int32Array(land);
     this.pocket = new Uint8Array(this.owners.length);
     this.isAnchor = new Uint8Array(this.owners.length);
+    this.supply = new Uint8Array(this.owners.length);
+    this.supplyListed = new Uint8Array(this.owners.length);
+    this.supplyDistance = new Uint16Array(this.owners.length);
+    this.supplyCost = new Uint8Array(this.owners.length);
     this.placeAnchors();
 
     // La capacité militaire se répartit entre les provinces selon leur part du PIB et de
@@ -448,6 +506,11 @@ export class Simulation {
     return this.controller[province];
   }
 
+  /** Ravitaillement d'une cellule, de 0 à 1 (1 sur le sol national). */
+  supplyAt(cell: number): number {
+    return SUPPLY_LEVELS[this.supply[cell]];
+  }
+
   isPocket(cell: number): boolean {
     return this.pocket[cell] === 1;
   }
@@ -500,7 +563,7 @@ export class Simulation {
       if (!this.alive[x] || !this.alive[y]) continue;
       const a = Math.min(x, y);
       const b = Math.max(x, y);
-      const side = (): FrontSide => ({ allocation: 0, stance: 'hold', force: 0, captured: 0, rawDensity: 0, density: 0 });
+      const side = (): FrontSide => ({ allocation: 0, stance: 'hold', force: 0, captured: 0, rawDensity: 0, density: 0, supply: 1 });
       const front: Front = { a, b, sides: [side(), side()], length: 0, logRatio: 0, flipBudget: 0 };
       const index = this.fronts.push(front) - 1;
       this.frontIndex[a * this.stride + b] = index;
@@ -519,7 +582,7 @@ export class Simulation {
       if (involved[this.owners[this.landCells[k]]]) this.refreshFrontier(this.landCells[k]);
     }
     this.measureFronts();
-    this.supplyDirty = true;
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
     if (this.player) {
       for (const front of added) {
         const enemy = front.a === this.player ? front.b : front.b === this.player ? front.a : 0;
@@ -631,6 +694,9 @@ export class Simulation {
       seaLoss,
       targetX: toX,
       targetY: toY,
+      supply: 1,
+      supplySum: 0,
+      supplyCount: 0,
     };
     this.offensives.push(offensive);
     list.push(offensive);
@@ -668,7 +734,9 @@ export class Simulation {
     this.tick++;
     this.evolveSectors();
     if (this.aiEnabled) {
-      if (this.tick % ADJACENCY_INTERVAL_TICKS === 0) this.refreshNeighbors();
+      const phase = this.tick % ADJACENCY_INTERVAL_TICKS;
+      if (phase === LAND_NEIGHBORS_TICK) this.refreshLandNeighbors();
+      else if (phase === SEA_NEIGHBORS_TICK) this.seaNeighbors = this.findSeaNeighbors();
       if (this.tick % WAR_INTERVAL_TICKS === 0) this.decideWars();
       if (this.tick % AI_INTERVAL_TICKS === 0) {
         this.decideAllocations();
@@ -683,8 +751,11 @@ export class Simulation {
     this.updateOffensives();
     this.scanFrontier();
     this.applyFlips();
-    if (this.tick % SUPPLY_INTERVAL_TICKS === 0 && this.supplyDirty) this.updateSupply();
-    if (this.tick % CAPITULATION_INTERVAL_TICKS === 0) this.checkCapitulations();
+    if (this.tick % SUPPLY_PHASE_TICKS === 0) {
+      const group = (this.tick / SUPPLY_PHASE_TICKS) % SUPPLY_GROUPS;
+      if (this.supplyDirty & (1 << group)) this.updateSupply(group);
+    }
+    if (this.tick % CAPITULATION_INTERVAL_TICKS === CAPITULATION_TICK) this.checkCapitulations();
   }
 
   private evolveSectors(): void {
@@ -763,6 +834,8 @@ export class Simulation {
     for (let attempt = 0; attempt < 24; attempt++) {
       const cell = this.frontier[Math.floor(this.random() * this.frontierCount)];
       if (owners[cell] !== nation) continue;
+      // Pas d'offensive depuis une pointe déjà à bout de souffle.
+      if (SUPPLY_LEVELS[this.supply[cell]] < AI_MIN_LAUNCH_SUPPLY) continue;
       const x = cell % W;
       const y = (cell - x) / W;
       const around = [
@@ -834,13 +907,17 @@ export class Simulation {
   // -------------------------------------------------------------------------
 
   private refreshNeighbors(): void {
+    this.refreshLandNeighbors();
+    this.seaNeighbors = this.findSeaNeighbors();
+  }
+
+  private refreshLandNeighbors(): void {
     const land: number[][] = Array.from({ length: this.stride }, () => []);
     for (const [a, b] of findLandNeighbors(this.owners, this.width, this.height)) {
       land[a].push(b);
       land[b].push(a);
     }
     this.landNeighbors = land;
-    this.seaNeighbors = this.findSeaNeighbors();
   }
 
   /**
@@ -985,6 +1062,7 @@ export class Simulation {
         this.pendingProvinces.push(p, winner);
       }
       this.provinceHome[p] = this.controller[p];
+      this.consolidation[p] = 0;
       this.provinceValue[p] *= ANNEXED_VALUE;
       this.provinceGdp[p] *= ANNEXED_VALUE;
       this.pendingHomes.push(p, this.controller[p]);
@@ -1002,7 +1080,7 @@ export class Simulation {
     for (let i = 0; i < previous.length; i++) this.refreshFrontier(previous[i]);
     for (const cell of transferred) this.refreshAround(cell);
     this.measureFronts();
-    this.supplyDirty = true;
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
     this.pendingEvents.push({ type: 'capitulation', tick: this.tick, loser, winner });
   }
 
@@ -1103,6 +1181,14 @@ export class Simulation {
     }
     for (let n = 1; n < this.stride; n++) this.growth[n] = base[n] > 0 ? gained[n] / base[n] / minutes : 0;
     this.recomputeCapacity();
+
+    // L'occupant répare peu à peu les voies des provinces qu'il tient.
+    const consolidating = ECONOMY_INTERVAL_TICKS / TICKS_PER_SECOND / CONSOLIDATION_SECONDS;
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] === this.provinceHome[p] || this.consolidation[p] >= 1) continue;
+      this.consolidation[p] = Math.min(1, this.consolidation[p] + consolidating);
+      this.supplyDirty = ALL_SUPPLY_GROUPS;
+    }
   }
 
   private computeArmies(): void {
@@ -1151,6 +1237,11 @@ export class Simulation {
         const lossB = sideB.force * (2 * sideA.force) / total * scale * LOSS_MULTIPLIER[sideB.stance];
         sideA.force = Math.max(0, sideA.force - lossA);
         sideB.force = Math.max(0, sideB.force - lossB);
+      }
+      // Un camp mal ravitaillé s'use, même quand personne n'attaque.
+      if (front.length > 0) {
+        sideA.force *= 1 - SUPPLY_ATTRITION * (1 - sideA.supply);
+        sideB.force *= 1 - SUPPLY_ATTRITION * (1 - sideB.supply);
       }
     }
   }
@@ -1207,7 +1298,12 @@ export class Simulation {
         if (this.tick >= offensive.transitUntil) this.land(offensive);
         continue;
       }
-      offensive.force *= 1 - OFFENSIVE_ATTRITION;
+      if (offensive.supplyCount > 0) {
+        offensive.supply = offensive.supplySum / offensive.supplyCount;
+        offensive.supplySum = 0;
+        offensive.supplyCount = 0;
+      }
+      offensive.force *= 1 - OFFENSIVE_ATTRITION * (1 + OFFENSIVE_SUPPLY_ATTRITION * (1 - offensive.supply));
       offensive.stalledTicks++;
       const toY = Math.max(0, Math.min(H - 1, offensive.toY));
       const reached = owners[toY * W + offensive.toX] === offensive.nation;
@@ -1264,7 +1360,7 @@ export class Simulation {
     offensive.toX = ((x + dx) % W + W) % W;
     offensive.toY = y + dy;
     offensive.lengthSquared = Math.max(1, dx * dx + dy * dy);
-    this.supplyDirty = true;
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
   }
 
   /**
@@ -1300,12 +1396,14 @@ export class Simulation {
   }
 
   private scanFrontier(): void {
-    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, sectors, sectorColumns, terrain, pocket, fronts, offensivesByNation, provinceHome, provinceGrid } = this;
+    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, supplySums, supply, sectors, sectorColumns, terrain, pocket, fronts, offensivesByNation, provinceHome, provinceGrid } = this;
     const list = this.frontier;
     const count = this.frontierCount;
     for (const front of fronts) {
       lengthCounts[front.a * stride + front.b] = 0;
       lengthCounts[front.b * stride + front.a] = 0;
+      supplySums[front.a * stride + front.b] = 0;
+      supplySums[front.b * stride + front.a] = 0;
       front.flipBudget = Math.min(MAX_FRONT_FLIP_BUDGET, front.flipBudget + MAX_FRONT_FLIPS_PER_TICK);
     }
     this.flipCount = 0;
@@ -1315,15 +1413,20 @@ export class Simulation {
       const defender = owners[cell];
       const x = cell % W;
       const y = (cell - x) / W;
-      const n0 = owners[x > 0 ? cell - 1 : cell + W - 1];
-      const n1 = owners[x < W - 1 ? cell + 1 : cell - W + 1];
+      const i0 = x > 0 ? cell - 1 : cell + W - 1;
+      const i1 = x < W - 1 ? cell + 1 : cell - W + 1;
+      const n0 = owners[i0];
+      const n1 = owners[i1];
       const n2 = y > 0 ? owners[cell - W] : 0;
       const n3 = y < H - 1 ? owners[cell + W] : 0;
       const sector = sectors[(y >> SECTOR_SHIFT) * sectorColumns + (x >> SECTOR_SHIFT)];
       const terrainId = terrain ? terrain[cell] : 0;
       const onHomeSoil = provinceHome[provinceGrid[cell]] === defender;
-      const local = sector - TERRAIN_DEFENSE[terrainId] - (onHomeSoil ? HOME_DEFENSE : 0);
       const encircled = pocket[cell] === 1;
+      // Un occupant mal ravitaillé défend mal. Une poche a déjà sa propre règle.
+      const defenderSupply = SUPPLY_LEVELS[supply[cell]];
+      const local =
+        sector - TERRAIN_DEFENSE[terrainId] - (onHomeSoil ? HOME_DEFENSE : 0) + (encircled ? 0 : SUPPLY_DEFENSE_PENALTY * (1 - defenderSupply));
 
       let best = 0;
       let bestChance = 0;
@@ -1338,6 +1441,10 @@ export class Simulation {
         const index = frontIndex[key];
         if (index < 0) continue;
         lengthCounts[key]++;
+        supplySums[key] += defenderSupply;
+        // L'attaque part de la cellule voisine : c'est son ravitaillement qui compte.
+        const from = j === 0 ? i0 : j === 1 ? i1 : j === 2 ? cell - W : cell + W;
+        const attackerSupply = SUPPLY_LEVELS[supply[from]];
 
         let edge = advantage[key];
         let speed = 1;
@@ -1345,11 +1452,14 @@ export class Simulation {
         if (offensivesByNation[attacker].length > 0) {
           const offensiveEdge = this.offensiveEdge(attacker, fronts[index], x, y);
           if (offensiveEdge > -Infinity) {
-            matched = this.matchedOffensive;
+            matched = this.matchedOffensive!;
+            matched.supplySum += attackerSupply;
+            matched.supplyCount++;
             speed = OFFENSIVE_SPEED;
             if (offensiveEdge > edge) edge = offensiveEdge;
           }
         }
+        edge -= SUPPLY_ATTACK_PENALTY * (1 - attackerSupply);
         if (encircled) {
           if (edge < POCKET_EDGE) edge = POCKET_EDGE;
           speed *= POCKET_SPEED;
@@ -1377,7 +1487,11 @@ export class Simulation {
     }
 
     for (const front of fronts) {
-      front.length = (lengthCounts[front.a * stride + front.b] + lengthCounts[front.b * stride + front.a]) / 2;
+      const aFacesB = front.b * stride + front.a;
+      const bFacesA = front.a * stride + front.b;
+      front.length = (lengthCounts[bFacesA] + lengthCounts[aFacesB]) / 2;
+      front.sides[0].supply = lengthCounts[aFacesB] > 0 ? supplySums[aFacesB] / lengthCounts[aFacesB] : 1;
+      front.sides[1].supply = lengthCounts[bFacesA] > 0 ? supplySums[bFacesA] / lengthCounts[bFacesA] : 1;
     }
   }
 
@@ -1420,7 +1534,7 @@ export class Simulation {
   }
 
   private applyFlips(): void {
-    if (this.flipCount > 0) this.supplyDirty = true;
+    if (this.flipCount > 0) this.supplyDirty = ALL_SUPPLY_GROUPS;
     for (let i = 0; i < this.flipCount; i++) {
       const cell = this.flipCells[i];
       const attacker = this.flipOwners[i];
@@ -1466,6 +1580,7 @@ export class Simulation {
         this.development[province] = Math.min(this.development[province], Math.max(MIN_DAMAGED_DEVELOPMENT, damaged));
       }
       this.controller[province] = to;
+      this.consolidation[province] = 0;
       this.capacityDirty = true;
       this.pendingProvinces.push(province, to);
     }
@@ -1490,6 +1605,8 @@ export class Simulation {
       this.isAnchor[anchor] = 1;
       this.anchorOwner.set(anchor, owners[seed]);
     }
+    // Le contrôle des poches suppose un marquage vierge.
+    visited.fill(0);
   }
 
   /**
@@ -1538,9 +1655,11 @@ export class Simulation {
     return tail;
   }
 
-  private updateSupply(): void {
+  /** Poches et ravitaillement des nations d'un groupe (identifiant modulo SUPPLY_GROUPS). */
+  private updateSupply(group: number): void {
     const { owners, landCells, visited, visitOrder, pocket, pocketCounts } = this;
-    this.supplyDirty = false;
+    this.supplyDirty &= ~(1 << group);
+    const inGroup = (nation: number) => nation % SUPPLY_GROUPS === group;
 
     const atWar = new Uint8Array(this.stride);
     const enemyNavy = new Float64Array(this.stride);
@@ -1551,19 +1670,27 @@ export class Simulation {
       enemyNavy[front.b] = Math.max(enemyNavy[front.b], this.navy[front.a]);
     }
 
-    for (const cell of this.pocketList) pocket[cell] = 0;
-    this.pocketList = [];
-    pocketCounts.fill(0);
-    this.pockets = [];
-    visited.fill(0);
+    const pocketList: number[] = [];
+    for (const cell of this.pocketLists[group]) pocket[cell] = 0;
+    this.pocketLists[group] = pocketList;
+    for (let n = group; n < this.stride; n += SUPPLY_GROUPS) pocketCounts[n] = 0;
+    this.pockets = this.pockets.filter((entry) => !inGroup(entry.nation));
 
+    // Nations de ce groupe en guerre : les seules dont les cellules comptent ici.
+    const active = new Uint8Array(this.stride);
+    for (let n = group; n < this.stride; n += SUPPLY_GROUPS) active[n] = atWar[n];
+    const { provinceHome, provinceGrid } = this;
     const zones: { owner: number; start: number; end: number; touchesEnemy: boolean; anchored: boolean; coastal: boolean }[] = [];
     const largest = new Int32Array(this.stride);
+    const occupied: number[] = [];
     let cursor = 0;
+    // Un seul parcours de la terre : territoire conquis à ravitailler, et zones à remplir.
     for (let k = 0; k < landCells.length; k++) {
       const seed = landCells[k];
       const owner = owners[seed];
-      if (visited[seed] || !atWar[owner]) continue;
+      if (active[owner] === 0) continue;
+      if (provinceHome[provinceGrid[seed]] !== owner) occupied.push(seed);
+      if (visited[seed]) continue;
       const flags = { touchesEnemy: false, anchored: false, coastal: false };
       const start = cursor;
       cursor = this.floodFill(seed, cursor, flags);
@@ -1589,7 +1716,7 @@ export class Simulation {
       for (let i = zone.start; i < zone.end; i++) {
         const cell = visitOrder[i];
         pocket[cell] = 1;
-        this.pocketList.push(cell);
+        pocketList.push(cell);
         const x = cell % this.width;
         sumX += this.wrapDelta(anchorX, x);
         sumY += (cell - x) / this.width;
@@ -1605,14 +1732,124 @@ export class Simulation {
       }
     }
 
+    // Le marquage de visite ne sert qu'à ce calcul : on l'efface derrière soi.
+    for (let i = 0; i < cursor; i++) visited[visitOrder[i]] = 0;
+
     for (const front of this.fronts) {
       for (let s = 0; s < 2; s++) {
         const nation = s === 0 ? front.a : front.b;
-        if (pocketCounts[nation] === 0) continue;
+        if (pocketCounts[nation] === 0 || !inGroup(nation)) continue;
         const share = pocketCounts[nation] / Math.max(1, this.cellCounts[nation]);
         front.sides[s].force *= 1 - share * POCKET_DRAIN;
       }
     }
+    if (this.logisticsEnabled) this.updateLogistics(group, occupied, enemyNavy, pocketList);
+  }
+
+  /**
+   * Ravitaillement du territoire conquis : distance au sol national de son occupant, en
+   * coût de transport (terrain, infrastructure, consolidation), par l'algorithme de Dial.
+   * Une côte conquise est aussi ravitaillée par la mer si la marine la tient. Une poche
+   * n'est plus ravitaillée du tout.
+   */
+  private updateLogistics(group: number, occupied: number[], enemyNavy: Float64Array, pocketList: number[]): void {
+    const { owners, provinceGrid, provinceHome, supply, supplyListed, supplyDistance: distance, terrain, width: W, height: H } = this;
+
+    const provinceCost = new Float64Array(this.controller.length);
+    for (let p = 1; p < provinceCost.length; p++) {
+      const area = Math.max(1, this.provinces[p - 1].areaKm2);
+      const density = Math.log10(Math.max(1e-6, (this.provinceGdp[p] * this.development[p]) / area));
+      const wealth = Math.max(0, Math.min(1, (density + 1.5) / 3.5));
+      const infrastructure = INFRASTRUCTURE_COST_MAX - (INFRASTRUCTURE_COST_MAX - INFRASTRUCTURE_COST_MIN) * wealth;
+      provinceCost[p] = infrastructure * (1 - (1 - CONSOLIDATED_COST) * this.consolidation[p]);
+    }
+    // Coût de transport de chaque cellule conquise, en pas entiers.
+    const cost = this.supplyCost;
+    for (const cell of occupied) {
+      distance[cell] = UNREACHED;
+      const terrainCost = TERRAIN_SUPPLY_COST[terrain ? terrain[cell] : 0];
+      cost[cell] = Math.max(1, Math.round(terrainCost * provinceCost[provinceGrid[cell]] * SUPPLY_COST_SCALE));
+    }
+
+    const maxDistance = (SUPPLY_FREE_RANGE + SUPPLY_FADE_RANGE) * SUPPLY_COST_SCALE;
+    const buckets: number[][] = Array.from({ length: maxDistance + 1 }, () => []);
+    const last = W * (H - 1);
+    const seaStart = SEA_SUPPLY_COST * SUPPLY_COST_SCALE;
+    // Points de départ : les cellules conquises au contact du sol national, ou d'une mer tenue.
+    for (const cell of occupied) {
+      const owner = owners[cell];
+      const navalSupply = this.navy[owner] > 0 && this.navy[owner] >= enemyNavy[owner] * NAVAL_SUPPLY_RATIO;
+      const x = cell % W;
+      let start = Infinity;
+      for (let j = 0; j < 4; j++) {
+        const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+        if ((j === 2 && cell < W) || (j === 3 && cell >= last)) continue;
+        const other = owners[next];
+        if (other === owner && provinceHome[provinceGrid[next]] === owner) start = 0;
+        else if (other === 0 && navalSupply && seaStart < start) start = seaStart;
+      }
+      if (start === Infinity) continue;
+      const d = start + cost[cell];
+      if (d <= maxDistance && d < distance[cell]) {
+        distance[cell] = d;
+        buckets[d].push(cell);
+      }
+    }
+    for (let d = 0; d <= maxDistance; d++) {
+      const bucket = buckets[d];
+      for (let i = 0; i < bucket.length; i++) {
+        const cell = bucket[i];
+        if (distance[cell] !== d) continue;
+        const owner = owners[cell];
+        const x = cell % W;
+        for (let j = 0; j < 4; j++) {
+          if ((j === 2 && cell < W) || (j === 3 && cell >= last)) continue;
+          const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+          // Seul le territoire conquis du même occupant prolonge le trajet.
+          if (owners[next] !== owner || provinceHome[provinceGrid[next]] === owner) continue;
+          const nd = d + cost[next];
+          if (nd <= maxDistance && nd < distance[next]) {
+            distance[next] = nd;
+            buckets[nd].push(next);
+          }
+        }
+      }
+    }
+
+    // Nouvelles valeurs, et retour au plein pour ce qui n'est plus occupé.
+    const fresh: number[] = [];
+    const write = (cell: number, value: number) => {
+      if (supplyListed[cell] === 2) return;
+      supplyListed[cell] = 2;
+      fresh.push(cell);
+      if (supply[cell] !== value) {
+        supply[cell] = value;
+        this.pendingSupplyCells.push(cell);
+        this.pendingSupplyValues.push(value);
+      }
+    };
+    for (const cell of pocketList) write(cell, 1);
+    for (const cell of occupied) {
+      const d = distance[cell] / SUPPLY_COST_SCALE;
+      const level = distance[cell] === UNREACHED ? MIN_SUPPLY : d <= SUPPLY_FREE_RANGE ? 1 : Math.max(MIN_SUPPLY, 1 - ((d - SUPPLY_FREE_RANGE) / SUPPLY_FADE_RANGE) * (1 - MIN_SUPPLY));
+      write(cell, 1 + Math.round(level * 254));
+    }
+    for (const cell of this.supplyList) {
+      if (supplyListed[cell] === 2) continue;
+      // Les cellules des autres groupes attendent leur tour, telles quelles.
+      if (owners[cell] % SUPPLY_GROUPS !== group) {
+        fresh.push(cell);
+        continue;
+      }
+      supplyListed[cell] = 0;
+      if (supply[cell] !== 0) {
+        supply[cell] = 0;
+        this.pendingSupplyCells.push(cell);
+        this.pendingSupplyValues.push(0);
+      }
+    }
+    for (const cell of fresh) supplyListed[cell] = 1;
+    this.supplyList = fresh;
   }
 
   // -------------------------------------------------------------------------
@@ -1665,14 +1902,26 @@ export class Simulation {
   // -------------------------------------------------------------------------
 
   /** Tout ce qui a changé depuis le dernier appel. */
-  drainChanges(): { cells: Uint32Array; owners: Uint16Array; provinces: Uint16Array; homes: Uint16Array; events: SimEvent[] } {
+  drainChanges(): {
+    cells: Uint32Array;
+    owners: Uint16Array;
+    provinces: Uint16Array;
+    homes: Uint16Array;
+    supplyCells: Uint32Array;
+    supplyValues: Uint8Array;
+    events: SimEvent[];
+  } {
     const changes = {
       cells: Uint32Array.from(this.pendingCells),
       owners: Uint16Array.from(this.pendingOwners),
       provinces: Uint16Array.from(this.pendingProvinces),
       homes: Uint16Array.from(this.pendingHomes),
+      supplyCells: Uint32Array.from(this.pendingSupplyCells),
+      supplyValues: Uint8Array.from(this.pendingSupplyValues),
       events: this.pendingEvents,
     };
+    this.pendingSupplyCells = [];
+    this.pendingSupplyValues = [];
     this.pendingCells = [];
     this.pendingOwners = [];
     this.pendingProvinces = [];
@@ -1732,12 +1981,13 @@ export class Simulation {
       output: Float32Array.from(this.output),
       capacity: Float32Array.from(this.capacity),
       effort: Float32Array.from(this.effort),
+      consolidation: Float32Array.from(this.consolidation),
     };
   }
 
   snapshot(): SimSnapshot {
     const fronts: FrontSnapshot[] = this.fronts.map((front) => {
-      const side = (s: FrontSide) => ({ allocation: s.allocation, stance: s.stance, force: s.force, captured: s.captured });
+      const side = (s: FrontSide) => ({ allocation: s.allocation, stance: s.stance, force: s.force, captured: s.captured, supply: s.supply });
       return {
         a: front.a,
         b: front.b,
@@ -1770,7 +2020,7 @@ export class Simulation {
         effortTarget: this.effortTarget[id],
         growth: this.growth[id],
       })),
-      offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured, transitUntil, targetX, targetY }) => ({
+      offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured, transitUntil, targetX, targetY, supply }) => ({
         id,
         nation,
         fromX,
@@ -1781,6 +2031,7 @@ export class Simulation {
         startForce,
         captured,
         inTransit: transitUntil > 0,
+        supply,
       })),
       pockets: this.pockets,
     };
@@ -1793,6 +2044,7 @@ export class Simulation {
   save(): SimSave {
     return {
       owners: this.owners.slice(),
+      supply: this.supply.slice(),
       state: {
         tick: this.tick,
         rngState: this.rngState,
@@ -1814,7 +2066,7 @@ export class Simulation {
         provinceValue: Array.from(this.provinceValue),
         controller: Array.from(this.controller),
         provinceCounts: this.provinceCounts.map((counts) => (counts ? [...counts] : null)),
-        pocketList: this.pocketList.slice(),
+        pocketLists: this.pocketLists.map((list) => list.slice()),
         pocketCounts: Array.from(this.pocketCounts),
         pockets: this.pockets.map((pocket) => ({ ...pocket })),
         landNeighbors: this.landNeighbors,
@@ -1825,6 +2077,7 @@ export class Simulation {
         effort: Array.from(this.effort),
         effortTarget: Array.from(this.effortTarget),
         growth: Array.from(this.growth),
+        consolidation: Array.from(this.consolidation),
       },
     };
   }
@@ -1852,8 +2105,8 @@ export class Simulation {
     });
     this.pocketCounts.set(state.pocketCounts);
     this.pockets = state.pockets;
-    this.pocketList = state.pocketList;
-    for (const cell of this.pocketList) this.pocket[cell] = 1;
+    this.pocketLists = state.pocketLists.map((list) => list.slice());
+    for (const list of this.pocketLists) for (const cell of list) this.pocket[cell] = 1;
     this.landNeighbors = state.landNeighbors;
     this.seaNeighbors = state.seaNeighbors;
     this.labelCells.set(state.labelCells);
@@ -1862,7 +2115,18 @@ export class Simulation {
     this.effort.set(state.effort);
     this.effortTarget.set(state.effortTarget);
     this.growth.set(state.growth);
+    this.consolidation.set(state.consolidation);
     this.recomputeCapacity();
+    // Le ravitaillement repart tel quel : le recalculer ici changerait la suite de la partie.
+    this.supply.set(saved.supply);
+    for (let k = 0; k < this.landCells.length; k++) {
+      const cell = this.landCells[k];
+      if (this.supply[cell] === 0) continue;
+      this.supplyList.push(cell);
+      this.supplyListed[cell] = 1;
+      this.pendingSupplyCells.push(cell);
+      this.pendingSupplyValues.push(this.supply[cell]);
+    }
 
     this.fronts = state.fronts.map((front) => ({ ...front, sides: front.sides.map((side) => ({ ...side })) }));
     this.reindexFronts();
@@ -1897,7 +2161,14 @@ export class Simulation {
       mix(Math.round(this.reserve[n] * 1000));
       mix(Math.round(this.effort[n] * 1e6));
     }
-    for (let p = 1; p < this.development.length; p++) mix(Math.round(this.development[p] * 1e6));
+    for (let p = 1; p < this.development.length; p++) {
+      mix(Math.round(this.development[p] * 1e6));
+      mix(Math.round(this.consolidation[p] * 1e6));
+    }
+    // Somme commutative : l'ordre de la liste ne change rien à la partie.
+    let supplySum = 0;
+    for (const cell of this.supplyList) supplySum = (supplySum + Math.imul(cell + 1, 2654435761) + this.supply[cell]) >>> 0;
+    mix(supplySum);
     mix(this.rngState);
     return hash;
   }

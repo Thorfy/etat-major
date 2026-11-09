@@ -22,7 +22,8 @@ uniform usampler2D uProvinceHome;
 uniform sampler2D uWars;
 uniform sampler2D uTerrain;
 uniform sampler2D uEconomy;
-uniform uint uMapMode;      // 0 : politique, 1 : économique
+uniform sampler2D uSupply;
+uniform uint uMapMode;      // 0 : politique, 1 : économique, 2 : ravitaillement
 uniform vec2 uCenter;
 uniform vec2 uResolution;
 uniform float uZoom;        // pixels physiques par cellule
@@ -49,6 +50,10 @@ const vec3 FRONT_GLOW = vec3(0.984, 0.553, 0.294);
 const vec3 ECONOMY_LOW = vec3(0.866, 0.835, 0.745);
 const vec3 ECONOMY_MID = vec3(0.788, 0.502, 0.302);
 const vec3 ECONOMY_HIGH = vec3(0.420, 0.106, 0.075);
+// Ravitaillement du territoire conquis : vert s'il suit, rouge s'il est coupé.
+const vec3 SUPPLY_GOOD = vec3(0.333, 0.588, 0.314);
+const vec3 SUPPLY_LOW = vec3(0.886, 0.643, 0.212);
+const vec3 SUPPLY_CUT = vec3(0.776, 0.188, 0.149);
 
 ivec2 wrapCell(ivec2 c) {
   return ivec2(c.x & (MAP_W - 1), clamp(c.y, 0, MAP_H - 1));
@@ -158,6 +163,16 @@ vec3 shade(vec2 p, float gratAlpha) {
       vec3 ramp = mix(ECONOMY_LOW, ECONOMY_MID, smoothstep(0.0, 0.6, wealth));
       ramp = mix(ramp, ECONOMY_HIGH, smoothstep(0.55, 1.0, wealth));
       color = mix(ramp, color, 0.2);
+    } else if (uMapMode == 2u) {
+      // Le sol national, toujours ravitaillé, s'efface ; le territoire conquis prend sa teinte.
+      float value = texelFetch(uSupply, wrapCell(ivec2(floor(p))), 0).r * 255.0;
+      color = mix(color, vec3(0.62, 0.61, 0.57), 0.55);
+      if (value > 0.5) {
+        float level = (value - 1.0) / 254.0;
+        vec3 ramp = mix(SUPPLY_CUT, SUPPLY_LOW, smoothstep(0.0, 0.5, level));
+        ramp = mix(ramp, SUPPLY_GOOD, smoothstep(0.5, 1.0, level));
+        color = mix(ramp, color, 0.15);
+      }
     } else {
       color = applyTerrain(color, p);
     }
@@ -165,7 +180,9 @@ vec3 shade(vec2 p, float gratAlpha) {
     uint home = texelFetch(uProvinceHome, ivec2(int(province), 0), 0).r;
     if (home != 0u && home != owner) {
       float stripe = step(0.5, fract((gl_FragCoord.x + gl_FragCoord.y) / 12.0));
-      color = mix(color, texelFetch(uPalette, ivec2(int(home), 0), 0).rgb, 0.55 * stripe);
+      // Plus discrètes sur la carte du ravitaillement, pour ne pas en brouiller la teinte.
+      float hatch = uMapMode == 2u ? 0.18 : 0.55;
+      color = mix(color, texelFetch(uPalette, ivec2(int(home), 0), 0).rgb, hatch * stripe);
     }
     color = mix(color, NATION_LINE, 0.07 * gratAlpha);
     if (owner == uSelectedOwner) color = mix(color, vec3(1.0), 0.20);

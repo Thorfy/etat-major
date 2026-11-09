@@ -180,6 +180,29 @@ describe('débarquements', () => {
     expect(sim.isPocket(20 * 120 + 70)).toBe(false);
   });
 
+  it('ravitaille une tête de pont par la mer tant que la marine la tient', () => {
+    const sim = start();
+    sim.launchOffensive(A, 45, 20, 90, 20, 1);
+    for (let t = 0; t < 120; t++) {
+      holdAll(sim);
+      sim.step();
+    }
+    expect(sim.owners[20 * 120 + 70]).toBe(A);
+    expect(sim.supplyAt(20 * 120 + 70)).toBe(1);
+  });
+
+  it('ne ravitaille plus une tête de pont dont la marine a perdu la mer', () => {
+    const sim = start((n) => (n === A ? 1e3 : 50e6));
+    sim.launchOffensive(A, 45, 20, 90, 20, 1);
+    let cut = false;
+    for (let t = 0; t < 200 && !cut; t++) {
+      holdAll(sim);
+      sim.step();
+      cut = sim.owners[20 * 120 + 70] === A && sim.supplyAt(20 * 120 + 70) < 0.2;
+    }
+    expect(cut).toBe(true);
+  });
+
   it('coupe le ravitaillement côtier d\'une marine trop faible', () => {
     const sim = start((n) => (n === A ? 1e3 : 50e6));
     sim.launchOffensive(A, 45, 20, 90, 20, 1);
@@ -460,7 +483,7 @@ describe('sauvegarde', () => {
 
     // Aller-retour par JSON, comme dans un vrai fichier.
     const raw = original.save();
-    const saved = { owners: raw.owners, state: JSON.parse(JSON.stringify(raw.state)) };
+    const saved = { owners: raw.owners, supply: raw.supply, state: JSON.parse(JSON.stringify(raw.state)) };
 
     const resumed = new Simulation({ ...config(), saved });
     expect(resumed.tick).toBe(original.tick);

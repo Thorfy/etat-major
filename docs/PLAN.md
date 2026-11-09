@@ -39,6 +39,100 @@ Choix par défaut, à confirmer :
 | 7 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
 | 8 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
 
+## État du jalon 5
+
+Terminé : une percée trop profonde s'essouffle. Sur une bande de test, la même suite de
+flèches avance d'environ 20 cellules par minute sans logistique, du début à la fin. Avec la
+logistique, elle tombe vers 9 cellules par minute au-delà de 100 cellules de profondeur, et le
+ravitaillement de sa pointe descend à 0,18. **Le test de plaisir reste ouvert** : personne n'a
+encore joué à la main.
+
+**Règles.** Toutes sont des premiers réglages, dans `src/sim/balance.ts`.
+
+- **Sol national :** toujours ravitaillé, tant qu'il n'est pas encerclé (les poches gardent
+  leur règle du jalon 2).
+- **Territoire conquis :** son ravitaillement dépend de la distance au sol national de son
+  occupant, comptée en coût de transport. Il est plein sur 20 unités, puis s'éteint sur 60
+  unités, sans descendre sous 15 % : on vit sur le pays.
+- **Coût de transport d'une cellule :** le terrain (plaine 1, plateau 1,5, désert 2, montagne,
+  arctique et jungle 2,5), multiplié par l'infrastructure de la province. Celle-ci va de ×0,5
+  (bassin industriel) à ×1,5 (province vide), d'après la densité de PIB. On porte donc loin en
+  Europe de l'Ouest, et peu dans le Sahara ou en Sibérie.
+- **Consolidation :** une province occupée se consolide en 3 min. Son coût de transport tombe
+  alors à 30 %. Elle ne compte qu'au profit de celui qui contrôle la province, c'est-à-dire qui
+  en tient la majorité des cellules. Une percée étroite à travers de grandes provinces ne se
+  consolide donc pas : il faut l'élargir.
+- **Par la mer :** une côte conquise est ravitaillée depuis la mer, pour un coût de 15, tant que
+  la marine vaut au moins la moitié de celle de l'ennemi. Une tête de pont dont la marine perd
+  la mer devient une poche, comme avant.
+- **Effets :** sur une cellule mal ravitaillée, l'attaquant perd jusqu'à 1,5 en log du rapport
+  de force, et le défenseur qui l'occupe jusqu'à 1. Un camp mal ravitaillé s'use jusqu'à 0,06 %
+  de ses forces par tick, même sans combat, et une offensive mal ravitaillée jusqu'à cinq fois
+  plus vite. L'essoufflement propre aux flèches est divisé par deux (−1 de log tous les 220
+  cellules au lieu de 110) : la logistique fait le reste.
+- **IA :** elle ne lance plus d'offensive depuis une cellule ravitaillée à moins de 50 %.
+- **Interface :** troisième carte « Ravitaillement » (bouton en haut ou touche R), du rouge
+  (coupé) au vert (ravitaillé), sur le seul territoire conquis. Le panneau donne le
+  ravitaillement de chaque front, des deux côtés, et celui de chaque offensive, avec un message
+  quand l'une d'elles passe sous 40 %. La fiche d'une cellule conquise donne son ravitaillement
+  et la consolidation de sa province.
+- **Sauvegarde :** la grille du ravitaillement est sauvegardée telle quelle, car la recalculer
+  à la reprise changerait la suite de la partie. Le format passe en version 3.
+
+**Performances.** Le calcul du ravitaillement a d'abord fait passer le pire cas à 223 ms.
+Trois changements l'ont ramené à 75 ms, en dessous de son niveau du jalon 4 :
+
+- Les nations sont contrôlées en quatre groupes, à tour de rôle toutes les 0,5 s. Chacune
+  reste contrôlée toutes les 2 s, mais aucun tick ne porte tout le calcul.
+- Un seul parcours de la terre par contrôle, sans appel de fonction par cellule.
+- Les calculs lourds ne tombent plus sur le même tick : voisinages par la terre et par la mer
+  séparés (ils prenaient 87 ms ensemble), et capitulations décalées.
+
+| Mesure | Résultat |
+|---|---|
+| Pire cas, guerre mondiale, 10 min de jeu | Médiane 7,3 ms, p95 57 ms, p99 60 ms, **max 75 ms** (jalon 4 : 89 ms) |
+| Monde sans joueur, 60 min, deux graines | 138 et 146 nations sur 193 ; tick max 65 et 64 ms |
+| Frontière active à 60 min | 2 800 à 3 600 cellules (jalon 4 : 15 000 à 30 000) |
+| Sauvegarde, après 60 min | Environ 440 Ko de JSON avant compression, plus la grille |
+| Navigateur | Percée allemande en Pologne, carte et fiche ; reprise identique, grille du ravitaillement comprise |
+| Tests | 101 réussis, dont 6 sur la logistique |
+
+Le p95 monte, de 36 à 57 ms : les contrôles sont quatre fois plus fréquents, chacun plus léger.
+
+**Duels de 30 min sur la vraie carte, le reste du monde jouant aussi** (gain du joueur en
+cellules, deux graines ; entre parenthèses, le jalon 4) :
+
+| Stratégie du joueur | France contre IA allemande | Allemagne contre IA française |
+|---|---|---|
+| Tient à 100 %, sans réserve | −397 et −1 111 (−574 et −647) | −57 et 0 (−59 et 0) |
+| Tient à 60 %, sans offensive | −2 420 et −2 673 (capitule) | −378 et −290 (−245 et −246) |
+| Attaque à 100 % | −1 491 et −1 674 (capitule) | −7 et −56 (−36 et −3) |
+| Tient à 60 %, une offensive par minute | Capitule en 26 min (22 et 26 min) | +97 et +63 (+286 et +32) |
+| Tient à 40 %, offensives toutes les 30 s | Capitule en 12 et 14 min (13 min) | +615 et +104 (+1 003 et +76) |
+| Effort à 100 %, une offensive par minute | +727 et +170 à 10 min, puis −1 085 et −127 (+192 et +50) | +1 468 et +1 150 (+2 424 et +676) |
+
+La défense en profondeur paie : une France passive ne capitule plus, car les avancées
+allemandes s'épuisent en territoire français. Les gains offensifs baissent dans l'ensemble. La
+France à effort maximal perce vite, puis reflue : sa percée s'épuise loin de ses bases pendant
+que son industrie s'use. Les scripts qui enchaînent les flèches vers le cœur de l'Allemagne
+s'effondrent toujours, ce qui est l'effet voulu.
+
+Points à reprendre :
+
+- **Rythme à éprouver par un joueur.** Une avance large et lente reste ravitaillée, parce que
+  la consolidation suit. Seules les percées rapides s'essoufflent. Si c'est trop doux ou trop
+  dur à la main : portée sans perte, durée de consolidation, malus d'attaque.
+- **La France gagne toujours rarement contre l'Allemagne,** mais elle tient désormais.
+- **Pas de dépôts, de routes ni de consommation :** une grande armée loin de chez elle est
+  ravitaillée comme une petite. Le ravitaillement ne dépend que de la distance, du terrain, de
+  l'infrastructure et de la consolidation.
+- **Pas de blocus ni de ports :** la mer ravitaille n'importe quelle côte conquise, selon le seul
+  rapport des marines.
+- **Le ravitaillement se lit cellule par cellule** sur la carte et dans la fiche. Une flèche
+  tracée ne montre pas encore à l'avance jusqu'où elle restera ravitaillée.
+- **Pire cas plus régulier, mais pas plus bas en médiane :** p95 à 57 ms. Pistes si besoin :
+  listes de cellules par nation, pour ne plus parcourir toute la terre à chaque contrôle.
+
 ## État du jalon 4
 
 Terminé : la puissance militaire vient de l'économie, et le critère est tenu. Prendre la
@@ -122,8 +216,8 @@ Points à reprendre :
   plusieurs provinces. 43 villes tombent hors de toute province, et les pays sans ville connue
   répartissent tout selon la surface habitable.
 - **Pas de commerce ni de ressources :** le PIB ne dépend que du territoire et de l'effort.
-  Pétrole, blocus et échanges pourraient venir avec la logistique (jalon 5) ou la diplomatie
-  (jalon 6).
+  Pétrole, blocus et échanges ne sont pas venus avec la logistique du jalon 5. Ils pourraient
+  venir avec la diplomatie (jalon 6).
 - **La richesse va aux pays épargnés.** Sur 60 min, les États-Unis, souvent en guerre, perdent
   19 % de PIB, quand le Japon en paix en gagne 44 %. C'est voulu, mais il n'y a encore aucun
   frein à la croissance d'un pays en paix. La Russie garde ses 23 % de terres.

@@ -13,13 +13,17 @@ const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
 
-/** Carte politique (pays) ou économique (richesse des provinces). */
-export type MapMode = 'political' | 'economic';
+/** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
+export type MapMode = 'political' | 'economic' | 'supply';
+
+const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2 };
 
 export interface CellInfo {
   province: number;
   owner: number;
   terrain: number;
+  /** Ravitaillement de la cellule au moment du clic, de 0 à 1. */
+  supply: number;
 }
 
 export interface MapEvents {
@@ -30,7 +34,7 @@ export interface MapEvents {
   onAimingChange(aiming: boolean): void;
 }
 
-const NO_CELL: CellInfo = { province: 0, owner: 0, terrain: 0 };
+const NO_CELL: CellInfo = { province: 0, owner: 0, terrain: 0, supply: 1 };
 const MIN_ARROW_CELLS = 3;
 
 export interface FrameStats {
@@ -118,7 +122,7 @@ export class MapView {
 
   setMapMode(mode: MapMode): void {
     this.mode = mode;
-    this.renderer.setMapMode(mode === 'economic' ? 1 : 0);
+    this.renderer.setMapMode(MODE_IDS[mode]);
     this.dirty = true;
   }
 
@@ -126,6 +130,12 @@ export class MapView {
   setEconomy(wealth: Uint8Array): void {
     this.renderer.updateEconomy(wealth);
     if (this.mode === 'economic') this.dirty = true;
+  }
+
+  applySupplyChanges(cells: Uint32Array, values: Uint8Array): void {
+    if (cells.length === 0) return;
+    this.renderer.updateSupply(cells, values);
+    if (this.mode === 'supply') this.dirty = true;
   }
 
   applyHomeChanges(pairs: Uint16Array): void {
@@ -213,6 +223,7 @@ export class MapView {
       province: this.world.provinceGrid[index],
       owner: this.world.ownerGrid[index],
       terrain: this.world.terrainGrid[index],
+      supply: this.renderer.supply[index] === 0 ? 1 : (this.renderer.supply[index] - 1) / 254,
     };
   }
 

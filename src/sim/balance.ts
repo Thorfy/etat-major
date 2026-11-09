@@ -56,8 +56,11 @@ export const OFFENSIVE_EDGE_FALLOFF = 0.5;
 export const OFFENSIVE_SPEED = 1.7;
 /** Portée maximale d'une flèche, en cellules. */
 export const MAX_OFFENSIVE_LENGTH = 100;
-/** La pression s'essouffle avec la distance au départ : −1 de log tous les N cellules. */
-export const OFFENSIVE_DEPTH_FADE = 110;
+/**
+ * La pression s'essouffle avec la distance au départ : −1 de log tous les N cellules. La
+ * logistique fait l'essentiel de l'essoufflement depuis le jalon 5.
+ */
+export const OFFENSIVE_DEPTH_FADE = 220;
 /** Coût de chaque cellule conquise : une base fixe, plus une part de la densité adverse. */
 export const OFFENSIVE_CELL_BASE_COST = 0.5;
 export const OFFENSIVE_CELL_COST = 0.02;
@@ -95,6 +98,8 @@ export function baseNavy(gdpMusd: number): number {
 /** Une nation capitule quand elle tient moins que cette part de la valeur de son territoire. */
 export const CAPITULATION_SHARE = 0.25;
 export const CAPITULATION_INTERVAL_TICKS = 20;
+/** Décalage des contrôles de capitulation, pour ne pas tomber sur un contrôle du ravitaillement. */
+export const CAPITULATION_TICK = 3;
 /** Une province annexée rapporte cette part de sa valeur d'origine. */
 export const ANNEXED_VALUE = 0.35;
 
@@ -107,18 +112,63 @@ export const WAR_CAPACITY_RATIO = 1.2;
 /** Répit du joueur en début de partie. */
 export const PLAYER_GRACE_TICKS = 1800;
 export const ADJACENCY_INTERVAL_TICKS = 600;
+/**
+ * Voisinages par la terre puis par la mer, chacun sur un tick à part, choisi pour ne
+ * tomber ni sur un contrôle du ravitaillement ni sur une décision de l'IA.
+ */
+export const LAND_NEIGHBORS_TICK = 2;
+export const SEA_NEIGHBORS_TICK = 302;
 /** Portée des voisinages maritimes, en cellules de la grille à demi-résolution. */
 export const SEA_NEIGHBOR_RADIUS = 30;
 export const AI_AMPHIBIOUS_CHANCE = 0.1;
 
 // Ravitaillement et encerclements.
 export const SUPPLY_INTERVAL_TICKS = 20;
+/**
+ * Les nations sont contrôlées en autant de groupes, à tour de rôle : chacune l'est toujours
+ * toutes les SUPPLY_INTERVAL_TICKS, mais le calcul ne pèse jamais sur un seul tick.
+ */
+export const SUPPLY_GROUPS = 4;
 /** Avantage minimal de l'ennemi sur une poche, même s'il ne fait que tenir. */
 export const POCKET_EDGE = 1.6;
 export const POCKET_SPEED = 1.6;
 /** Part des forces perdue à chaque contrôle : part du territoire encerclé × ce réglage. */
 export const POCKET_DRAIN = 0.04;
 export const POCKET_MIN_CELLS_SHOWN = 3;
+
+// Logistique. Le sol national est toujours ravitaillé. Sur le territoire conquis, le
+// ravitaillement s'affaiblit avec la distance au sol national, comptée en coût de transport.
+/** Coût de transport d'une cellule, par terrain : plaine, montagne, plateau, désert, arctique, jungle. */
+export const TERRAIN_SUPPLY_COST = [1, 2.5, 1.5, 2, 2.5, 2.5];
+/**
+ * Infrastructure : une région dense et riche transporte mieux. Le coût est multiplié par un
+ * facteur qui va de ce maximum (province vide) à ce minimum (bassin industriel).
+ */
+export const INFRASTRUCTURE_COST_MAX = 1.5;
+export const INFRASTRUCTURE_COST_MIN = 0.5;
+/** Une province occupée se consolide (voies réparées) en ce nombre de secondes de jeu. */
+export const CONSOLIDATION_SECONDS = 180;
+/** Une province consolidée ne coûte plus que cette part de son coût de transport. */
+export const CONSOLIDATED_COST = 0.3;
+/** Coût de transport jusqu'à une côte conquise, si la marine tient la mer. */
+export const SEA_SUPPLY_COST = 15;
+/** Distance ravitaillée sans perte, puis distance sur laquelle le ravitaillement s'éteint. */
+export const SUPPLY_FREE_RANGE = 20;
+export const SUPPLY_FADE_RANGE = 60;
+/** Ravitaillement minimal, même très loin : on vit sur le pays. */
+export const MIN_SUPPLY = 0.15;
+/** Précision du calcul des distances : pas de 1 / ce réglage. */
+export const SUPPLY_COST_SCALE = 2;
+/** Malus de l'attaquant mal ravitaillé, en log du rapport de force, à ravitaillement nul. */
+export const SUPPLY_ATTACK_PENALTY = 1.5;
+/** Malus du défenseur mal ravitaillé, sur une cellule qu'il occupe. */
+export const SUPPLY_DEFENSE_PENALTY = 1;
+/** Usure supplémentaire par tick d'un camp au ravitaillement nul, en part de ses forces. */
+export const SUPPLY_ATTRITION = 0.0006;
+/** Une offensive sans ravitaillement s'use ce nombre de fois plus vite. */
+export const OFFENSIVE_SUPPLY_ATTRITION = 4;
+/** L'IA ne lance pas d'offensive depuis une cellule moins ravitaillée que ça. */
+export const AI_MIN_LAUNCH_SUPPLY = 0.5;
 
 // IA.
 export const AI_INTERVAL_TICKS = 30;

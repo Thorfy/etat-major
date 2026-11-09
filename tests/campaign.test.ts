@@ -244,7 +244,7 @@ describe('encerclements', () => {
       for (let x = 70; x < 73; x++) flips.push(y * W + x);
     }
     const unique = [...new Set(flips)];
-    const internals = sim as unknown as { owners: Uint16Array; cellCounts: Int32Array; refreshFrontier(cell: number): void; supplyDirty: boolean };
+    const internals = sim as unknown as { owners: Uint16Array; cellCounts: Int32Array; refreshFrontier(cell: number): void; supplyDirty: number };
     for (const cell of unique) {
       if (internals.owners[cell] === B) {
         internals.owners[cell] = A;
@@ -253,7 +253,8 @@ describe('encerclements', () => {
       }
     }
     for (let i = 0; i < internals.owners.length; i++) internals.refreshFrontier(i);
-    internals.supplyDirty = true;
+    // Tous les groupes de nations sont à recontrôler.
+    internals.supplyDirty = 0xff;
     return sim;
   };
 

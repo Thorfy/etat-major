@@ -34,6 +34,8 @@ export const GAME_SPEEDS = [1, 2, 4] as const;
 const MESSAGE_MS = 3500;
 const AUTOSAVE_MS = 120_000;
 const JOURNAL_SIZE = 40;
+/** En dessous, une offensive est signalée comme à bout de ravitaillement. */
+export const LOW_SUPPLY = 0.4;
 
 export interface GameStart {
   player: number;
@@ -79,6 +81,7 @@ export class GameClient {
   private readonly inContact = new Set<number>();
   private readonly labels = new Map<number, NationLabel>();
   private readonly saveRequests = new Map<number, (save: SimSave) => void>();
+  private readonly warnedOffensives = new Set<number>();
   private nextSaveRequest = 1;
   private frontCount = 0;
   private flipsWindow = 0;
@@ -165,6 +168,7 @@ export class GameClient {
 
   private receive(update: WorkerUpdate): void {
     this.view.applyOwnerChanges(update.cells, update.owners);
+    this.view.applySupplyChanges(update.supplyCells, update.supplyValues);
     for (let i = 0; i < update.provinces.length; i += 2) {
       this.controllers[update.provinces[i]] = update.provinces[i + 1];
     }
@@ -197,6 +201,7 @@ export class GameClient {
         this.view.setWars(update.snapshot.fronts.map((front) => [front.a, front.b]));
       }
       this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets);
+      this.watchSupply(update.snapshot);
       this.onChange();
     }
   }
@@ -218,6 +223,17 @@ export class GameClient {
       this.notify(`${name(event.loser)} capitule : tu annexes tout son territoire.`);
     } else if (this.isAtWarWith(event.loser)) {
       this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
+    }
+  }
+
+  /** Prévient une fois quand une offensive du joueur arrive à bout de ravitaillement. */
+  private watchSupply(snapshot: SimSnapshot): void {
+    for (const offensive of snapshot.offensives) {
+      if (offensive.nation !== this.player || offensive.inTransit) continue;
+      if (offensive.supply < LOW_SUPPLY && !this.warnedOffensives.has(offensive.id)) {
+        this.warnedOffensives.add(offensive.id);
+        this.notify('Une offensive s\'essouffle : elle est trop loin de ses bases. Laisse le front se consolider.');
+      }
     }
   }
 

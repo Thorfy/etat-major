@@ -200,7 +200,7 @@ describe('sauvegarde', () => {
     run(sim, 900, orders(sim));
     const save = sim.save();
     // Le passage par JSON est celui du fichier de sauvegarde.
-    const resumed = new Simulation({ ...economyConfig(options), saved: { owners: save.owners, state: JSON.parse(JSON.stringify(save.state)) } });
+    const resumed = new Simulation({ ...economyConfig(options), saved: { owners: save.owners, supply: save.supply, state: JSON.parse(JSON.stringify(save.state)) } });
     expect(resumed.stateHash()).toBe(sim.stateHash());
     run(sim, 900, orders(sim));
     run(resumed, 900, orders(resumed));

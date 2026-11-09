@@ -25,6 +25,8 @@ export interface FrontSideSnapshot {
   stance: Stance;
   force: number;
   captured: number;
+  /** Ravitaillement moyen de ses cellules de front, de 0 à 1. */
+  supply: number;
 }
 
 export interface NationSnapshot {
@@ -54,6 +56,8 @@ export interface EconomySnapshot {
   output: Float32Array;
   capacity: Float32Array;
   effort: Float32Array;
+  /** Par province : consolidation de l'occupant, de 0 à 1. */
+  consolidation: Float32Array;
 }
 
 export interface OffensiveSnapshot {
@@ -68,6 +72,8 @@ export interface OffensiveSnapshot {
   captured: number;
   /** Encore en mer. */
   inTransit: boolean;
+  /** Ravitaillement de son couloir, de 0 à 1. */
+  supply: number;
 }
 
 export interface PocketSnapshot {
@@ -129,6 +135,9 @@ export interface WorkerUpdate {
   provinces: Uint16Array;
   /** Paires (province, nouveau pays d'origine), après une annexion. */
   homes: Uint16Array;
+  /** Cellules dont le ravitaillement a changé, et leur nouvelle valeur (0 : plein). */
+  supplyCells: Uint32Array;
+  supplyValues: Uint8Array;
   events: SimEvent[];
   labels: NationLabel[];
   snapshot: SimSnapshot | null;
@@ -145,9 +154,11 @@ export interface WorkerSaved {
 
 export type FromWorker = WorkerUpdate | WorkerSaved;
 
-/** État complet de la simulation. Tout sauf `owners` passe tel quel par JSON. */
+/** État complet de la simulation. Tout sauf les grilles passe tel quel par JSON. */
 export interface SimSave {
   owners: Uint16Array;
+  /** Ravitaillement de chaque cellule, tel que le dernier calcul l'a laissé. */
+  supply: Uint8Array;
   state: SimSaveState;
 }
 
@@ -156,14 +167,15 @@ export interface SimSaveState {
   rngState: number;
   player: number;
   nextOffensiveId: number;
-  supplyDirty: boolean;
+  /** Un bit par groupe de nations à recalculer. */
+  supplyDirty: number;
   fronts: {
     a: number;
     b: number;
     length: number;
     logRatio: number;
     flipBudget: number;
-    sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number }[];
+    sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number; supply: number }[];
   }[];
   offensives: {
     id: number;
@@ -185,6 +197,9 @@ export interface SimSaveState {
     seaLoss: number;
     targetX: number;
     targetY: number;
+    supply: number;
+    supplySum: number;
+    supplyCount: number;
   }[];
   frontier: number[];
   sectors: number[];
@@ -199,7 +214,7 @@ export interface SimSaveState {
   provinceValue: number[];
   controller: number[];
   provinceCounts: ([number, number][] | null)[];
-  pocketList: number[];
+  pocketLists: number[][];
   pocketCounts: number[];
   pockets: PocketSnapshot[];
   landNeighbors: number[][];
@@ -210,4 +225,5 @@ export interface SimSaveState {
   effort: number[];
   effortTarget: number[];
   growth: number[];
+  consolidation: number[];
 }

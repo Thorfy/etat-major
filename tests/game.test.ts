@@ -67,10 +67,10 @@ describe('affichage', () => {
 
 describe("affichage de l'économie", () => {
   it('écrit les variations sans « −0 % »', () => {
-    expect(formatChange(-0.001, 0)).toBe('0 %');
-    expect(formatChange(0.0123)).toBe('+1,2 %');
-    expect(formatChange(-0.0151, 0)).toBe('-2 %');
-    expect(formatPercent(0.535)).toBe('54 %');
+    expect(formatChange(-0.001, 0)).toBe('0 %');
+    expect(formatChange(0.0123)).toBe('+1,2 %');
+    expect(formatChange(-0.0151, 0)).toBe('-2 %');
+    expect(formatPercent(0.535)).toBe('54 %');
   });
 
   it('teinte les provinces selon leur densité de PIB, pas leur taille', () => {

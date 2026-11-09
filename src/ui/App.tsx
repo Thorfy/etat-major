@@ -80,10 +80,11 @@ function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: Map
   const modes: { id: MapMode; label: string }[] = [
     { id: 'political', label: 'Pays' },
     { id: 'economic', label: 'Économie' },
+    { id: 'supply', label: 'Ravitaillement' },
   ];
   return (
     <div class="panel map-mode">
-      <div class="speeds" role="group" aria-label="Carte affichée (touche E)">
+      <div class="speeds" role="group" aria-label="Carte affichée (touches E et R)">
         {modes.map(({ id, label }) => (
           <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
             {label}
@@ -96,6 +97,14 @@ function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: Map
           <span>Rural</span>
           <span>Industriel</span>
           <small>PIB par km² de chaque province</small>
+        </div>
+      )}
+      {mode === 'supply' && (
+        <div class="legend">
+          <div class="ramp supply" role="img" aria-label="Du territoire coupé au territoire bien ravitaillé" />
+          <span>Coupé</span>
+          <span>Ravitaillé</span>
+          <small>Territoire conquis ; le sol national l'est toujours</small>
         </div>
       )}
     </div>
@@ -159,8 +168,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game && <Journal game={game} nameOf={nameOf} />}
       <div class="panel hints">
         {game
-          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E : carte économique · F3 : mesures'
-          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E : carte économique · F3 : mesures'}
+          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, R : cartes · F3 : mesures'
+          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, R : cartes · F3 : mesures'}
       </div>
       {selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
@@ -207,6 +216,22 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
             )}
             <dt>Superficie</dt>
             <dd>{integer.format(selected.areaKm2)} km²</dd>
+            {game && state.selected.supply < 1 && (
+              <>
+                <dt>Ravitaillement ici</dt>
+                <dd class={state.selected.supply < 0.4 ? 'behind' : ''}>{formatPercent(state.selected.supply)}</dd>
+              </>
+            )}
+            {economy && owner !== origin && (
+              <>
+                <dt>Consolidation</dt>
+                <dd>
+                  {game!.controllerOf(provinceId) === origin
+                    ? 'province pas encore tenue'
+                    : formatPercent(economy.consolidation[provinceId])}
+                </dd>
+              </>
+            )}
             <dt>Terrain ici</dt>
             <dd>{TERRAIN_NAMES[state.selected.terrain]}</dd>
             {origin !== owner && (

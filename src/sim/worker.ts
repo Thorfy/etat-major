@@ -44,7 +44,14 @@ function send(tickMs: number, withSnapshot: boolean, withEconomy = false): void 
     economy,
     tickMs,
   };
-  const transfer: Transferable[] = [changes.cells.buffer, changes.owners.buffer, changes.provinces.buffer, changes.homes.buffer];
+  const transfer: Transferable[] = [
+    changes.cells.buffer,
+    changes.owners.buffer,
+    changes.provinces.buffer,
+    changes.homes.buffer,
+    changes.supplyCells.buffer,
+    changes.supplyValues.buffer,
+  ];
   if (economy) transfer.push(...Object.values(economy).map((array: Float32Array) => array.buffer));
   scope.postMessage(update, transfer);
 }
@@ -87,7 +94,7 @@ scope.onmessage = (event) => {
   } else if (message.type === 'save') {
     if (!sim) return;
     const save = sim.save();
-    scope.postMessage({ type: 'saved', requestId: message.requestId, save }, [save.owners.buffer]);
+    scope.postMessage({ type: 'saved', requestId: message.requestId, save }, [save.owners.buffer, save.supply.buffer]);
   } else if (sim) {
     sim.apply(message.command);
     // En pause, le joueur doit voir tout de suite l'effet de ses ordres.

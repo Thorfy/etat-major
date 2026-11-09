@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "game-jalon-5",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:/Labs/risk-jalon-5", "run", "dev", "--", "--port", "5174", "--strictPort"],
+      "port": 5174
     }
   ]
 }

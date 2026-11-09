@@ -2,6 +2,7 @@ import { GAME_SPEEDS, type GameClient } from '../game/GameClient.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapView } from '../render/MapView.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
+import { LOW_SUPPLY } from '../game/GameClient.ts';
 import { effortEffect } from '../game/economy.ts';
 import { formatChange, formatClock, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
@@ -127,7 +128,12 @@ function OffensivesSection({ game, nations, view, aiming }: { game: GameClient; 
             <div class="offensive-row">
               <span>
                 {integer.format(offensive.force)}{' '}
-                <small>· {offensive.inTransit ? 'en mer' : `${integer.format(offensive.captured)} cellules prises`}</small>
+                <small>
+                  · {offensive.inTransit ? 'en mer' : `${integer.format(offensive.captured)} cellules prises`}
+                  {!offensive.inTransit && (
+                    <span class={offensive.supply < LOW_SUPPLY ? 'behind' : ''}> · ravitaillée à {formatPercent(offensive.supply)}</span>
+                  )}
+                </small>
               </span>
               <button class="close-inline" aria-label="Arrêter l'offensive et rendre ses forces à la réserve" onClick={() => game.cancelOffensive(offensive.id)}>
                 ×
@@ -209,6 +215,11 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
             <dd>{integer.format(own.force)} / {integer.format(theirs.force)}</dd>
             <dt>Adversaire</dt>
             <dd>{STANCE_STATUS[theirs.stance]}</dd>
+            <dt>Ravitaillement</dt>
+            <dd>
+              <span class={own.supply < LOW_SUPPLY ? 'behind' : ''}>{formatPercent(own.supply)}</span> /{' '}
+              <span class={theirs.supply < LOW_SUPPLY ? 'ahead' : ''}>{formatPercent(theirs.supply)}</span>
+            </dd>
             <dt>Longueur</dt>
             <dd>{integer.format(front.length)}</dd>
           </dl>

@@ -7,17 +7,20 @@ export function formatGdp(millions: number): string {
   return `${integer.format(millions)} M $`;
 }
 
+/** Espace insécable : un pourcentage ne se coupe jamais avant son signe. */
+const NBSP = ' ';
+
 export function formatPercent(share: number): string {
-  return `${integer.format(share * 100)} %`;
+  return `${integer.format(share * 100)}${NBSP}%`;
 }
 
 /** Variation signée, en pourcentage : « +1,2 % ». */
 export function formatChange(share: number, digits = 1): string {
   const rounded = Math.round(share * 100 * 10 ** digits) / 10 ** digits;
   // Pas de « −0 % » : une variation qui s'arrondit à zéro n'a pas de signe.
-  if (rounded === 0) return `${(0).toLocaleString('fr-FR', { minimumFractionDigits: digits })} %`;
+  if (rounded === 0) return `${(0).toLocaleString('fr-FR', { minimumFractionDigits: digits })}${NBSP}%`;
   const value = rounded.toLocaleString('fr-FR', { maximumFractionDigits: digits, minimumFractionDigits: digits });
-  return `${rounded > 0 ? '+' : ''}${value} %`;
+  return `${rounded > 0 ? '+' : ''}${value}${NBSP}%`;
 }
 
 export function formatClock(seconds: number): string {

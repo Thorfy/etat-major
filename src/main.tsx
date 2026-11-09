@@ -15,7 +15,7 @@ const MIN_FOCUS_SPAN = 160;
 async function start(): Promise<void> {
   message('Chargement de la carte…');
   const world = await loadWorld();
-  const noCell = { province: 0, owner: 0, terrain: 0 };
+  const noCell = { province: 0, owner: 0, terrain: 0, supply: 1 };
   const state: UiState = {
     hover: noCell,
     selected: noCell,
@@ -109,8 +109,10 @@ async function start(): Promise<void> {
   window.addEventListener('keydown', (event) => {
     const { target } = event;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
-    if (event.key.toLowerCase() === 'e' && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      setMapMode(state.mapMode === 'economic' ? 'political' : 'economic');
+    const key = event.key.toLowerCase();
+    if ((key === 'e' || key === 'r') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const mode = key === 'e' ? 'economic' : 'supply';
+      setMapMode(state.mapMode === mode ? 'political' : mode);
       return;
     }
     const game = state.game;
