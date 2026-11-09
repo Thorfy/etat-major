@@ -23,7 +23,8 @@ Choix par défaut, à confirmer :
 - **Aviation :** intégrée à la puissance militaire et aux doctrines.
 - **Micro-États :** ceux qui sont trop petits pour la grille sont rattachés à un voisin.
 - **Frontières contestées :** contrôle effectif, modifiable dans `data/map-config.json`.
-- **Nom :** « Risk » est provisoire et devra changer avant toute mise en ligne publique.
+- **Nom :** « État-major », choisi pour la mise en ligne. « Risk », le nom provisoire des
+  premiers jalons, est une marque déposée.
 
 ## Jalons
 

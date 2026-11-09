@@ -148,7 +148,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
   return (
     <>
       <div class="panel title">
-        <strong>Risk</strong> · titre provisoire
+        <strong>État-major</strong> · grande stratégie
       </div>
       <MapModeSwitch mode={state.mapMode} onMapMode={onMapMode} />
       {state.debug && <DebugOverlay view={view} game={game} />}

@@ -1,6 +1,8 @@
-# Risk (titre provisoire)
+# État-major
 
 Grande stratégie solo en temps réel sur la Terre moderne, dans un navigateur.
+
+Jouer en ligne : https://thorfy.github.io/etat-major/
 La feuille de route est dans [docs/PLAN.md](docs/PLAN.md).
 
 ## Lancer le jeu
