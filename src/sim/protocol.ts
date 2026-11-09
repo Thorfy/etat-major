@@ -3,13 +3,23 @@
 
 export type Stance = 'attack' | 'hold' | 'retreat';
 
+/** Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement). */
+export type BuildKind = 'factory' | 'infrastructure' | 'depot';
+
+export interface BuildOrder {
+  province: number;
+  kind: BuildKind;
+}
+
 export type SimCommand =
   | { type: 'declareWars'; pairs: [number, number][] }
   | { type: 'setFront'; nation: number; enemy: number; allocation: number; stance: Stance }
   | { type: 'launchOffensive'; nation: number; fromX: number; fromY: number; toX: number; toY: number; share: number }
   | { type: 'cancelOffensive'; nation: number; id: number }
   /** Effort de guerre voulu, de 0 à 1 : l'économie s'y reconvertit progressivement. */
-  | { type: 'setEffort'; nation: number; effort: number };
+  | { type: 'setEffort'; nation: number; effort: number }
+  | { type: 'build'; nation: number; province: number; kind: BuildKind }
+  | { type: 'cancelBuild'; nation: number; index: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -44,6 +54,21 @@ export interface NationSnapshot {
   effortTarget: number;
   /** Croissance du PIB par minute (négative : usure de l'économie de guerre). */
   growth: number;
+  /** Effort maximal que permet la stabilité. */
+  effortCap: number;
+  manpower: number;
+  manpowerMax: number;
+  /** Stabilité, de 0 à 1 : la lassitude de guerre la fait baisser. */
+  stability: number;
+  /** Part des besoins en pétrole et en acier couverte, de 0 à 1. */
+  oil: number;
+  steel: number;
+  /** Une marine ennemie bien plus forte coupe les importations par la mer. */
+  blockaded: boolean;
+  /** Points de construction par minute. */
+  construction: number;
+  /** File de chantiers (joueur seulement) ; seul le premier avance. */
+  builds: (BuildOrder & { cost: number; progress: number })[];
 }
 
 /** Économie du monde entier, envoyée moins souvent que le reste. */
@@ -58,6 +83,12 @@ export interface EconomySnapshot {
   effort: Float32Array;
   /** Par province : consolidation de l'occupant, de 0 à 1. */
   consolidation: Float32Array;
+  /** Par province : niveaux d'usine et d'infrastructure, et dépôt (0 ou 1). */
+  factories: Uint8Array;
+  infrastructure: Uint8Array;
+  depots: Uint8Array;
+  /** Par nation. */
+  stability: Float32Array;
 }
 
 export interface OffensiveSnapshot {
@@ -110,7 +141,7 @@ export interface WorkerInit {
   width: number;
   height: number;
   nations: { population: number; gdpMusd: number }[];
-  provinces: { nation: number; areaKm2: number; x: number; y: number; population: number; gdpMusd: number }[];
+  provinces: { nation: number; areaKm2: number; x: number; y: number; population: number; gdpMusd: number; oil: number; steel: number }[];
   provinceGrid: Uint16Array;
   ownerGrid: Uint16Array;
   terrainGrid: Uint8Array;
@@ -226,4 +257,20 @@ export interface SimSaveState {
   effortTarget: number[];
   growth: number[];
   consolidation: number[];
+  rawCapacity: number[];
+  provinceManpower: number[];
+  manpower: number[];
+  manpowerMax: number[];
+  armyAfterReinforce: number[];
+  losses: number[];
+  stability: number[];
+  oilCoverage: number[];
+  steelCoverage: number[];
+  blockaded: number[];
+  factories: number[];
+  infrastructure: number[];
+  depots: number[];
+  queues: BuildOrder[][];
+  buildProgress: number[];
+  constructionRate: number[];
 }

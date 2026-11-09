@@ -26,6 +26,10 @@ export interface ProvinceData {
   population: number;
   /** Part du PIB du pays, en millions de dollars US, estimée de la même façon. */
   gdpMusd: number;
+  /** Production de pétrole des gisements de la province (ordre de grandeur, Mb/j). */
+  oil: number;
+  /** Production d'acier (ordre de grandeur, dizaines de Mt/an). */
+  steel: number;
 }
 
 export interface WorldData {

@@ -23,12 +23,6 @@ export function formatChange(share: number, digits = 1): string {
   return `${rounded > 0 ? '+' : ''}${value}${NBSP}%`;
 }
 
-export function formatClock(seconds: number): string {
-  const total = Math.floor(seconds);
-  const minutes = Math.floor(total / 60);
-  return `${minutes}:${String(total % 60).padStart(2, '0')}`;
-}
-
 const MAX_SHOWN_RATIO = 20;
 
 /** Rapport de force lisible, toujours exprimé du côté du joueur. */

@@ -7,7 +7,8 @@ import type { CellInfo, MapMode, MapView } from '../render/MapView.ts';
 import type { SimEvent } from '../sim/protocol.ts';
 import { FrontsPanel } from './FrontsPanel.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
-import { formatClock, formatGdp, formatPercent, integer } from './format.ts';
+import { formatDuration, formatShortDate } from '../game/time.ts';
+import { formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
   hover: CellInfo;
@@ -66,7 +67,7 @@ function Journal({ game, nameOf }: { game: GameClient; nameOf(id: number): strin
     <section class="panel journal" aria-label="Événements du monde">
       {lines.map((event) => (
         <p key={`${event.type}-${event.tick}-${event.type === 'war' ? event.a * 1000 + event.b : event.loser}`} class={involvesPlayer(event) ? 'mine' : ''}>
-          <time>{formatClock(event.tick / 10)}</time>{' '}
+          <time>{formatShortDate(event.tick)}</time>{' '}
           {event.type === 'war'
             ? `Guerre : ${nameOf(event.a)} et ${nameOf(event.b)}`
             : `${nameOf(event.loser)} capitule devant ${nameOf(event.winner)}`}
@@ -96,7 +97,7 @@ function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: Map
           <div class="ramp" role="img" aria-label="Du plus pauvre au plus riche" />
           <span>Rural</span>
           <span>Industriel</span>
-          <small>PIB par km² de chaque province</small>
+          <small>PIB par km² · goutte : pétrole · carré : acier</small>
         </div>
       )}
       {mode === 'supply' && (
@@ -117,7 +118,7 @@ function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): 
       <section class="panel dialog" role="alertdialog" aria-labelledby="defeat-title">
         <h2 id="defeat-title">{nameOf(game.player)} a capitulé</h2>
         <p>
-          {nameOf(game.defeatedBy)} annexe tout ce qu'il te restait, après {formatClock(game.elapsedSeconds)} de guerre.
+          {nameOf(game.defeatedBy)} annexe tout ce qu'il te restait, après {formatDuration(game.tick)} de partie.
         </p>
         <button class="action" onClick={() => window.location.reload()}>
           Retour au menu
@@ -154,7 +155,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game ? (
         <FrontsPanel game={game} nations={nations} view={view} aiming={state.aiming} />
       ) : (
-        <SetupPanel nations={nations} onStart={onStart} onResume={onResume} />
+        <SetupPanel nations={nations} picked={state.selected.owner} onStart={onStart} onResume={onResume} />
       )}
       {hovered && (
         <div class="panel hover">
@@ -171,7 +172,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
           ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, R : cartes · F3 : mesures'
           : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, R : cartes · F3 : mesures'}
       </div>
-      {selected && holder && (
+      {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
           <button class="close" aria-label="Fermer" onClick={() => view.select()}>
             ×
@@ -190,6 +191,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
                 <dd>{integer.format(game!.nationEconomy(owner).capacity)}</dd>
                 <dt>Effort de guerre</dt>
                 <dd>{formatPercent(game!.nationEconomy(owner).effort)}</dd>
+                <dt>Stabilité</dt>
+                <dd>{formatPercent(economy.stability[owner])}</dd>
               </>
             ) : (
               <>
@@ -232,6 +235,30 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
                 </dd>
               </>
             )}
+            {(selected.oil > 0 || selected.steel > 0) && (
+              <>
+                <dt>Gisements</dt>
+                <dd>
+                  {[selected.oil > 0 ? `pétrole ${selected.oil}` : '', selected.steel > 0 ? `acier ${selected.steel}` : '']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </dd>
+              </>
+            )}
+            {economy && (economy.factories[provinceId] > 0 || economy.infrastructure[provinceId] > 0 || economy.depots[provinceId] > 0) && (
+              <>
+                <dt>Bâtiments</dt>
+                <dd>
+                  {[
+                    economy.factories[provinceId] ? `usines ${economy.factories[provinceId]}` : '',
+                    economy.infrastructure[provinceId] ? `infrastructure ${economy.infrastructure[provinceId]}` : '',
+                    economy.depots[provinceId] ? 'dépôt' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </dd>
+              </>
+            )}
             <dt>Terrain ici</dt>
             <dd>{TERRAIN_NAMES[state.selected.terrain]}</dd>
             {origin !== owner && (
@@ -241,6 +268,25 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
               </>
             )}
           </dl>
+          {game && game.buildOptions(provinceId).length > 0 && (
+            <div class="build-options">
+              <h3>Bâtir ici</h3>
+              {game.buildOptions(provinceId).map((option) => (
+                <button
+                  key={option.kind}
+                  class="action quiet"
+                  disabled={option.reason !== ''}
+                  title={option.reason || undefined}
+                  onClick={() => game.build(provinceId, option.kind)}
+                >
+                  {option.label} · {integer.format(option.cost)} pts
+                </button>
+              ))}
+              {game.buildOptions(provinceId).some((option) => option.reason) && (
+                <p class="front-note">{game.buildOptions(provinceId).find((option) => option.reason)!.reason}</p>
+              )}
+            </div>
+          )}
           {game?.canDeclareWar(owner) && (
             <button class="action" onClick={() => game.declareWar(owner)}>
               Déclarer la guerre : {holder.name}

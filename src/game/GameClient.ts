@@ -2,8 +2,19 @@
 import { areLandNeighbors, findLandNeighbors } from '../map/adjacency.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import type { MapView } from '../render/MapView.ts';
-import { DEFAULT_OFFENSIVE_SHARE, MAX_OFFENSIVES_PER_NATION, OFFENSIVE_MIN_FORCE, TICKS_PER_SECOND } from '../sim/balance.ts';
+import {
+  BUILD_COST,
+  DEFAULT_OFFENSIVE_SHARE,
+  GAME_SPEEDS,
+  DEPOT_MIN_CONSOLIDATION,
+  MAX_BUILD_QUEUE,
+  MAX_FACTORY_LEVEL,
+  MAX_INFRASTRUCTURE_LEVEL,
+  MAX_OFFENSIVES_PER_NATION,
+  OFFENSIVE_MIN_FORCE,
+} from '../sim/balance.ts';
 import type {
+  BuildKind,
   EconomySnapshot,
   FromWorker,
   FrontSnapshot,
@@ -30,12 +41,21 @@ export interface FrontOrder {
   stance: Stance;
 }
 
-export const GAME_SPEEDS = [1, 2, 4] as const;
+export { GAME_SPEEDS, SPEED_LABELS } from '../sim/balance.ts';
 const MESSAGE_MS = 3500;
 const AUTOSAVE_MS = 120_000;
 const JOURNAL_SIZE = 40;
 /** En dessous, une offensive est signalée comme à bout de ravitaillement. */
 export const LOW_SUPPLY = 0.4;
+
+export interface BuildOption {
+  kind: BuildKind;
+  label: string;
+  /** Points de construction. */
+  cost: number;
+  /** Vide si le chantier est possible, sinon la raison du refus. */
+  reason: string;
+}
 
 export interface GameStart {
   player: number;
@@ -54,8 +74,8 @@ export class GameClient {
   maxTickMs = 0;
   flipsPerSecond = 0;
   error: string | null = null;
-  /** 0 = pause. */
-  speed = 1;
+  /** 0 = pause, sinon un multiple de la cadence de base (voir GAME_SPEEDS). */
+  speed: number = GAME_SPEEDS[0];
   offensiveShare = DEFAULT_OFFENSIVE_SHARE;
   message: string | null = null;
   journal: SimEvent[] = [];
@@ -86,7 +106,7 @@ export class GameClient {
   private frontCount = 0;
   private flipsWindow = 0;
   private windowStart = performance.now();
-  private speedBeforePause = 1;
+  private speedBeforePause: number = GAME_SPEEDS[0];
   private messageTimer = 0;
   private readonly mapHash: number;
 
@@ -125,7 +145,16 @@ export class GameClient {
       width: world.data.width,
       height: world.data.height,
       nations: world.data.nations.map(({ population, gdpMusd }) => ({ population, gdpMusd })),
-      provinces: world.data.provinces.map(({ nation, areaKm2, x, y, population, gdpMusd }) => ({ nation, areaKm2, x, y, population, gdpMusd })),
+      provinces: world.data.provinces.map(({ nation, areaKm2, x, y, population, gdpMusd, oil, steel }) => ({
+        nation,
+        areaKm2,
+        x,
+        y,
+        population,
+        gdpMusd,
+        oil,
+        steel,
+      })),
       provinceGrid,
       ownerGrid,
       terrainGrid,
@@ -268,8 +297,12 @@ export class GameClient {
     }
   }
 
-  get elapsedSeconds(): number {
-    return (this.snapshot?.tick ?? 0) / TICKS_PER_SECOND;
+  get tick(): number {
+    return this.snapshot?.tick ?? 0;
+  }
+
+  get worldData() {
+    return this.world.data;
   }
 
   get playerStats(): NationSnapshot | undefined {
@@ -357,6 +390,64 @@ export class GameClient {
     this.effortOrder = effort;
     this.command({ type: 'setEffort', nation: this.player, effort });
     this.onChange();
+  }
+
+  /**
+   * Ce que le joueur peut bâtir dans une province, et pourquoi pas sinon. Reprend les règles
+   * de la simulation, qui ignorerait l'ordre sans rien dire.
+   */
+  buildOptions(province: number): BuildOption[] {
+    const economy = this.economy;
+    if (!economy || !this.canCommand || province <= 0) return [];
+    if (this.controllers[province] !== this.player) return [];
+    const national = this.homeOf(province) === this.player;
+    const queue = this.playerStats?.builds ?? [];
+    const queued = (kind: BuildKind) => queue.filter((order) => order.province === province && order.kind === kind).length;
+    const full = queue.length >= MAX_BUILD_QUEUE ? `File pleine (${MAX_BUILD_QUEUE} chantiers).` : '';
+    const options: BuildOption[] = [];
+    if (national) {
+      const level = economy.factories[province] + queued('factory');
+      options.push({
+        kind: 'factory',
+        label: `Usine, niveau ${level + 1}`,
+        cost: BUILD_COST.factory * (level + 1),
+        reason: full || (level >= MAX_FACTORY_LEVEL ? `Niveau maximal (${MAX_FACTORY_LEVEL}).` : ''),
+      });
+    }
+    const roads = economy.infrastructure[province] + queued('infrastructure');
+    options.push({
+      kind: 'infrastructure',
+      label: `Infrastructure, niveau ${roads + 1}`,
+      cost: BUILD_COST.infrastructure * (roads + 1),
+      reason: full || (roads >= MAX_INFRASTRUCTURE_LEVEL ? `Niveau maximal (${MAX_INFRASTRUCTURE_LEVEL}).` : ''),
+    });
+    if (!national) {
+      const consolidated = economy.consolidation[province] >= DEPOT_MIN_CONSOLIDATION;
+      options.push({
+        kind: 'depot',
+        label: 'Dépôt',
+        cost: BUILD_COST.depot,
+        reason:
+          full ||
+          (economy.depots[province] || queued('depot') ? 'Un dépôt est déjà là ou en chantier.' : '') ||
+          (!consolidated ? `Province consolidée à ${Math.round(DEPOT_MIN_CONSOLIDATION * 100)} % au moins.` : ''),
+      });
+    }
+    return options;
+  }
+
+  /** Pays d'origine actuel d'une province (il change après une annexion). */
+  homeOf(province: number): number {
+    return this.view.homeOf(province);
+  }
+
+  build(province: number, kind: BuildKind): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'build', nation: this.player, province, kind });
+  }
+
+  cancelBuild(index: number): void {
+    this.command({ type: 'cancelBuild', nation: this.player, index });
   }
 
   setOffensiveShare(share: number): void {

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { rebalance } from '../src/game/allocation.ts';
 import { areLandNeighbors, findLandNeighbors } from '../src/map/adjacency.ts';
 import { effortEffect, provinceWealth } from '../src/game/economy.ts';
-import { formatChange, formatClock, formatPercent, formatRatio } from '../src/ui/format.ts';
+import { formatDate, formatDuration, formatShortDate } from '../src/game/time.ts';
+import { formatChange, formatPercent, formatRatio } from '../src/ui/format.ts';
 
 const total = (map: Map<number, number>) => [...map.values()].reduce((a, b) => a + b, 0);
 
@@ -60,8 +61,13 @@ describe('affichage', () => {
   });
 
   it('formate le temps écoulé', () => {
-    expect(formatClock(0)).toBe('0:00');
-    expect(formatClock(92.7)).toBe('1:32');
+    // Une minute de simulation (600 ticks) vaut une semaine, à partir du 1er janvier 2026.
+    expect(formatDate(0)).toBe('1 janvier 2026');
+    expect(formatDate(600 * 10)).toBe('12 mars 2026');
+    expect(formatShortDate(600 * 52)).toBe('31 déc. 26');
+    expect(formatDuration(600 * 3)).toBe('3 semaines');
+    expect(formatDuration(600 * 30)).toBe('7 mois');
+    expect(formatDuration(600 * 130)).toBe('2 ans et 6 mois');
   });
 });
 

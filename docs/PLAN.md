@@ -10,7 +10,7 @@ Une partie dure 1 à 2 h, avec pause, vitesse réglable et sauvegarde.
 | Monde | Terre réelle, époque moderne, ton neutre (les pays sont un plateau de jeu) |
 | Carte | Hybride : provinces pour la logique, grille de pixels pour le front continu |
 | Guerre | Pression abstraite, sans divisions : curseurs par front + flèches d'offensive |
-| Systèmes | Économie, logistique, diplomatie, technologies et doctrines, nucléaire |
+| Systèmes | Économie et arrière, logistique, défense planifiée, diplomatie, technologies et doctrines, nucléaire |
 | Fin de partie | Bac à sable, avec classement mondial |
 | Technique | TypeScript, Vite, WebGL2, simulation dans un Web Worker, hébergement statique |
 | Style | Carte d'état-major sobre |
@@ -35,9 +35,175 @@ Choix par défaut, à confirmer :
 | 3 | Monde entier, IA, capitulations, sauvegarde, traversées maritimes de base | Première partie complète jouable |
 | 4 | Économie et industrie | Conquérir une région industrielle change le rapport de force |
 | 5 | Logistique et ravitaillement détaillés | Une percée trop profonde s'essouffle |
-| 6 | Diplomatie, alliances, tension mondiale | Une coalition se forme contre un pays trop expansionniste |
-| 7 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
-| 8 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
+| 6 | L'arrière : chantiers, main-d'œuvre, lassitude de guerre, ressources stratégiques | Attaquer en boucle épuise le pays ; bâtir à l'arrière pèse sur la guerre |
+| 7 | Défense planifiée : lignes fortifiées, réserve de contre-attaque, priorités par secteur | Une défense préparée arrête une attaque qui aurait percé sans elle |
+| 8 | Diplomatie : trêves et paix, alliances, tension mondiale, séparatismes | Une coalition se forme contre un pays trop expansionniste ; une région à bout fait sécession |
+| 9 | Commerce : échanges entre pays et entre régions, axes commerciaux | Un axe tracé enrichit les régions qu'il traverse ; couper une route commerciale affaiblit l'ennemi |
+| 10 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
+| 11 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
+
+Les jalons 6 et 7 ont été ajoutés après le jalon 5, à la demande du joueur : il manquait des
+décisions à l'intérieur du pays et pour préparer la défense, au-delà d'attaquer en boucle.
+Le commerce (jalon 9) et les séparatismes (dans la diplomatie) ont été demandés pendant le
+jalon 6 :
+
+- **Séparatismes :** un pays dont la situation devient intenable (stabilité au plus bas,
+  économie ruinée) voit des régions faire sécession et se battre contre lui. Ils viennent avec
+  la diplomatie, qui apporte aussi les trêves : sans elles, une sécession ne finirait jamais.
+  Pistes : ressusciter un pays annexé, ou découper un grand pays selon ses régions.
+- **Commerce :** des échanges entre pays et entre régions, et des axes tracés par le joueur
+  (routes, voies ferrées, lignes maritimes) qui enrichissent les régions traversées. Il
+  remplace le marché mondial abstrait des ressources. Il suit la diplomatie, dont dépendent
+  les accords commerciaux et les embargos.
+
+Corrections ajoutées au jalon 6, à la demande du joueur : une IA qui n'attaque plus seulement
+les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauvegardes mises à
+jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
+normale, et le temps se compte en dates).
+
+## État du jalon 6
+
+Terminé : attaquer en boucle épuise le pays. Dans les duels scriptés, l'Allemagne qui lance
+une offensive toutes les 30 s gagne 1 003 et 887 cellules en 20 min, puis s'effondre et finit à
+−2 802 et −879 à 30 min. Ses pertes ont vidé son réservoir d'hommes et sa stabilité. La même
+Allemagne qui n'attaque qu'une fois par minute garde ses gains. **Le test de plaisir reste
+ouvert** : personne n'a encore joué à la main.
+
+**Main-d'œuvre.** Les renforts puisent dans un réservoir d'hommes, tiré de la population des
+provinces nationales tenues (10 % pour les provinces occupées). Il vaut 1,2 fois la capacité
+militaire de départ, et se reconstitue de 3 % de son maximum par minute. Les pertes ne
+reviennent pas, les démobilisés si. Un réservoir vide ne renforce plus l'armée.
+
+**Lassitude de guerre.** Chaque nation a une stabilité, à 80 % au départ :
+
+- **Ce qui la fait baisser :** la guerre (0,5 point par minute, plus avec un effort élevé), les
+  pertes (20 points pour des pertes égales à tout le réservoir) et l'occupation du territoire
+  national (jusqu'à 4 points par minute).
+- **Ce qui la remonte :** la paix, vers 85 % ; une capitulation adverse rapporte 10 points.
+- **Ses effets :** sous 80 %, l'effort de guerre possible baisse (jusqu'à 30 % à stabilité nulle),
+  et la nation capitule plus tôt (jusqu'à 50 % de son territoire perdu au lieu de 75 %).
+- **Résistance :** une province occupée non consolidée coûte une garnison à l'occupant
+  (20 % de sa valeur) au lieu de lui rapporter. Conquérir ne paie qu'une fois consolidé.
+
+**Ressources stratégiques.** 39 gisements de pétrole et 40 bassins sidérurgiques, placés à la
+main en ordres de grandeur (`data/map-config.json`, `resources`), rattachés à 78 provinces.
+
+- **Besoins :** le monde consomme 80 % de ce qu'il produit, en pétrole selon l'armée, en acier
+  selon le PIB.
+- **Importations :** 70 % des besoins par la mer, 40 % par la terre seule (pays enclavé ou sous
+  blocus). Une marine ennemie au moins deux fois plus forte impose un blocus.
+- **Effets :** sans pétrole, l'armée ne garde que 60 % de sa capacité ; sans acier, chantiers et
+  croissance ne gardent que 40 % de leur rythme. Un gisement occupé rapporte la moitié de sa
+  production à l'occupant.
+- **Au départ :** un pays sans gisement couvre 70 % de son pétrole. La France perd ainsi 12 % de
+  capacité face à l'Arabie saoudite, et la perte s'aggrave sous blocus.
+
+**Chantiers.** La part civile de l'économie produit des points de construction : 2 × racine du
+PIB en milliards × (1 − effort), soit environ 50 par minute pour la France à 50 %. Un seul
+chantier avance à la fois, dans une file de 6 au plus.
+
+| Bâtiment | Où | Effet | Coût |
+|---|---|---|---|
+| Usine, 3 niveaux | Sol national | +15 % de valeur militaire et de PIB de la province par niveau | 200 × niveau |
+| Infrastructure, 3 niveaux | Toute province tenue | −20 % de coût de transport par niveau | 120 × niveau |
+| Dépôt | Province occupée, consolidée à 50 % | Ravitaille sa province comme le sol national | 150 |
+
+Une province prise au combat perd un niveau d'usine et d'infrastructure, et son dépôt. L'IA
+bâtit des usines dans ses provinces les plus riches, de l'infrastructure, et des dépôts derrière
+ses conquêtes.
+
+**Correction de la logistique du jalon 5.** Une cellule tout juste conquise gardait jusqu'à 2 s
+la valeur « pleinement ravitaillée », en attendant le contrôle de son groupe. La pointe d'une
+percée, faite de ces cellules, échappait donc en partie à l'essoufflement. Elle hérite
+désormais tout de suite du ravitaillement de sa meilleure voisine.
+
+**Interface.** La section Économie montre la main-d'œuvre, la stabilité, la couverture en
+pétrole et en acier (et le blocus), les points de construction et la file de chantiers, que l'on
+peut annuler. La fiche d'une province donne ses gisements, ses bâtiments, et des boutons
+« Bâtir ici » avec leur coût, ou la raison d'un refus. La carte économique montre les gisements :
+goutte noire pour le pétrole, carré d'acier pour l'acier.
+
+**Mesures.**
+
+| Mesure | Résultat |
+|---|---|
+| Monde sans joueur, 60 min, deux graines | 138 et 140 nations sur 193 |
+| Stabilité moyenne des pays en guerre | 0,73 à 10 min, 0,57 à 30 min, 0,32 à 0,36 à 60 min |
+| Réservoir moyen des pays en guerre | 73 % à 10 min, 30 % à 60 min |
+| Usines bâties par l'IA en 60 min | Environ 380 niveaux |
+| Pire cas, guerre mondiale, 10 min | Médiane 7,1 ms, p99 60 ms, **max 75 ms** (inchangé) |
+| Sauvegarde, après 60 min | 543 et 621 Ko de JSON avant compression |
+| Navigateur | Usine bâtie depuis la fiche, file, carte des gisements ; reprise identique, file comprise |
+| Tests | 114 réussis, dont 11 sur l'arrière et 1 sur les dépôts |
+
+**Duels de 30 min sur la vraie carte, le reste du monde jouant aussi** (gain du joueur en
+cellules, deux graines ; entre parenthèses, le jalon 5) :
+
+| Stratégie du joueur | France contre IA allemande | Allemagne contre IA française |
+|---|---|---|
+| Tient à 100 %, sans réserve | −88 et −191 (−397 et −1 111) | −68 et 0 (−57 et 0) |
+| Tient à 60 %, sans offensive | −1 336 et −1 326 (−2 420 et −2 673) | −275 et −32 (−378 et −290) |
+| Attaque à 100 % | Capitule en 23 et 24 min (−1 491 et −1 674) | −47 et −45 (−7 et −56) |
+| Tient à 60 %, une offensive par minute | −2 038, capitule en 28 min (capitule en 26) | +596 et +118 (+97 et +63) |
+| Tient à 40 %, offensives toutes les 30 s | Capitule en 10 min (12 et 14) | +1 003 et +887 à 20 min, puis −2 802 et −879 |
+| Effort à 100 %, une offensive par minute | Capitule en 20 min, et −2 088 (−1 085 et −127) | +1 107 et +1 281 (+1 468 et +1 150) |
+
+Tenir paie davantage, attaquer sans relâche coûte bien plus cher. La France reste le camp
+faible : les scripts n'utilisent ni les chantiers ni les dépôts, et à effort maximal la lassitude
+la rattrape vite.
+
+Points à reprendre :
+
+- **Lassitude à éprouver par un joueur.** Une France à effort maximal qui attaque chaque minute
+  capitule en 20 min dans une partie. Si c'est trop dur à la main : usure par minute de guerre,
+  poids des pertes, plafond d'effort.
+- **La richesse des pays épargnés s'emballe :** sur 60 min, le Japon en paix gagne jusqu'à 93 %
+  de PIB, l'Allemagne 56 à 69 %. Usines et croissance s'additionnent sans frein en paix.
+- **Pas de paix possible :** la lassitude hâte les capitulations, mais une guerre ne finit
+  toujours que par l'une d'elles. La diplomatie (jalon 8) devra offrir une sortie.
+- **Gisements approximatifs,** placés à la main ; pas de commerce entre pays, les importations
+  viennent d'un marché mondial abstrait.
+- **Côte connue au départ seulement :** un pays qui perd toutes ses côtes importe encore par la
+  mer, et un pays enclavé qui en conquiert une n'y gagne rien.
+
+### Corrections demandées pendant le jalon 6
+
+**L'IA n'attaquait presque jamais les grands pays.** Ce n'était pas propre au joueur : sur deux
+parties d'une heure sans joueur, les 10 pays les plus puissants subissaient 0 à 0,1 attaque
+chacun, contre 0,5 à 0,6 pour les petits. Une IA n'attaque qu'un voisin au moins 1,2 fois plus
+faible, et un grand pays en a peu. Désormais, l'IA compare sa capacité à la force qu'un voisin
+peut vraiment lui opposer : sa capacité, moins ce qu'il engage déjà sur d'autres fronts (un
+quart au moins reste), réduite jusqu'à moitié s'il est las et de 40 % au plus s'il est à court
+d'hommes. Un pays en paix et en forme reste rarement attaqué ; un pays occupé ailleurs ou
+épuisé devient une proie, joueur compris. Mesuré sur les mêmes parties : 0,1 à 0,2 attaque pour
+les 10 premiers, et la France attaquée deux fois dans l'une d'elles. Une variante qui retenait la
+plus belle occasion parmi plusieurs pays doublait le nombre de guerres (157 au lieu de 86) au
+profit des gros contre les tout petits : écartée.
+
+**Choisir son pays sur la carte.** Au menu, un clic sur un pays le choisit, et le panneau montre
+sa population, son PIB et sa superficie. La fiche de province n'apparaît plus au menu, où elle
+cachait ce panneau.
+
+**Sauvegardes d'une version à l'autre.** Une sauvegarde plus ancienne est mise à jour au
+chargement au lieu d'être refusée : sa forme est convertie (en-tête du fichier, liste des poches,
+champs du ravitaillement), et ce qu'une version ne connaissait pas encore (économie,
+ravitaillement, arrière) prend les valeurs d'une partie neuve. Les provinces déjà annexées
+gardent seulement leur part annexée de PIB et d'hommes. Seule une sauvegarde d'une version plus
+récente, ou jouée sur une autre carte, reste refusée. Testé sur des fichiers des versions 1 à 3
+reconstitués.
+
+**Gestion du temps.** L'ancien ×4 devient la vitesse normale : ×1, ×2 et ×4 font désormais 40,
+80 et 160 ticks par seconde (mesuré dans le navigateur : 40, 81 et 159). Le temps se compte en
+dates, à partir du 1er janvier 2026 : **une minute de simulation vaut une semaine**. Tous les
+rythmes « par minute » de ce plan sont donc des rythmes par semaine (croissance, chantiers,
+main-d'œuvre, lassitude), et l'interface les affiche ainsi. À vitesse normale, une semaine passe
+en 15 s et une heure de jeu couvre un peu plus de quatre ans. Le répit du joueur passe à
+12 semaines, soit 3 min à vitesse normale. Le Worker n'envoie plus que 10 états complets par
+seconde, quelle que soit la vitesse.
+
+Conséquence à suivre : à vitesse normale, le monde évolue quatre fois plus vite qu'avant en temps
+réel. Les mesures « 60 min » des jalons précédents valent donc 60 semaines de jeu, soit environ
+15 min de jeu réelles à ×1.
 
 ## État du jalon 5
 
@@ -215,9 +381,8 @@ Points à reprendre :
   les zones industrielles sans grande ville et compte les agglomérations qui débordent sur
   plusieurs provinces. 43 villes tombent hors de toute province, et les pays sans ville connue
   répartissent tout selon la surface habitable.
-- **Pas de commerce ni de ressources :** le PIB ne dépend que du territoire et de l'effort.
-  Pétrole, blocus et échanges ne sont pas venus avec la logistique du jalon 5. Ils pourraient
-  venir avec la diplomatie (jalon 6).
+- **Pas de commerce ni de ressources :** pétrole, acier et blocus sont venus au jalon 6. Le
+  commerce entre pays reste à faire, peut-être avec la diplomatie (jalon 8).
 - **La richesse va aux pays épargnés.** Sur 60 min, les États-Unis, souvent en guerre, perdent
   19 % de PIB, quand le Japon en paix en gagne 44 %. C'est voulu, mais il n'y a encore aucun
   frein à la croissance d'un pays en paix. La Russie garde ses 23 % de terres.

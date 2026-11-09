@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'preact/hooks';
 import { type SaveSlot, type StoredSave, listSaves } from '../game/saves.ts';
 import type { NationData } from '../map/types.ts';
-import { formatClock } from './format.ts';
+import { formatDate } from '../game/time.ts';
+import { formatGdp, integer } from './format.ts';
 
 interface SetupProps {
   nations: NationData[];
+  /** Pays cliqué sur la carte : il devient le pays choisi. */
+  picked: number;
   onStart(player: number): void;
   onResume(slot: SaveSlot): void;
 }
@@ -14,8 +17,12 @@ const SLOT_NAMES: Record<SaveSlot, string> = { auto: 'Sauvegarde automatique', m
 const savedDate = (time: number) =>
   new Date(time).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-export function SetupPanel({ nations, onStart, onResume }: SetupProps) {
+export function SetupPanel({ nations, picked, onStart, onResume }: SetupProps) {
   const [player, setPlayer] = useState(nations.findIndex((nation) => nation.code === 'FRA') + 1);
+  useEffect(() => {
+    if (picked > 0) setPlayer(picked);
+  }, [picked]);
+  const chosen = nations[player - 1];
   const [saves, setSaves] = useState<StoredSave[]>([]);
   useEffect(() => {
     void listSaves().then(setSaves);
@@ -32,7 +39,7 @@ export function SetupPanel({ nations, onStart, onResume }: SetupProps) {
           <h2>Continuer</h2>
           {saves.map(({ slot, meta }) => (
             <button key={slot} class="save-entry" onClick={() => onResume(slot)}>
-              <b>{meta.playerName}</b> · {formatClock(meta.tick / 10)}
+              <b>{meta.playerName}</b> · {formatDate(meta.tick)}
               <small>
                 {SLOT_NAMES[slot]} · {savedDate(meta.savedAt)}
               </small>
@@ -51,6 +58,15 @@ export function SetupPanel({ nations, onStart, onResume }: SetupProps) {
           ))}
         </select>
       </label>
+      <p class="setup-note">Ou clique sur un pays de la carte.</p>
+      <dl class="setup-facts">
+        <dt>Population</dt>
+        <dd>{integer.format(chosen.population)}</dd>
+        <dt>PIB</dt>
+        <dd>{formatGdp(chosen.gdpMusd)}</dd>
+        <dt>Superficie</dt>
+        <dd>{integer.format(chosen.areaKm2)} km²</dd>
+      </dl>
       <p class="setup-note">Tu commences en paix. Le reste du monde, lui, n'attendra pas.</p>
       <button class="action" onClick={() => onStart(player)}>
         Commencer

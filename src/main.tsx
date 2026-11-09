@@ -65,9 +65,10 @@ async function start(): Promise<void> {
     try {
       const stored = await readSave(slot);
       if (!stored) throw new Error('sauvegarde introuvable.');
-      if (stored.meta.version !== SAVE_VERSION) throw new Error('elle vient d\'une autre version du jeu.');
+      if (stored.meta.version > SAVE_VERSION) throw new Error('elle vient d\'une version plus récente du jeu.');
       if (stored.meta.mapHash !== mapHashOf(world)) throw new Error('elle a été jouée sur une autre carte.');
-      const saved = await decodeSave(stored.blob, world.data.width * world.data.height);
+      // Une sauvegarde d'une version précédente est mise à jour au chargement.
+      const saved = await decodeSave(stored.blob, world.data.width * world.data.height, stored.meta.version);
       launch({ player: stored.meta.player, seed: 1, saved });
     } catch (error) {
       state.startError = `Reprise impossible : ${error instanceof Error ? error.message : String(error)}`;
@@ -105,6 +106,11 @@ async function start(): Promise<void> {
   // Avant la partie, la carte économique montre la richesse de départ.
   const gdp = [0, ...world.data.provinces.map((province) => province.gdpMusd)];
   view.setEconomy(provinceWealth(world.data.provinces.map((province) => province.areaKm2), gdp));
+  view.setResourceMarkers(
+    world.data.provinces
+      .filter((province) => province.oil > 0 || province.steel > 0)
+      .map(({ x, y, oil, steel }) => ({ x, y, oil, steel })),
+  );
 
   window.addEventListener('keydown', (event) => {
     const { target } = event;

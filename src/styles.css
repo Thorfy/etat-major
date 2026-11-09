@@ -535,6 +535,24 @@ canvas {
   font-weight: 400;
 }
 
+.setup-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 12px;
+  margin: 8px 0;
+}
+
+.setup-facts dt {
+  color: var(--ink-soft);
+}
+
+.setup-facts dd {
+  margin: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
 .setup-note {
   margin: 0;
   color: var(--ink-soft);
@@ -729,6 +747,25 @@ canvas {
 
 .economy dd small {
   font-size: 12px;
+}
+
+.builds {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.builds li {
+  margin-bottom: 6px;
+}
+
+.build-options h3 {
+  margin-top: 12px;
+}
+
+.build-options .action {
+  margin-top: 6px;
+  text-align: left;
 }
 
 .economy .front-note {

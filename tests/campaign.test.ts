@@ -355,7 +355,9 @@ describe('capacité militaire', () => {
     const kept = [5, 6, 7, 8].filter((province) => sim.controllerOf(province) === B);
     const sum = (provinces: number[]) => provinces.reduce((total, province) => total + sim.development[province] * value, 0);
     expect(capacity(sim, B)).toBeCloseTo(sum(kept) + sum(lost) * 0.35, 6);
-    expect(capacity(sim, A)).toBeCloseTo(startA + sum(lost) * 0.12, 6);
+    // L'occupant paie une garnison tant que la province n'est pas consolidée.
+    const occupied = lost.reduce((total, province) => total + sim.development[province] * value * (0.12 - 0.2 * (1 - sim.consolidation[province])), 0);
+    expect(capacity(sim, A)).toBeCloseTo(startA + occupied, 6);
 
     for (let t = 0; t < 40000 && sim.controllerOf(5) !== B; t++) {
       sim.setFront(A, B, 0, 'retreat');
@@ -384,7 +386,8 @@ describe('IA', () => {
   it('lance des offensives contre un joueur immobile', () => {
     const sim = makeSim({ player: A, ai: true, seed: 5 });
     sim.declareWars([[A, B]]);
-    sim.setFront(A, B, 1, 'hold');
+    // Un joueur qui engage tout met l'IA en sous-nombre : elle n'a alors plus de réserve.
+    sim.setFront(A, B, 0.5, 'hold');
     let launched = false;
     for (let t = 0; t < 6000 && !launched; t++) {
       sim.step();

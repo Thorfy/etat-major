@@ -553,6 +553,8 @@ const provinces: ProvinceData[] = order.map((e) => ({
   areaKm2: 0,
   population: 0,
   gdpMusd: 0,
+  oil: 0,
+  steel: 0,
 }));
 const nationOfCell = new Uint16Array(W * H);
 const nationCells = new Uint32Array(nationList.length);
@@ -686,6 +688,7 @@ const terrainGrid = new Uint16Array(W * H);
 // ---------------------------------------------------------------------------
 
 const cityPopulation = new Float64Array(provinces.length);
+const depositPlaces: string[] = [];
 const habitable = new Float64Array(provinces.length);
 let unplacedCities = 0;
 {
@@ -703,13 +706,13 @@ let unplacedCities = 0;
   }
   // Une ville côtière peut tomber dans l'eau de la grille : on prend la terre la plus proche.
   const radius: number = economy.citySearchRadiusCells;
-  const provinceAt = (cx: number, cy: number): number => {
+  const provinceAt = (cx: number, cy: number, reach = radius): number => {
     let best = 0;
     let bestDistance = Infinity;
-    for (let dy = -radius; dy <= radius; dy++) {
+    for (let dy = -reach; dy <= reach; dy++) {
       const y = cy + dy;
       if (y < 0 || y >= H) continue;
-      for (let dx = -radius; dx <= radius; dx++) {
+      for (let dx = -reach; dx <= reach; dx++) {
         const id = grid[y * W + ((cx + dx + W) % W)];
         const distance = dx * dx + dy * dy;
         if (id !== 0 && distance < bestDistance) {
@@ -747,6 +750,20 @@ let unplacedCities = 0;
     province.population = Math.round(nationList[n].population * share(economy.ruralPopulationShare));
     province.gdpMusd = Math.round(nationList[n].gdpMusd * share(economy.ruralGdpShare) * 10) / 10;
   });
+
+  // Ressources stratégiques : chaque gisement rejoint la province qui le porte, ou la
+  // province côtière la plus proche s'il est en mer.
+  type Deposit = { name: string; at: [number, number]; output: number };
+  const resources = config.resources as { searchRadiusCells: number; oil: Deposit[]; steel: Deposit[] };
+  for (const kind of ['oil', 'steel'] as const) {
+    for (const deposit of resources[kind]) {
+      const [lon, lat] = deposit.at;
+      const id = provinceAt(Math.floor(lonToX(lon)) % W, Math.floor(latToY(lat)), resources.searchRadiusCells);
+      if (id === 0) throw new Error(`Gisement hors de toute province : ${deposit.name}`);
+      provinces[id - 1][kind] = Math.round((provinces[id - 1][kind] + deposit.output) * 10) / 10;
+      depositPlaces.push(`${deposit.name} → ${provinces[id - 1].name} (${nationList[provinces[id - 1].nation].code})`);
+    }
+  }
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -798,6 +815,15 @@ for (const [code, reference] of Object.entries(REFERENCE_KM2)) {
     const total = own.reduce((sum, p) => sum + p.gdpMusd, 0);
     console.log(`  ${code} : ${own.slice(0, 4).map((p) => `${p.name} ${((p.gdpMusd / total) * 100).toFixed(0)} %`).join(', ')}`);
   }
+}
+{
+  const total = (kind: 'oil' | 'steel') => {
+    const byNation = new Map<string, number>();
+    for (const p of provinces) if (p[kind] > 0) byNation.set(nationData[p.nation].code, (byNation.get(nationData[p.nation].code) ?? 0) + p[kind]);
+    return [...byNation].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([code, value]) => `${code} ${value.toFixed(1)}`).join(', ');
+  };
+  console.log(`
+Ressources : ${depositPlaces.length} gisements. Pétrole : ${total('oil')}. Acier : ${total('steel')}`);
 }
 const smallest = [...nationData].sort((a, b) => a.cells - b.cells).slice(0, 12);
 console.log(`\nPlus petites nations : ${smallest.map((n) => `${n.name} (${n.cells})`).join(', ')}`);

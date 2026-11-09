@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SAVE_VERSION, decodeSave, encodeSave, hashGrid } from '../src/game/saveFormat.ts';
+import { encodeRle } from '../src/map/codec.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
 import { traceRoute } from '../src/sim/route.ts';
 
@@ -513,10 +514,71 @@ describe('sauvegarde', () => {
       labels: [],
     };
     const blob = await encodeSave({ meta, sim: sim.save() });
-    const decoded = await decodeSave(blob, sim.owners.length);
+    const decoded = await decodeSave(blob, sim.owners.length, SAVE_VERSION);
     expect(decoded.meta).toEqual(meta);
     const resumed = new Simulation({ ...config(), saved: decoded.sim });
     expect(resumed.stateHash()).toBe(sim.stateHash());
+  });
+
+  it('met à jour et reprend les sauvegardes des versions précédentes', async () => {
+    const sim = new Simulation(config());
+    play(sim, 800);
+    const current = sim.save();
+    // Ce que chaque version a ajouté à l'état de la simulation.
+    const added: Record<number, string[]> = {
+      2: ['provinceGdp', 'development', 'effort', 'effortTarget', 'growth'],
+      3: ['consolidation'],
+      4: [
+        'rawCapacity', 'provinceManpower', 'manpower', 'manpowerMax', 'armyAfterReinforce', 'losses', 'stability',
+        'oilCoverage', 'steelCoverage', 'blockaded', 'factories', 'infrastructure', 'depots', 'queues', 'buildProgress',
+        'constructionRate',
+      ],
+    };
+    const gzip = async (parts: BlobPart[]) =>
+      new Blob([await new Response(new Blob(parts).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()]);
+    for (const version of [1, 2, 3]) {
+      const state = JSON.parse(JSON.stringify(current.state));
+      for (let later = version + 1; later <= 4; later++) for (const key of added[later] ?? []) delete state[key];
+      if (version < 3) {
+        // Avant la version 3 : poches en une seule liste, indicateur booléen, pas de ravitaillement.
+        state.pocketList = state.pocketLists.flat();
+        delete state.pocketLists;
+        state.supplyDirty = true;
+        for (const front of state.fronts) for (const side of front.sides) delete side.supply;
+        for (const offensive of state.offensives) {
+          delete offensive.supply;
+          delete offensive.supplySum;
+          delete offensive.supplyCount;
+        }
+      }
+      const meta = { version, mapHash: 0, player: 1, playerName: 'Test', tick: sim.tick, savedAt: 1, offensiveShare: 0.7, journal: [], labels: [] };
+      const json = new TextEncoder().encode(JSON.stringify({ meta, state }));
+      const rle = encodeRle(current.owners) as Uint16Array<ArrayBuffer>;
+      const supplyRle = encodeRle(Uint16Array.from(current.supply)) as Uint16Array<ArrayBuffer>;
+      const blob = await gzip(
+        version >= 3
+          ? [new Uint32Array([json.length, rle.length, supplyRle.length]), json, rle, supplyRle]
+          : [new Uint32Array([json.length, rle.length]), json, rle],
+      );
+
+      const decoded = await decodeSave(blob, sim.owners.length, version);
+      expect(decoded.meta.version).toBe(SAVE_VERSION);
+      const resumed = new Simulation({ ...config(), saved: decoded.sim });
+      expect(resumed.tick).toBe(sim.tick);
+      expect(resumed.owners).toEqual(sim.owners);
+      // La partie continue sans erreur, avec une armée et une capacité cohérentes.
+      play(resumed, 600);
+      for (const nation of [A, B]) {
+        if (!resumed.isAlive(nation)) continue;
+        expect(resumed.capacityOf(nation)).toBeGreaterThan(0);
+        expect(Number.isFinite(resumed.armyOf(nation))).toBe(true);
+        expect(resumed.manpowerOf(nation)).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('refuse une sauvegarde d\'une version plus récente', async () => {
+    await expect(decodeSave(new Blob([]), 10, SAVE_VERSION + 1)).rejects.toThrow(/plus récente/);
   });
 });
 

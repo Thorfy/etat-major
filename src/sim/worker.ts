@@ -1,6 +1,6 @@
 // Fait tourner la simulation hors du fil principal, à cadence fixe.
 import { Simulation } from './Simulation.ts';
-import { ADJACENCY_INTERVAL_TICKS, TICKS_PER_SECOND } from './balance.ts';
+import { ADJACENCY_INTERVAL_TICKS, GAME_SPEEDS, TICKS_PER_SECOND } from './balance.ts';
 import type { FromWorker, ToWorker, WorkerUpdate } from './protocol.ts';
 
 const scope = self as unknown as {
@@ -9,16 +9,17 @@ const scope = self as unknown as {
 };
 
 const BASE_TICK_MS = 1000 / TICKS_PER_SECOND;
-const MAX_CATCH_UP_TICKS = 3;
-const SNAPSHOT_EVERY = 2;
+const MAX_CATCH_UP_TICKS = 4;
+/** L'interface n'a pas besoin de plus de 10 états complets par seconde, quelle que soit la vitesse. */
+const SNAPSHOT_MS = 100;
 /** L'économie du monde change lentement : toutes les 5 s de jeu. */
 const ECONOMY_EVERY_TICKS = 50;
 
 let sim: Simulation | null = null;
-let speed = 1;
+let speed: number = GAME_SPEEDS[0];
+let lastSnapshot = 0;
 let last = 0;
 let accumulated = 0;
-let updates = 0;
 let lastLabelTick = 0;
 let lastEconomyTick = -Infinity;
 
@@ -75,8 +76,9 @@ function loop(): void {
   // Trop de retard (onglet ralenti) : on abandonne le temps perdu plutôt que de courir après.
   if (accumulated > tickMs * MAX_CATCH_UP_TICKS) accumulated = 0;
   if (steps > 0) {
-    updates++;
-    send((performance.now() - begin) / steps, updates % SNAPSHOT_EVERY === 0);
+    const snapshot = now - lastSnapshot >= SNAPSHOT_MS;
+    if (snapshot) lastSnapshot = now;
+    send((performance.now() - begin) / steps, snapshot);
   }
 }
 
@@ -98,6 +100,6 @@ scope.onmessage = (event) => {
   } else if (sim) {
     sim.apply(message.command);
     // En pause, le joueur doit voir tout de suite l'effet de ses ordres.
-    send(0, true, message.command.type === 'setEffort');
+    send(0, true, message.command.type === 'setEffort' || message.command.type === 'build' || message.command.type === 'cancelBuild');
   }
 };

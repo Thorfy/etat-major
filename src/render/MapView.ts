@@ -7,7 +7,7 @@ import { traceRoute } from '../sim/route.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
-import { type ArrowDraft, drawCampaign } from './Overlay.ts';
+import { type ArrowDraft, type ResourceMarker, drawCampaign, drawResources } from './Overlay.ts';
 
 const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
@@ -53,6 +53,7 @@ export class MapView {
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private readonly keys = new Set<string>();
   private mode: MapMode = 'political';
+  private resourceMarkers: ResourceMarker[] = [];
 
   private dpr = 1;
   private dirty = true;
@@ -126,6 +127,12 @@ export class MapView {
     this.dirty = true;
   }
 
+  /** Gisements de pétrole et d'acier, montrés sur la carte économique. */
+  setResourceMarkers(markers: ResourceMarker[]): void {
+    this.resourceMarkers = markers;
+    if (this.mode === 'economic') this.dirty = true;
+  }
+
   /** Richesse de chaque province, pour la carte économique. */
   setEconomy(wealth: Uint8Array): void {
     this.renderer.updateEconomy(wealth);
@@ -136,6 +143,11 @@ export class MapView {
     if (cells.length === 0) return;
     this.renderer.updateSupply(cells, values);
     if (this.mode === 'supply') this.dirty = true;
+  }
+
+  /** Pays d'origine actuel d'une province, tel que la carte l'affiche. */
+  homeOf(province: number): number {
+    return this.renderer.homeOf(province);
   }
 
   applyHomeChanges(pairs: Uint16Array): void {
@@ -418,6 +430,7 @@ export class MapView {
         selectedOwner: this.selectedOwner,
       });
       this.labels.draw(this.camera);
+      if (this.mode === 'economic') drawResources(this.labels.context, this.camera, this.resourceMarkers);
       if (this.player !== 0) {
         drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
       }

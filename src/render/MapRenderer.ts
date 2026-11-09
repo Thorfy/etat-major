@@ -137,6 +137,10 @@ export class MapRenderer {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.homes.length, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, this.homes);
   }
 
+  homeOf(province: number): number {
+    return this.homes[province];
+  }
+
   updateHomes(pairs: Uint16Array): void {
     for (let i = 0; i < pairs.length; i += 2) this.homes[pairs[i]] = pairs[i + 1];
     this.uploadHomes();

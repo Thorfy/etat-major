@@ -87,6 +87,27 @@ function worldGame(durationMinutes: number, seed: number) {
         .map((entry) => `${entry.name} ${(entry.output / 1e6).toFixed(1)} Bn (${entry.output >= entry.start ? '+' : ''}${((entry.output / entry.start - 1) * 100).toFixed(0)} %)`);
       console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
       console.log(`         PIB : ${richest.join(', ')}`);
+      let atWar = 0;
+      let stabilitySum = 0;
+      let manpowerSum = 0;
+      let factories = 0;
+      let blockaded = 0;
+      const warring = new Set<number>();
+      for (const front of sim.fronts) {
+        warring.add(front.a);
+        warring.add(front.b);
+      }
+      for (let n = 1; n <= world.nations.length; n++) {
+        if (!sim.isAlive(n)) continue;
+        if (warring.has(n)) {
+          atWar++;
+          stabilitySum += sim.stabilityOf(n);
+          manpowerSum += sim.manpowerOf(n) / Math.max(1, sim.manpowerMaxOf(n));
+        }
+        if (sim.isBlockaded(n)) blockaded++;
+      }
+      for (let p = 1; p < sim.factories.length; p++) factories += sim.factories[p];
+      console.log(`         Arrière : ${atWar} nations en guerre, stabilité moyenne ${atWar ? (stabilitySum / atWar).toFixed(2) : '-'}, réservoir moyen ${atWar ? ((manpowerSum / atWar) * 100).toFixed(0) : '-'} %, ${blockaded} sous blocus, ${factories} niveaux d'usine bâtis`);
     }
   }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);

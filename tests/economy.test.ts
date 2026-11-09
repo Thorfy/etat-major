@@ -88,6 +88,11 @@ describe('valeur des provinces', () => {
     const balanceAfterTaking = (richFirst: boolean) => {
       const sim = makeEconomy({ richFirst });
       takeProvince5(sim);
+      // Une conquête ne rapporte pleinement qu'une fois consolidée : plus de garnison à payer.
+      run(sim, 2000, () => {
+        sim.setFront(A, B, 1, 'hold');
+        sim.setFront(B, A, 1, 'hold');
+      });
       return sim.capacityOf(A) / sim.capacityOf(B);
     };
     const rich = balanceAfterTaking(true);

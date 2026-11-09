@@ -2,6 +2,12 @@
 // l'économie au jalon 4.
 
 export const TICKS_PER_SECOND = 10;
+/**
+ * Vitesses de jeu, en multiples de TICKS_PER_SECOND, affichées ×1, ×2 et ×4. La vitesse
+ * normale fait 40 ticks par seconde réelle : une semaine de jeu toutes les 15 s.
+ */
+export const GAME_SPEEDS = [4, 8, 16] as const;
+export const SPEED_LABELS = ['×1', '×2', '×4'] as const;
 
 /** Probabilité maximale par tick qu'une cellule de front bascule. */
 export const MAX_FLIP_CHANCE = 0.02;
@@ -109,8 +115,16 @@ export const WAR_CHANCE = 0.5;
 /** Nombre maximal de guerres en cours, en part des nations encore en vie. */
 export const MAX_WAR_SHARE = 0.2;
 export const WAR_CAPACITY_RATIO = 1.2;
-/** Répit du joueur en début de partie. */
-export const PLAYER_GRACE_TICKS = 1800;
+/**
+ * L'IA juge la force qu'un voisin peut vraiment lui opposer : ce qu'il engage déjà sur
+ * d'autres fronts n'en fait pas partie (sans descendre sous ce plancher), et un pays las ou à
+ * court d'hommes pèse moins.
+ */
+export const MIN_FREE_FORCE_SHARE = 0.25;
+export const WEARY_STRENGTH = 0.5;
+export const DRAINED_STRENGTH = 0.4;
+/** Répit du joueur en début de partie : 12 semaines, environ 3 min à vitesse normale. */
+export const PLAYER_GRACE_TICKS = 7200;
 export const ADJACENCY_INTERVAL_TICKS = 600;
 /**
  * Voisinages par la terre puis par la mer, chacun sur un tick à part, choisi pour ne
@@ -226,3 +240,71 @@ export function baseCapacity(population: number, gdpMusd: number): number {
   const populationMillions = Math.max(0.05, population / 1e6);
   return 10 * Math.sqrt(gdpBillions) * populationMillions ** 0.25;
 }
+
+// ---------------------------------------------------------------------------
+// L'arrière (jalon 6).
+// ---------------------------------------------------------------------------
+
+// Main-d'œuvre : les renforts puisent dans un réservoir d'hommes que les pertes vident.
+/** Réservoir maximal, en part de la capacité militaire de départ portée par la population. */
+export const MANPOWER_RATIO = 1.2;
+/** Le réservoir se reconstitue de cette part de son maximum par minute. */
+export const MANPOWER_REGEN_PER_MINUTE = 0.03;
+/** Une province occupée fournit cette part de ses hommes à l'occupant. */
+export const OCCUPIED_MANPOWER = 0.1;
+
+// Lassitude de guerre : la stabilité baisse avec la guerre, les pertes et l'occupation.
+export const START_STABILITY = 0.8;
+/** En paix, la stabilité remonte vers ce niveau. */
+export const PEACE_STABILITY = 0.85;
+export const STABILITY_RECOVERY_PER_MINUTE = 0.02;
+/** Usure par minute de guerre, multipliée par 0,5 + effort de guerre. */
+export const WAR_WEARINESS_PER_MINUTE = 0.005;
+/** Stabilité perdue pour des pertes égales à tout le réservoir de main-d'œuvre. */
+export const CASUALTY_WEARINESS = 0.2;
+/** Usure par minute si tout le territoire national est occupé (au prorata sinon). */
+export const OCCUPATION_WEARINESS_PER_MINUTE = 0.04;
+/** Stabilité gagnée par le vainqueur d'une capitulation. */
+export const VICTORY_STABILITY = 0.1;
+/**
+ * Effort de guerre possible au plus : tout tant que la stabilité reste à son niveau de départ,
+ * puis de moins en moins, jusqu'à ce réglage à stabilité nulle.
+ */
+export const MIN_EFFORT_CAP = 0.3;
+/** Une nation instable capitule plus tôt : jusqu'à ce supplément de seuil à stabilité nulle. */
+export const UNREST_CAPITULATION = 0.25;
+/** Résistance : une province occupée non consolidée coûte cette part de sa valeur à l'occupant. */
+export const GARRISON_COST = 0.2;
+
+// Ressources stratégiques.
+/** Le monde produit plus qu'il ne consomme : les besoins valent cette part de la production. */
+export const RESOURCE_NEED_RATIO = 0.8;
+/** Part des besoins importable : par la mer, ou par la terre seule (pays enclavé ou bloqué). */
+export const SEA_IMPORT_SHARE = 0.7;
+export const LAND_IMPORT_SHARE = 0.4;
+/** Une marine ennemie au moins ce nombre de fois plus forte impose un blocus. */
+export const BLOCKADE_RATIO = 2;
+/** Part de la production d'un gisement occupé qui revient à l'occupant. */
+export const OCCUPIED_RESOURCES = 0.5;
+/** Sans pétrole, l'armée ne garde que cette part de sa capacité. */
+export const OIL_SHORTAGE_FLOOR = 0.6;
+/** Sans acier, chantiers et croissance ne gardent que cette part de leur rythme. */
+export const STEEL_SHORTAGE_FLOOR = 0.4;
+
+// Chantiers : la part civile de l'économie bâtit, province par province.
+/** Points de construction par minute : ce réglage × racine du PIB en Md$ × (1 − effort). */
+export const CONSTRUCTION_PER_MINUTE = 2;
+export const MAX_BUILD_QUEUE = 6;
+export const MAX_FACTORY_LEVEL = 3;
+export const MAX_INFRASTRUCTURE_LEVEL = 3;
+/** Coût d'un chantier, multiplié par le niveau visé pour les usines et l'infrastructure. */
+export const BUILD_COST = { factory: 200, infrastructure: 120, depot: 150 } as const;
+/** Chaque niveau d'usine ajoute cette part à la valeur et au PIB de la province. */
+export const FACTORY_BONUS = 0.15;
+/** Chaque niveau d'infrastructure retire cette part au coût de transport de la province. */
+export const INFRASTRUCTURE_BONUS = 0.2;
+/** Un dépôt se bâtit dans une province occupée, consolidée au moins à ce point. */
+export const DEPOT_MIN_CONSOLIDATION = 0.5;
+/** Chance qu'une IA lance un chantier à chacune de ses décisions, si sa file est courte. */
+export const AI_BUILD_CHANCE = 0.3;
+export const AI_MAX_QUEUE = 2;

@@ -56,6 +56,46 @@ function drawArrow(
   ctx.setLineDash([]);
 }
 
+export interface ResourceMarker {
+  x: number;
+  y: number;
+  oil: number;
+  steel: number;
+}
+
+/** Gisements, sur la carte économique : goutte noire pour le pétrole, carré d'acier pour l'acier. */
+export function drawResources(ctx: CanvasRenderingContext2D, camera: Camera, markers: readonly ResourceMarker[]): void {
+  const { viewWidth, viewHeight, zoom } = camera;
+  for (const marker of markers) {
+    const x = wrapDeltaX(camera.x, marker.x) * zoom + viewWidth / 2;
+    const y = (marker.y - camera.y) * zoom + viewHeight / 2;
+    if (x < -20 || x > viewWidth + 20 || y < -20 || y > viewHeight + 20) continue;
+    const both = marker.oil > 0 && marker.steel > 0;
+    if (marker.oil > 0) {
+      const r = Math.min(9, 3 + Math.sqrt(marker.oil) * 2);
+      const cx = both ? x - r * 0.8 : x;
+      ctx.beginPath();
+      ctx.moveTo(cx, y - r * 1.6);
+      ctx.bezierCurveTo(cx + r * 1.1, y - r * 0.2, cx + r, y + r, cx, y + r);
+      ctx.bezierCurveTo(cx - r, y + r, cx - r * 1.1, y - r * 0.2, cx, y - r * 1.6);
+      ctx.fillStyle = 'rgba(24, 22, 20, 0.92)';
+      ctx.fill();
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(232, 226, 208, 0.9)';
+      ctx.stroke();
+    }
+    if (marker.steel > 0) {
+      const r = Math.min(8, 3 + Math.sqrt(marker.steel) * 0.9);
+      const cx = both ? x + r * 0.9 : x;
+      ctx.fillStyle = 'rgba(126, 146, 160, 0.95)';
+      ctx.fillRect(cx - r, y - r, r * 2, r * 2);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = 'rgba(24, 22, 20, 0.9)';
+      ctx.strokeRect(cx - r, y - r, r * 2, r * 2);
+    }
+  }
+}
+
 export function drawCampaign(
   ctx: CanvasRenderingContext2D,
   camera: Camera,

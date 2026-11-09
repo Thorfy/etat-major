@@ -4,6 +4,39 @@ import { findLandNeighbors } from '../map/adjacency.ts';
 import { distanceToBoundary } from '../map/distance.ts';
 import {
   ADJACENCY_INTERVAL_TICKS,
+  AI_BUILD_CHANCE,
+  AI_MAX_QUEUE,
+  BLOCKADE_RATIO,
+  BUILD_COST,
+  CASUALTY_WEARINESS,
+  CONSTRUCTION_PER_MINUTE,
+  DEPOT_MIN_CONSOLIDATION,
+  FACTORY_BONUS,
+  GARRISON_COST,
+  INFRASTRUCTURE_BONUS,
+  LAND_IMPORT_SHARE,
+  MANPOWER_RATIO,
+  MANPOWER_REGEN_PER_MINUTE,
+  MAX_BUILD_QUEUE,
+  MAX_FACTORY_LEVEL,
+  MAX_INFRASTRUCTURE_LEVEL,
+  MIN_EFFORT_CAP,
+  MIN_FREE_FORCE_SHARE,
+  DRAINED_STRENGTH,
+  WEARY_STRENGTH,
+  OCCUPATION_WEARINESS_PER_MINUTE,
+  OCCUPIED_MANPOWER,
+  OCCUPIED_RESOURCES,
+  OIL_SHORTAGE_FLOOR,
+  PEACE_STABILITY,
+  RESOURCE_NEED_RATIO,
+  SEA_IMPORT_SHARE,
+  STABILITY_RECOVERY_PER_MINUTE,
+  START_STABILITY,
+  STEEL_SHORTAGE_FLOOR,
+  UNREST_CAPITULATION,
+  VICTORY_STABILITY,
+  WAR_WEARINESS_PER_MINUTE,
   LAND_NEIGHBORS_TICK,
   SEA_NEIGHBORS_TICK,
   AI_MIN_LAUNCH_SUPPLY,
@@ -112,6 +145,8 @@ import {
   baseNavy,
 } from './balance.ts';
 import type {
+  BuildKind,
+  BuildOrder,
   EconomySnapshot,
   FrontSnapshot,
   NationLabel,
@@ -119,6 +154,7 @@ import type {
   SimCommand,
   SimEvent,
   SimSave,
+  SimSaveState,
   SimSnapshot,
   Stance,
 } from './protocol.ts';
@@ -132,7 +168,16 @@ export interface SimConfig {
    * Le propriétaire initial d'une province est `nation + 1`. Sans population ni PIB,
    * la valeur d'une province suit la racine de sa surface.
    */
-  provinces: { nation: number; areaKm2: number; x: number; y: number; population?: number; gdpMusd?: number }[];
+  provinces: {
+    nation: number;
+    areaKm2: number;
+    x: number;
+    y: number;
+    population?: number;
+    gdpMusd?: number;
+    oil?: number;
+    steel?: number;
+  }[];
   provinceGrid: Uint16Array;
   /** Carte de départ, copiée : la simulation possède sa propre grille. */
   ownerGrid: Uint16Array;
@@ -255,6 +300,7 @@ export class Simulation {
   private readonly controller: Uint16Array;
   private readonly provinceCounts: (Map<number, number> | null)[];
   private capacityDirty = false;
+  private hasCoast: Uint8Array = new Uint8Array(0);
   /** Vrai pendant une annexion : les provinces changent de mains sans destructions. */
   private peacefulTransfer = false;
   private readonly demobilized: Float64Array;
@@ -272,6 +318,37 @@ export class Simulation {
   private readonly output: Float64Array;
   /** Croissance du PIB courant, par minute (négative en cas d'usure). */
   private readonly growth: Float64Array;
+  /** Capacité militaire avant l'effet du pétrole, qui sert aussi à mesurer le besoin. */
+  private readonly rawCapacity: Float64Array;
+
+  // L'arrière.
+  /** Hommes que chaque province apporte au réservoir de son pays. */
+  private readonly provinceManpower: Float64Array;
+  private readonly manpower: Float64Array;
+  private readonly manpowerMax: Float64Array;
+  /** Armée de chaque nation juste après les renforts du tick précédent : mesure des pertes. */
+  private readonly armyAfterReinforce: Float64Array;
+  /** Pertes accumulées depuis le dernier passage de l'économie. */
+  private readonly losses: Float64Array;
+  private readonly stability: Float64Array;
+  private readonly provinceOil: Float64Array;
+  private readonly provinceSteel: Float64Array;
+  /** Besoin en pétrole par point de capacité, et en acier par million de dollars de PIB. */
+  private oilPerCapacity = 0;
+  private steelPerOutput = 0;
+  /** Part des besoins couverte, de 0 à 1. */
+  private readonly oilCoverage: Float64Array;
+  private readonly steelCoverage: Float64Array;
+  private readonly blockaded: Uint8Array;
+  /** Bâtiments de chaque province. */
+  readonly factories: Uint8Array;
+  readonly infrastructure: Uint8Array;
+  readonly depots: Uint8Array;
+  /** Chantiers en file, par nation ; le premier avance. */
+  private queues: BuildOrder[][];
+  private readonly buildProgress: Float64Array;
+  /** Points de construction par minute, pour l'affichage. */
+  private readonly constructionRate: Float64Array;
 
   // Ravitaillement.
   private readonly landCells: Int32Array;
@@ -373,6 +450,24 @@ export class Simulation {
     for (let n = 1; n < this.stride; n++) this.temperament[n] = (this.random() * 2 - 1) * AI_EFFORT_SPREAD;
     this.output = new Float64Array(this.stride);
     this.growth = new Float64Array(this.stride);
+    this.rawCapacity = new Float64Array(this.stride);
+    this.provinceManpower = new Float64Array(provinceCount);
+    this.manpower = new Float64Array(this.stride);
+    this.manpowerMax = new Float64Array(this.stride);
+    this.armyAfterReinforce = new Float64Array(this.stride).fill(-1);
+    this.losses = new Float64Array(this.stride);
+    this.stability = new Float64Array(this.stride).fill(START_STABILITY);
+    this.provinceOil = new Float64Array(provinceCount);
+    this.provinceSteel = new Float64Array(provinceCount);
+    this.oilCoverage = new Float64Array(this.stride).fill(1);
+    this.steelCoverage = new Float64Array(this.stride).fill(1);
+    this.blockaded = new Uint8Array(this.stride);
+    this.factories = new Uint8Array(provinceCount);
+    this.infrastructure = new Uint8Array(provinceCount);
+    this.depots = new Uint8Array(provinceCount);
+    this.queues = Array.from({ length: this.stride }, () => []);
+    this.buildProgress = new Float64Array(this.stride);
+    this.constructionRate = new Float64Array(this.stride);
     this.demobilized = new Float64Array(this.stride);
 
     let land = 0;
@@ -423,15 +518,41 @@ export class Simulation {
       const weight = VALUE_GDP_WEIGHT * gdp + (1 - VALUE_GDP_WEIGHT) * population;
       this.provinceValue[index + 1] = baseCapacity(nation.population, nation.gdpMusd) * weight;
       this.provinceGdp[index + 1] = gdpTotal[n] > 0 ? (province.gdpMusd ?? 0) : nation.gdpMusd * gdp;
+      this.provinceManpower[index + 1] = baseCapacity(nation.population, nation.gdpMusd) * population * MANPOWER_RATIO;
+      this.provinceOil[index + 1] = province.oil ?? 0;
+      this.provinceSteel[index + 1] = province.steel ?? 0;
     });
+    // Besoins : le monde consomme une part de ce qu'il produit, chaque pays selon son armée
+    // (pétrole) et son industrie (acier).
+    let worldOil = 0;
+    let worldSteel = 0;
+    for (let p = 1; p < provinceCount; p++) {
+      worldOil += this.provinceOil[p];
+      worldSteel += this.provinceSteel[p];
+    }
     this.recomputeCapacity();
+    let worldCapacity = 0;
+    let worldOutput = 0;
+    for (let n = 1; n < this.stride; n++) {
+      worldCapacity += this.rawCapacity[n];
+      worldOutput += this.output[n];
+    }
+    this.oilPerCapacity = worldCapacity > 0 ? (RESOURCE_NEED_RATIO * worldOil) / worldCapacity : 0;
+    this.steelPerOutput = worldOutput > 0 ? (RESOURCE_NEED_RATIO * worldSteel) / worldOutput : 0;
+    this.recomputeManpower();
+    this.manpower.set(this.manpowerMax);
 
     const hasCoast = new Uint8Array(this.stride);
     for (let k = 0; k < this.coastCells.length; k++) hasCoast[this.owners[this.coastCells[k]]] = 1;
     for (let n = 1; n < this.stride; n++) {
-      this.reserve[n] = this.capacity[n] * INITIAL_MOBILIZATION;
       this.alive[n] = this.cellCounts[n] > 0 ? 1 : 0;
       this.navy[n] = hasCoast[n] ? baseNavy(config.nations[n - 1].gdpMusd) : 0;
+    }
+    this.hasCoast = hasCoast;
+    this.updateResources();
+    this.recomputeCapacity();
+    for (let n = 1; n < this.stride; n++) {
+      this.reserve[n] = this.capacity[n] * INITIAL_MOBILIZATION;
     }
     if (this.aiEnabled) this.refreshNeighbors();
     if (config.saved) this.restore(config.saved);
@@ -498,6 +619,34 @@ export class Simulation {
     return this.effort[nation];
   }
 
+  manpowerOf(nation: number): number {
+    return this.manpower[nation];
+  }
+
+  manpowerMaxOf(nation: number): number {
+    return this.manpowerMax[nation];
+  }
+
+  stabilityOf(nation: number): number {
+    return this.stability[nation];
+  }
+
+  oilCoverageOf(nation: number): number {
+    return this.oilCoverage[nation];
+  }
+
+  steelCoverageOf(nation: number): number {
+    return this.steelCoverage[nation];
+  }
+
+  isBlockaded(nation: number): boolean {
+    return this.blockaded[nation] === 1;
+  }
+
+  buildQueueOf(nation: number): readonly BuildOrder[] {
+    return this.queues[nation];
+  }
+
   isAlive(nation: number): boolean {
     return this.alive[nation] === 1;
   }
@@ -546,6 +695,12 @@ export class Simulation {
         break;
       case 'setEffort':
         this.setEffort(command.nation, command.effort);
+        break;
+      case 'build':
+        this.build(command.nation, command.province, command.kind);
+        break;
+      case 'cancelBuild':
+        this.cancelBuild(command.nation, command.index);
         break;
     }
   }
@@ -742,6 +897,7 @@ export class Simulation {
         this.decideAllocations();
         this.decideOffensives();
         this.decideEfforts();
+        this.decideBuilds();
       }
     }
     if (this.tick % ECONOMY_INTERVAL_TICKS === 0) this.updateEconomy();
@@ -993,17 +1149,36 @@ export class Simulation {
     const nation = living[Math.floor(this.random() * living.length)];
     if (this.fronts.some((front) => front.a === nation || front.b === nation)) return;
 
+    // Un voisin occupé ailleurs, las ou à court d'hommes pèse moins : il devient une proie.
     const pick = (candidates: number[]) => {
       const weak = candidates.filter((other) => {
         if (!this.alive[other]) return false;
         if (other === this.player && this.tick < PLAYER_GRACE_TICKS) return false;
-        return this.capacity[nation] >= this.capacity[other] * WAR_CAPACITY_RATIO;
+        return this.capacity[nation] >= this.availableStrength(other) * WAR_CAPACITY_RATIO;
       });
       return weak.length > 0 ? weak[Math.floor(this.random() * weak.length)] : 0;
     };
     const land = pick(this.landNeighbors[nation]);
     const enemy = land !== 0 ? land : this.navy[nation] > 0 ? pick(this.seaNeighbors[nation]) : 0;
     if (enemy !== 0) this.declareWars([[nation, enemy]]);
+  }
+
+  /**
+   * Force qu'une nation peut opposer à un nouvel ennemi : sa capacité, moins ce qu'elle
+   * engage déjà ailleurs, réduite si elle est lasse ou à court d'hommes. Un pays occupé sur un
+   * autre front, ou épuisé, devient une proie, joueur compris.
+   */
+  availableStrength(nation: number): number {
+    let engaged = 0;
+    for (const front of this.fronts) {
+      if (front.a === nation) engaged += front.sides[0].allocation;
+      else if (front.b === nation) engaged += front.sides[1].allocation;
+    }
+    const free = Math.max(MIN_FREE_FORCE_SHARE, 1 - engaged);
+    const morale = 1 - WEARY_STRENGTH * Math.max(0, 1 - this.stability[nation] / START_STABILITY);
+    const men = this.manpowerMax[nation] > 0 ? this.manpower[nation] / this.manpowerMax[nation] : 1;
+    const reserves = 1 - DRAINED_STRENGTH * (1 - men);
+    return this.capacity[nation] * free * morale * reserves;
   }
 
   // -------------------------------------------------------------------------
@@ -1018,7 +1193,9 @@ export class Simulation {
       atWar[front.b] = 1;
     }
     for (let n = 1; n < this.stride; n++) {
-      if (atWar[n] && this.alive[n] && this.heldHome[n] < this.totalHome[n] * CAPITULATION_SHARE) {
+      // Une nation instable capitule plus tôt.
+      const unrest = (UNREST_CAPITULATION * Math.max(0, START_STABILITY - this.stability[n])) / START_STABILITY;
+      if (atWar[n] && this.alive[n] && this.heldHome[n] < this.totalHome[n] * (CAPITULATION_SHARE + unrest)) {
         this.capitulate(n);
       }
     }
@@ -1065,16 +1242,21 @@ export class Simulation {
       this.consolidation[p] = 0;
       this.provinceValue[p] *= ANNEXED_VALUE;
       this.provinceGdp[p] *= ANNEXED_VALUE;
+      this.provinceManpower[p] *= ANNEXED_VALUE;
       this.pendingHomes.push(p, this.controller[p]);
     }
 
     this.navy[winner] += this.navy[loser] * ANNEXED_NAVY;
     this.navy[loser] = 0;
+    this.stability[winner] = Math.min(1, this.stability[winner] + VICTORY_STABILITY);
+    this.queues[loser] = [];
+    this.manpower[loser] = 0;
     this.alive[loser] = 0;
     for (const offensive of [...this.offensivesByNation[loser]]) this.endOffensive(offensive);
     this.reserve[loser] = 0;
     this.removeFrontsOf(loser);
     this.recomputeCapacity();
+    this.recomputeManpower();
     // Peut quitter la frontière : ce qui y était. Peut y entrer : ce qui vient de changer de main.
     const previous = this.frontier.slice(0, this.frontierCount);
     for (let i = 0; i < previous.length; i++) this.refreshFrontier(previous[i]);
@@ -1118,8 +1300,8 @@ export class Simulation {
    * de départ du territoire : bâtir ou détruire ne la rapproche pas.
    */
   private recomputeCapacity(): void {
-    const { capacity, output, development, provinceGdp } = this;
-    capacity.fill(0);
+    const { capacity, output, development, provinceGdp, rawCapacity } = this;
+    rawCapacity.fill(0);
     output.fill(0);
     this.heldHome.fill(0);
     this.totalHome.fill(0);
@@ -1127,21 +1309,68 @@ export class Simulation {
       const value = this.provinceValue[p];
       const home = this.provinceHome[p];
       const holder = this.controller[p];
-      const developed = development[p];
+      const developed = development[p] * (1 + FACTORY_BONUS * this.factories[p]);
       this.totalHome[home] += value;
       if (holder === home) {
         this.heldHome[home] += value;
-        capacity[home] += value * developed;
+        rawCapacity[home] += value * developed;
         output[home] += provinceGdp[p] * developed;
       } else {
-        capacity[holder] += value * developed * OCCUPIED_VALUE;
+        // Tant qu'elle n'est pas consolidée, une province occupée coûte une garnison.
+        const garrison = GARRISON_COST * (1 - this.consolidation[p]);
+        rawCapacity[holder] += value * developed * (OCCUPIED_VALUE - garrison);
         output[holder] += provinceGdp[p] * developed * OCCUPIED_VALUE;
-        capacity[home] += value * developed * LOST_PROVINCE_RETAINED;
+        rawCapacity[home] += value * developed * LOST_PROVINCE_RETAINED;
         output[home] += provinceGdp[p] * developed * LOST_PROVINCE_RETAINED;
       }
     }
-    for (let n = 1; n < this.stride; n++) capacity[n] *= EFFORT_CAPACITY_BASE + this.effort[n];
+    for (let n = 1; n < this.stride; n++) {
+      rawCapacity[n] = Math.max(0, rawCapacity[n] * (EFFORT_CAPACITY_BASE + this.effort[n]));
+      // Sans pétrole, une armée ne roule pas.
+      capacity[n] = rawCapacity[n] * (OIL_SHORTAGE_FLOOR + (1 - OIL_SHORTAGE_FLOOR) * this.oilCoverage[n]);
+    }
     this.capacityDirty = false;
+  }
+
+  /** Réservoir maximal : les hommes des provinces nationales tenues, et un peu des occupées. */
+  private recomputeManpower(): void {
+    const { manpowerMax } = this;
+    manpowerMax.fill(0);
+    for (let p = 1; p < this.controller.length; p++) {
+      const holder = this.controller[p];
+      manpowerMax[holder] += this.provinceManpower[p] * (holder === this.provinceHome[p] ? 1 : OCCUPIED_MANPOWER);
+    }
+  }
+
+  /**
+   * Couverture des besoins en pétrole et en acier : production des gisements tenus, plus
+   * ce qui s'importe. Un pays sans côte, ou soumis au blocus d'une marine bien plus forte,
+   * n'importe que par la terre.
+   */
+  private updateResources(): void {
+    const oil = new Float64Array(this.stride);
+    const steel = new Float64Array(this.stride);
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.provinceOil[p] === 0 && this.provinceSteel[p] === 0) continue;
+      const holder = this.controller[p];
+      const share = holder === this.provinceHome[p] ? 1 : OCCUPIED_RESOURCES;
+      oil[holder] += this.provinceOil[p] * share;
+      steel[holder] += this.provinceSteel[p] * share;
+    }
+    const strongestEnemyNavy = new Float64Array(this.stride);
+    for (const front of this.fronts) {
+      strongestEnemyNavy[front.a] = Math.max(strongestEnemyNavy[front.a], this.navy[front.b]);
+      strongestEnemyNavy[front.b] = Math.max(strongestEnemyNavy[front.b], this.navy[front.a]);
+    }
+    for (let n = 1; n < this.stride; n++) {
+      const enemyNavy = strongestEnemyNavy[n];
+      this.blockaded[n] = this.hasCoast[n] && enemyNavy > 0 && enemyNavy >= BLOCKADE_RATIO * this.navy[n] ? 1 : 0;
+      const imports = this.hasCoast[n] && !this.blockaded[n] ? SEA_IMPORT_SHARE : LAND_IMPORT_SHARE;
+      const oilNeed = this.rawCapacity[n] * this.oilPerCapacity;
+      const steelNeed = this.output[n] * this.steelPerOutput;
+      this.oilCoverage[n] = oilNeed > 0 ? Math.min(1, oil[n] / oilNeed + imports) : 1;
+      this.steelCoverage[n] = steelNeed > 0 ? Math.min(1, steel[n] / steelNeed + imports) : 1;
+    }
   }
 
   /**
@@ -1152,7 +1381,8 @@ export class Simulation {
     const { effort, effortTarget, development, provinceGdp } = this;
     const step = (EFFORT_CHANGE_PER_SECOND * ECONOMY_INTERVAL_TICKS) / TICKS_PER_SECOND;
     for (let n = 1; n < this.stride; n++) {
-      const gap = effortTarget[n] - effort[n];
+      // Un pays las de la guerre ne suit plus un effort trop lourd.
+      const gap = Math.min(effortTarget[n], this.effortCap(n)) - effort[n];
       effort[n] += Math.max(-step, Math.min(step, gap));
     }
     const atWar = new Uint8Array(this.stride);
@@ -1165,6 +1395,7 @@ export class Simulation {
     for (let n = 1; n < this.stride; n++) {
       rate[n] = 2 * GROWTH_PER_MINUTE * (DEFAULT_WAR_EFFORT - effort[n]) * minutes;
       if (rate[n] > 0 && atWar[n]) rate[n] *= AT_WAR_GROWTH;
+      if (rate[n] > 0) rate[n] *= this.steelFactor(n);
     }
     const gained = new Float64Array(this.stride);
     const base = new Float64Array(this.stride);
@@ -1188,6 +1419,145 @@ export class Simulation {
       if (this.controller[p] === this.provinceHome[p] || this.consolidation[p] >= 1) continue;
       this.consolidation[p] = Math.min(1, this.consolidation[p] + consolidating);
       this.supplyDirty = ALL_SUPPLY_GROUPS;
+    }
+
+    this.updateResources();
+    this.recomputeCapacity();
+    this.recomputeManpower();
+    for (let n = 1; n < this.stride; n++) {
+      if (!this.alive[n]) continue;
+      // Le réservoir se reconstitue lentement.
+      this.manpower[n] = Math.min(this.manpowerMax[n], this.manpower[n] + this.manpowerMax[n] * MANPOWER_REGEN_PER_MINUTE * minutes);
+      this.updateStability(n, atWar[n] === 1, minutes);
+      this.advanceConstruction(n, minutes);
+    }
+  }
+
+  /** Effort de guerre que la stabilité permet encore : tout, tant qu'elle reste à son niveau de départ. */
+  private effortCap(nation: number): number {
+    return Math.min(1, MIN_EFFORT_CAP + ((1 - MIN_EFFORT_CAP) * this.stability[nation]) / START_STABILITY);
+  }
+
+  private steelFactor(nation: number): number {
+    return STEEL_SHORTAGE_FLOOR + (1 - STEEL_SHORTAGE_FLOOR) * this.steelCoverage[nation];
+  }
+
+  /** La guerre, les pertes et l'occupation usent la stabilité ; la paix la rétablit. */
+  private updateStability(n: number, atWar: boolean, minutes: number): void {
+    let stability = this.stability[n];
+    if (atWar) {
+      stability -= WAR_WEARINESS_PER_MINUTE * (0.5 + this.effort[n]) * minutes;
+    } else {
+      const gap = PEACE_STABILITY - stability;
+      stability += Math.sign(gap) * Math.min(Math.abs(gap), STABILITY_RECOVERY_PER_MINUTE * minutes);
+    }
+    stability -= (CASUALTY_WEARINESS * this.losses[n]) / Math.max(1, this.manpowerMax[n]);
+    this.losses[n] = 0;
+    const lost = this.totalHome[n] > 0 ? 1 - this.heldHome[n] / this.totalHome[n] : 0;
+    stability -= OCCUPATION_WEARINESS_PER_MINUTE * lost * minutes;
+    this.stability[n] = Math.max(0, Math.min(1, stability));
+  }
+
+  /** La part civile de l'économie fait avancer le premier chantier de la file. */
+  private advanceConstruction(n: number, minutes: number): void {
+    const rate = CONSTRUCTION_PER_MINUTE * Math.sqrt(Math.max(0, this.output[n]) / 1000) * (1 - this.effort[n]) * this.steelFactor(n);
+    this.constructionRate[n] = rate;
+    const queue = this.queues[n];
+    if (queue.length === 0) {
+      this.buildProgress[n] = 0;
+      return;
+    }
+    this.buildProgress[n] += rate * minutes;
+    while (queue.length > 0) {
+      const order = queue[0];
+      // Un chantier devenu impossible (province perdue, niveau atteint) est abandonné.
+      if (!this.canBuild(n, order.province, order.kind, 0)) {
+        queue.shift();
+        continue;
+      }
+      const cost = this.buildCost(order.province, order.kind);
+      if (this.buildProgress[n] < cost) break;
+      this.buildProgress[n] -= cost;
+      queue.shift();
+      if (order.kind === 'factory') this.factories[order.province]++;
+      else if (order.kind === 'infrastructure') this.infrastructure[order.province]++;
+      else this.depots[order.province] = 1;
+      this.capacityDirty = true;
+      this.supplyDirty = ALL_SUPPLY_GROUPS;
+    }
+    if (queue.length === 0) this.buildProgress[n] = 0;
+    if (this.capacityDirty) this.recomputeCapacity();
+  }
+
+  /** Coût du prochain niveau d'un bâtiment dans une province. */
+  buildCost(province: number, kind: BuildKind): number {
+    if (kind === 'factory') return BUILD_COST.factory * (this.factories[province] + 1);
+    if (kind === 'infrastructure') return BUILD_COST.infrastructure * (this.infrastructure[province] + 1);
+    return BUILD_COST.depot;
+  }
+
+  /**
+   * Une nation peut-elle bâtir là ? `queued` compte les chantiers du même genre déjà en
+   * file pour cette province, qui rapprochent du niveau maximal.
+   */
+  canBuild(nation: number, province: number, kind: BuildKind, queued: number): boolean {
+    if (province <= 0 || province >= this.controller.length || this.controller[province] !== nation) return false;
+    const home = this.provinceHome[province] === nation;
+    if (kind === 'factory') return home && this.factories[province] + queued < MAX_FACTORY_LEVEL;
+    if (kind === 'infrastructure') return this.infrastructure[province] + queued < MAX_INFRASTRUCTURE_LEVEL;
+    // Un dépôt avance le ravitaillement en territoire conquis, une fois la province tenue.
+    return !home && this.depots[province] === 0 && queued === 0 && this.consolidation[province] >= DEPOT_MIN_CONSOLIDATION;
+  }
+
+  build(nation: number, province: number, kind: BuildKind): void {
+    if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return;
+    if (kind !== 'factory' && kind !== 'infrastructure' && kind !== 'depot') return;
+    const queue = this.queues[nation];
+    if (queue.length >= MAX_BUILD_QUEUE) return;
+    const queued = queue.filter((order) => order.province === province && order.kind === kind).length;
+    if (!this.canBuild(nation, province, kind, queued)) return;
+    queue.push({ province, kind });
+  }
+
+  cancelBuild(nation: number, index: number): void {
+    const queue = this.queues[nation];
+    if (!queue || !Number.isInteger(index) || index < 0 || index >= queue.length) return;
+    queue.splice(index, 1);
+    if (index === 0) this.buildProgress[nation] = 0;
+  }
+
+  /** L'IA bâtit des usines en paix, des dépôts derrière ses conquêtes en guerre. */
+  private decideBuilds(): void {
+    const owned: number[][] = Array.from({ length: this.stride }, () => []);
+    for (let p = 1; p < this.controller.length; p++) owned[this.controller[p]].push(p);
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+    }
+    for (let n = 1; n < this.stride; n++) {
+      if (n === this.player || !this.alive[n] || this.queues[n].length >= AI_MAX_QUEUE) continue;
+      if (this.random() >= AI_BUILD_CHANCE) continue;
+      const provinces = owned[n];
+      if (provinces.length === 0) continue;
+      if (atWar[n]) {
+        const depot = provinces.find((p) => this.canBuild(n, p, 'depot', 0));
+        if (depot !== undefined) {
+          this.build(n, depot, 'depot');
+          continue;
+        }
+      }
+      // Une usine dans l'une des provinces les plus riches, sinon de l'infrastructure.
+      const rich = provinces
+        .filter((p) => this.canBuild(n, p, 'factory', 0))
+        .sort((a, b) => this.provinceGdp[b] - this.provinceGdp[a] || a - b)
+        .slice(0, 5);
+      if (rich.length > 0 && this.random() < 0.75) {
+        this.build(n, rich[Math.floor(this.random() * rich.length)], 'factory');
+      } else {
+        const p = provinces[Math.floor(this.random() * provinces.length)];
+        if (this.canBuild(n, p, 'infrastructure', 0)) this.build(n, p, 'infrastructure');
+      }
     }
   }
 
@@ -1273,14 +1643,26 @@ export class Simulation {
     keep.fill(1);
     for (let n = 1; n < this.stride; n++) {
       if (!this.alive[n]) continue;
+      // Ce qui manque depuis le tick précédent est tombé au combat ou en route.
+      if (this.armyAfterReinforce[n] >= 0) this.losses[n] += Math.max(0, this.armyAfterReinforce[n] - this.armies[n]);
       const missing = this.capacity[n] - this.armies[n];
+      let after = this.armies[n];
       if (missing > 0) {
-        this.reserve[n] += missing * REINFORCE_PER_TICK;
+        // Les renforts puisent dans le réservoir de main-d'œuvre.
+        const added = Math.min(missing * REINFORCE_PER_TICK, this.manpower[n]);
+        this.reserve[n] += added;
+        this.manpower[n] -= added;
+        after += added;
       } else if (missing < 0 && this.armies[n] > 0) {
         keep[n] = 1 + (missing / this.armies[n]) * DEMOBILIZE_PER_TICK;
         this.reserve[n] *= keep[n];
         shrinking = true;
+        // Les démobilisés rentrent chez eux : ils retournent au réservoir.
+        const released = this.armies[n] * (1 - keep[n]);
+        this.manpower[n] = Math.min(this.manpowerMax[n], this.manpower[n] + released);
+        after -= released;
       }
+      this.armyAfterReinforce[n] = after;
     }
     if (!shrinking) return;
     for (const front of this.fronts) {
@@ -1512,6 +1894,7 @@ export class Simulation {
   private takeCell(cell: number, attacker: number, defender: number): Front | null {
     this.owners[cell] = attacker;
     this.pocket[cell] = 0;
+    this.inheritSupply(cell, attacker);
     this.cellCounts[defender]--;
     this.cellCounts[attacker]++;
     this.pendingCells.push(cell);
@@ -1520,6 +1903,40 @@ export class Simulation {
     const front = this.frontOf(attacker, defender);
     if (front) front.sides[front.a === attacker ? 0 : 1].captured++;
     return front;
+  }
+
+  /**
+   * Une cellule conquise prend tout de suite le ravitaillement de sa meilleure voisine du
+   * même camp, sans attendre le prochain contrôle : sinon la pointe d'une percée, faite de
+   * cellules fraîches, passerait pour pleinement ravitaillée.
+   */
+  private inheritSupply(cell: number, owner: number): void {
+    if (!this.logisticsEnabled) return;
+    const { owners, supply, width: W, height: H } = this;
+    let value = 0;
+    if (this.provinceHome[this.provinceGrid[cell]] !== owner) {
+      const x = cell % W;
+      const y = (cell - x) / W;
+      let best = -1;
+      for (let j = 0; j < 4; j++) {
+        if ((j === 2 && y === 0) || (j === 3 && y === H - 1)) continue;
+        const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+        if (owners[next] !== owner) continue;
+        const level = supply[next] === 0 ? 255 : supply[next];
+        if (level > best) best = level;
+      }
+      // Sans voisine (un débarquement), on suppose la cellule ravitaillée jusqu'au contrôle.
+      value = best < 0 ? 255 : best;
+    }
+    if (supply[cell] !== value) {
+      supply[cell] = value;
+      this.pendingSupplyCells.push(cell);
+      this.pendingSupplyValues.push(value);
+    }
+    if (value !== 0 && this.supplyListed[cell] === 0) {
+      this.supplyListed[cell] = 1;
+      this.supplyList.push(cell);
+    }
   }
 
   private refreshAround(cell: number): void {
@@ -1581,6 +1998,12 @@ export class Simulation {
       }
       this.controller[province] = to;
       this.consolidation[province] = 0;
+      if (!this.peacefulTransfer) {
+        // Les combats abattent un niveau d'usine et d'infrastructure ; le dépôt est perdu.
+        if (this.factories[province] > 0) this.factories[province]--;
+        if (this.infrastructure[province] > 0) this.infrastructure[province]--;
+      }
+      this.depots[province] = 0;
       this.capacityDirty = true;
       this.pendingProvinces.push(province, to);
     }
@@ -1761,7 +2184,8 @@ export class Simulation {
       const density = Math.log10(Math.max(1e-6, (this.provinceGdp[p] * this.development[p]) / area));
       const wealth = Math.max(0, Math.min(1, (density + 1.5) / 3.5));
       const infrastructure = INFRASTRUCTURE_COST_MAX - (INFRASTRUCTURE_COST_MAX - INFRASTRUCTURE_COST_MIN) * wealth;
-      provinceCost[p] = infrastructure * (1 - (1 - CONSOLIDATED_COST) * this.consolidation[p]);
+      const built = 1 - INFRASTRUCTURE_BONUS * this.infrastructure[p];
+      provinceCost[p] = infrastructure * built * (1 - (1 - CONSOLIDATED_COST) * this.consolidation[p]);
     }
     // Coût de transport de chaque cellule conquise, en pas entiers.
     const cost = this.supplyCost;
@@ -1780,7 +2204,9 @@ export class Simulation {
       const owner = owners[cell];
       const navalSupply = this.navy[owner] > 0 && this.navy[owner] >= enemyNavy[owner] * NAVAL_SUPPLY_RATIO;
       const x = cell % W;
-      let start = Infinity;
+      // Un dépôt ravitaille sa province comme le sol national.
+      const province = provinceGrid[cell];
+      let start = this.depots[province] === 1 && this.controller[province] === owner ? 0 : Infinity;
       for (let j = 0; j < 4; j++) {
         const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
         if ((j === 2 && cell < W) || (j === 3 && cell >= last)) continue;
@@ -1982,6 +2408,10 @@ export class Simulation {
       capacity: Float32Array.from(this.capacity),
       effort: Float32Array.from(this.effort),
       consolidation: Float32Array.from(this.consolidation),
+      factories: this.factories.slice(),
+      infrastructure: this.infrastructure.slice(),
+      depots: this.depots.slice(),
+      stability: Float32Array.from(this.stability),
     };
   }
 
@@ -2019,6 +2449,23 @@ export class Simulation {
         effort: this.effort[id],
         effortTarget: this.effortTarget[id],
         growth: this.growth[id],
+        effortCap: this.effortCap(id),
+        manpower: this.manpower[id],
+        manpowerMax: this.manpowerMax[id],
+        stability: this.stability[id],
+        oil: this.oilCoverage[id],
+        steel: this.steelCoverage[id],
+        blockaded: this.blockaded[id] === 1,
+        construction: this.constructionRate[id],
+        // La file de chantiers ne sert qu'au joueur.
+        builds:
+          id === this.player
+            ? this.queues[id].map((order, index) => ({
+                ...order,
+                cost: this.buildCost(order.province, order.kind),
+                progress: index === 0 ? this.buildProgress[id] : 0,
+              }))
+            : [],
       })),
       offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured, transitUntil, targetX, targetY, supply }) => ({
         id,
@@ -2078,12 +2525,32 @@ export class Simulation {
         effortTarget: Array.from(this.effortTarget),
         growth: Array.from(this.growth),
         consolidation: Array.from(this.consolidation),
+        rawCapacity: Array.from(this.rawCapacity),
+        provinceManpower: Array.from(this.provinceManpower),
+        manpower: Array.from(this.manpower),
+        manpowerMax: Array.from(this.manpowerMax),
+        armyAfterReinforce: Array.from(this.armyAfterReinforce),
+        losses: Array.from(this.losses),
+        stability: Array.from(this.stability),
+        oilCoverage: Array.from(this.oilCoverage),
+        steelCoverage: Array.from(this.steelCoverage),
+        blockaded: Array.from(this.blockaded),
+        factories: Array.from(this.factories),
+        infrastructure: Array.from(this.infrastructure),
+        depots: Array.from(this.depots),
+        queues: this.queues.map((queue) => queue.map((order) => ({ ...order }))),
+        buildProgress: Array.from(this.buildProgress),
+        constructionRate: Array.from(this.constructionRate),
       },
     };
   }
 
   private restore(saved: SimSave): void {
     const { state } = saved;
+    // Une sauvegarde d'une version plus ancienne n'a pas tout : ce qui manque garde les
+    // valeurs d'une partie neuve, calculées par le constructeur.
+    const legacy = state as Partial<SimSaveState>;
+    const startHome = this.provinceHome.slice();
     this.owners.set(saved.owners);
     this.tick = state.tick;
     this.rngState = state.rngState;
@@ -2110,15 +2577,41 @@ export class Simulation {
     this.landNeighbors = state.landNeighbors;
     this.seaNeighbors = state.seaNeighbors;
     this.labelCells.set(state.labelCells);
-    this.provinceGdp.set(state.provinceGdp);
-    this.development.set(state.development);
-    this.effort.set(state.effort);
-    this.effortTarget.set(state.effortTarget);
-    this.growth.set(state.growth);
-    this.consolidation.set(state.consolidation);
+    // Une province annexée avant que ces valeurs existent n'en garde que la part annexée.
+    for (const [values, target] of [
+      [legacy.provinceGdp, this.provinceGdp],
+      [legacy.provinceManpower, this.provinceManpower],
+    ] as const) {
+      if (values) target.set(values);
+      else {
+        for (let p = 1; p < target.length; p++) if (state.provinceHome[p] !== startHome[p]) target[p] *= ANNEXED_VALUE;
+      }
+    }
+    const restoreArray = (target: Float64Array | Uint8Array, values: number[] | undefined) => {
+      if (values) target.set(values);
+    };
+    restoreArray(this.development, legacy.development);
+    restoreArray(this.effort, legacy.effort);
+    restoreArray(this.effortTarget, legacy.effortTarget);
+    restoreArray(this.growth, legacy.growth);
+    restoreArray(this.consolidation, legacy.consolidation);
+    restoreArray(this.manpower, legacy.manpower);
+    restoreArray(this.armyAfterReinforce, legacy.armyAfterReinforce);
+    restoreArray(this.losses, legacy.losses);
+    restoreArray(this.stability, legacy.stability);
+    restoreArray(this.oilCoverage, legacy.oilCoverage);
+    restoreArray(this.steelCoverage, legacy.steelCoverage);
+    restoreArray(this.blockaded, legacy.blockaded);
+    restoreArray(this.factories, legacy.factories);
+    restoreArray(this.infrastructure, legacy.infrastructure);
+    restoreArray(this.depots, legacy.depots);
+    if (legacy.queues) this.queues = legacy.queues.map((queue) => queue.map((order) => ({ ...order })));
+    restoreArray(this.buildProgress, legacy.buildProgress);
+    restoreArray(this.constructionRate, legacy.constructionRate);
     this.recomputeCapacity();
+    this.recomputeManpower();
     // Le ravitaillement repart tel quel : le recalculer ici changerait la suite de la partie.
-    this.supply.set(saved.supply);
+    if (saved.supply) this.supply.set(saved.supply);
     for (let k = 0; k < this.landCells.length; k++) {
       const cell = this.landCells[k];
       if (this.supply[cell] === 0) continue;
@@ -2160,14 +2653,22 @@ export class Simulation {
     for (let n = 1; n < this.stride; n++) {
       mix(Math.round(this.reserve[n] * 1000));
       mix(Math.round(this.effort[n] * 1e6));
+      mix(Math.round(this.manpower[n] * 1000));
+      mix(Math.round(this.stability[n] * 1e6));
+      mix(Math.round(this.buildProgress[n] * 1000));
+      mix(this.queues[n].length);
     }
+    for (let p = 1; p < this.factories.length; p++) mix(this.factories[p] * 16 + this.infrastructure[p] * 2 + this.depots[p]);
     for (let p = 1; p < this.development.length; p++) {
       mix(Math.round(this.development[p] * 1e6));
       mix(Math.round(this.consolidation[p] * 1e6));
     }
     // Somme commutative : l'ordre de la liste ne change rien à la partie.
     let supplySum = 0;
-    for (const cell of this.supplyList) supplySum = (supplySum + Math.imul(cell + 1, 2654435761) + this.supply[cell]) >>> 0;
+    for (const cell of this.supplyList) {
+      // Une cellule revenue au plein attend d'être retirée de la liste : elle ne compte pas.
+      if (this.supply[cell] !== 0) supplySum = (supplySum + Math.imul(cell + 1, 2654435761) + this.supply[cell]) >>> 0;
+    }
     mix(supplySum);
     mix(this.rngState);
     return hash;

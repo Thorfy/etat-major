@@ -1,10 +1,11 @@
-import { GAME_SPEEDS, type GameClient } from '../game/GameClient.ts';
+import { GAME_SPEEDS, type GameClient, SPEED_LABELS } from '../game/GameClient.ts';
+import { formatDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapView } from '../render/MapView.ts';
-import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
+import type { BuildKind, FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { LOW_SUPPLY } from '../game/GameClient.ts';
 import { effortEffect } from '../game/economy.ts';
-import { formatChange, formatClock, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
+import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
 const STANCES: { id: Stance; label: string }[] = [
   { id: 'attack', label: 'Attaquer' },
@@ -24,15 +25,15 @@ function SpeedControls({ game }: { game: GameClient }) {
       <button class={game.speed === 0 ? 'on' : ''} aria-pressed={game.speed === 0} onClick={() => game.togglePause()}>
         Pause
       </button>
-      {GAME_SPEEDS.map((speed) => (
+      {GAME_SPEEDS.map((speed, index) => (
         <button
           key={speed}
           class={game.speed === speed ? 'on' : ''}
           aria-pressed={game.speed === speed}
-          aria-label={`Vitesse ${speed}`}
+          aria-label={`Vitesse ${SPEED_LABELS[index]}`}
           onClick={() => game.setSpeed(speed)}
         >
-          ×{speed}
+          {SPEED_LABELS[index]}
         </button>
       ))}
     </div>
@@ -74,7 +75,7 @@ function EconomySection({ game, nation }: { game: GameClient; nation: NationData
           <small class={change > 0.005 ? 'ahead' : change < -0.005 ? 'behind' : ''}>({formatChange(change, 0)})</small>
         </dd>
         <dt>{stats.growth < 0 ? 'Usure' : 'Croissance'}</dt>
-        <dd class={stats.growth > 0.0005 ? 'ahead' : stats.growth < -0.0005 ? 'behind' : ''}>{formatChange(stats.growth)} / min</dd>
+        <dd class={stats.growth > 0.0005 ? 'ahead' : stats.growth < -0.0005 ? 'behind' : ''}>{formatChange(stats.growth)} / sem.</dd>
       </dl>
       <label class="allocation">
         <span>
@@ -90,8 +91,70 @@ function EconomySection({ game, nation }: { game: GameClient; nation: NationData
           onInput={(event) => game.setEffort(Number(event.currentTarget.value) / 100)}
         />
       </label>
-      <p class="front-note">{converting ? 'Reconversion de l\'économie en cours. ' : ''}{effortEffect(target, atWar)}</p>
+      <p class="front-note">
+        {converting ? 'Reconversion de l\'économie en cours. ' : ''}
+        {stats.effortCap < target - 0.005
+          ? `Ton pays, las de la guerre, ne suit plus au-delà de ${formatPercent(stats.effortCap)}.`
+          : effortEffect(target, atWar)}
+      </p>
+      <HomeFront game={game} />
     </section>
+  );
+}
+
+const BUILD_NAMES: Record<BuildKind, string> = {
+  factory: 'Usine',
+  infrastructure: 'Infrastructure',
+  depot: 'Dépôt',
+};
+
+/** Hommes, stabilité, ressources et chantiers. */
+function HomeFront({ game }: { game: GameClient }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
+  const { provinces } = game.worldData;
+  const manpowerShare = stats.manpowerMax > 0 ? stats.manpower / stats.manpowerMax : 1;
+  return (
+    <>
+      <dl>
+        <dt>Main-d'œuvre</dt>
+        <dd class={manpowerShare < 0.25 ? 'behind' : ''}>
+          {integer.format(stats.manpower)} / {integer.format(stats.manpowerMax)}
+        </dd>
+        <dt>Stabilité</dt>
+        <dd class={stats.stability < 0.5 ? 'behind' : ''}>{formatPercent(stats.stability)}</dd>
+        <dt>Pétrole</dt>
+        <dd class={stats.oil < 0.8 ? 'behind' : ''}>
+          {formatPercent(stats.oil)}
+          {stats.blockaded ? ' · blocus' : ''}
+        </dd>
+        <dt>Acier</dt>
+        <dd class={stats.steel < 0.8 ? 'behind' : ''}>{formatPercent(stats.steel)}</dd>
+        <dt>Chantiers</dt>
+        <dd>+{integer.format(stats.construction)} pts / sem.</dd>
+      </dl>
+      {stats.builds.length === 0 ? (
+        <p class="front-note">Aucun chantier. Clique sur une de tes provinces pour bâtir.</p>
+      ) : (
+        <ol class="builds">
+          {stats.builds.map((order, index) => (
+            <li key={`${order.province}-${order.kind}-${index}`}>
+              <div class="offensive-row">
+                <span>
+                  {BUILD_NAMES[order.kind]} <small>· {provinces[order.province - 1].name}</small>
+                </span>
+                <button class="close-inline" aria-label="Annuler ce chantier" onClick={() => game.cancelBuild(index)}>
+                  ×
+                </button>
+              </div>
+              <div class="gauge">
+                <div style={{ width: `${Math.min(100, (order.progress / order.cost) * 100)}%` }} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </>
   );
 }
 
@@ -265,7 +328,10 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
           <span class="swatch" style={{ background: nation.color }} />
           {nation.name}
         </h2>
-        <span class="clock">{game.speed === 0 ? 'en pause' : formatClock(game.elapsedSeconds)}</span>
+        <span class="clock">
+          {formatDate(game.tick)}
+          {game.speed === 0 ? ' · pause' : ''}
+        </span>
       </header>
       <SpeedControls game={game} />
       <GameMenu game={game} />

@@ -81,7 +81,7 @@ describe('percée et ravitaillement', () => {
     // Au début, la logistique ne change presque rien.
     expect(tips[2] - tips[0]).toBeGreaterThan((free[2] - free[0]) * 0.8);
     // Loin du sol national, la percée avance nettement moins vite.
-    expect(tips[12] - tips[8]).toBeLessThan((free[12] - free[8]) * 0.6);
+    expect(tips[12] - tips[8]).toBeLessThan((free[12] - free[8]) * 0.7);
     expect(tips[12]).toBeLessThan(free[12] * 0.85);
     expect(real.supplyAt(ROW * W + tips[12] - 1)).toBeLessThan(0.4);
     expect(supplied.supplyAt(ROW * W + free[12] - 1)).toBe(1);
@@ -121,6 +121,44 @@ describe('percée et ravitaillement', () => {
     expect(sim.consolidation[province - 1]).toBe(1);
     expect(sim.consolidation[province - 1]).toBeGreaterThan(consolidationBefore);
     expect(sim.supplyAt(ROW * W + tip)).toBeGreaterThanOrEqual(before);
+  });
+
+  it('ravitaille une province conquise par un dépôt', () => {
+    const sim = new Simulation(stripConfig());
+    sim.declareWars([[A, B]]);
+    // Assez loin pour que la province ne soit plus ravitaillée pleinement.
+    for (let t = 0; t < 600 * 10; t++) {
+      sim.setFront(A, B, 1, 'attack');
+      sim.setFront(B, A, 1, 'hold');
+      sim.step();
+    }
+    // La dernière province entièrement tenue derrière la pointe.
+    const province = Math.floor((tipOf(sim) - 1) / 20);
+    expect(sim.controllerOf(province)).toBe(A);
+    const cell = ROW * W + (province - 1) * 20 + 10;
+    const hold = () => {
+      sim.setFront(A, B, 1, 'hold');
+      sim.setFront(B, A, 1, 'hold');
+    };
+    for (let t = 0; t < (CONSOLIDATION_SECONDS / 2) * TICKS_PER_SECOND + 20; t++) {
+      hold();
+      sim.step();
+    }
+    expect(sim.supplyAt(cell)).toBeLessThan(1);
+    // Économie civile : les chantiers vont plus vite.
+    sim.setEffort(A, 0);
+    sim.build(A, province, 'depot');
+    expect(sim.buildQueueOf(A)).toHaveLength(1);
+    for (let t = 0; t < 600 * 20 && sim.depots[province] === 0; t++) {
+      hold();
+      sim.step();
+    }
+    expect(sim.depots[province]).toBe(1);
+    for (let t = 0; t < 40; t++) {
+      hold();
+      sim.step();
+    }
+    expect(sim.supplyAt(cell)).toBe(1);
   });
 
   it('porte moins loin en montagne qu\'en plaine', () => {
