@@ -32,6 +32,7 @@ export interface NationSnapshot {
   capacity: number;
   cells: number;
   pocketCells: number;
+  navy: number;
 }
 
 export interface OffensiveSnapshot {
@@ -44,6 +45,8 @@ export interface OffensiveSnapshot {
   force: number;
   startForce: number;
   captured: number;
+  /** Encore en mer. */
+  inTransit: boolean;
 }
 
 export interface PocketSnapshot {
@@ -56,10 +59,23 @@ export interface PocketSnapshot {
 export interface SimSnapshot {
   tick: number;
   frontierSize: number;
+  aliveNations: number;
   fronts: FrontSnapshot[];
   nations: NationSnapshot[];
   offensives: OffensiveSnapshot[];
   pockets: PocketSnapshot[];
+}
+
+export type SimEvent =
+  | { type: 'war'; tick: number; a: number; b: number }
+  | { type: 'capitulation'; tick: number; loser: number; winner: number };
+
+export interface NationLabel {
+  id: number;
+  x: number;
+  y: number;
+  /** Négatif : la nation n'existe plus, son nom disparaît. */
+  r: number;
 }
 
 export interface WorkerInit {
@@ -73,13 +89,16 @@ export interface WorkerInit {
   terrainGrid: Uint8Array;
   seed: number;
   player: number;
+  /** Partie à reprendre : `ownerGrid` reste alors la carte de départ. */
+  saved?: SimSave;
 }
 
 export type ToWorker =
   | WorkerInit
   | { type: 'command'; command: SimCommand }
   /** 0 = pause, sinon multiplicateur de la vitesse normale. */
-  | { type: 'speed'; speed: number };
+  | { type: 'speed'; speed: number }
+  | { type: 'save'; requestId: number };
 
 export interface WorkerUpdate {
   type: 'update';
@@ -87,7 +106,81 @@ export interface WorkerUpdate {
   owners: Uint16Array;
   /** Paires (province, nouveau contrôleur). */
   provinces: Uint16Array;
+  /** Paires (province, nouveau pays d'origine), après une annexion. */
+  homes: Uint16Array;
+  events: SimEvent[];
+  labels: NationLabel[];
   snapshot: SimSnapshot | null;
   /** Durée du dernier calcul de tick, en ms. */
   tickMs: number;
+}
+
+export interface WorkerSaved {
+  type: 'saved';
+  requestId: number;
+  save: SimSave;
+}
+
+export type FromWorker = WorkerUpdate | WorkerSaved;
+
+/** État complet de la simulation. Tout sauf `owners` passe tel quel par JSON. */
+export interface SimSave {
+  owners: Uint16Array;
+  state: SimSaveState;
+}
+
+export interface SimSaveState {
+  tick: number;
+  rngState: number;
+  player: number;
+  nextOffensiveId: number;
+  supplyDirty: boolean;
+  fronts: {
+    a: number;
+    b: number;
+    length: number;
+    logRatio: number;
+    flipBudget: number;
+    sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number }[];
+  }[];
+  offensives: {
+    id: number;
+    nation: number;
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    dx: number;
+    dy: number;
+    lengthSquared: number;
+    force: number;
+    startForce: number;
+    captured: number;
+    stalledTicks: number;
+    transitUntil: number;
+    landingX: number;
+    landingY: number;
+    seaLoss: number;
+    targetX: number;
+    targetY: number;
+  }[];
+  frontier: number[];
+  sectors: number[];
+  reserve: number[];
+  capacity: number[];
+  cellCounts: number[];
+  navy: number[];
+  alive: number[];
+  heldHome: number[];
+  totalHome: number[];
+  provinceHome: number[];
+  provinceValue: number[];
+  controller: number[];
+  provinceCounts: ([number, number][] | null)[];
+  pocketList: number[];
+  pocketCounts: number[];
+  pockets: PocketSnapshot[];
+  landNeighbors: number[][];
+  seaNeighbors: number[][];
+  labelCells: number[];
 }

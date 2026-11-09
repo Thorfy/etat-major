@@ -1,10 +1,27 @@
 // Côté jeu : lance le Worker, transmet les ordres et applique ses résultats à la carte.
-import { findLandNeighbors } from '../map/adjacency.ts';
+import { areLandNeighbors, findLandNeighbors } from '../map/adjacency.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import type { MapView } from '../render/MapView.ts';
-import { DEFAULT_ALLOCATION, DEFAULT_OFFENSIVE_SHARE, MAX_OFFENSIVES_PER_NATION, OFFENSIVE_MIN_FORCE, TICKS_PER_SECOND } from '../sim/balance.ts';
-import type { FrontSnapshot, OffensiveSnapshot, SimCommand, SimSnapshot, Stance, ToWorker, WorkerInit, WorkerUpdate } from '../sim/protocol.ts';
+import { DEFAULT_OFFENSIVE_SHARE, MAX_OFFENSIVES_PER_NATION, OFFENSIVE_MIN_FORCE, TICKS_PER_SECOND } from '../sim/balance.ts';
+import type {
+  FromWorker,
+  FrontSnapshot,
+  NationLabel,
+  NationSnapshot,
+  OffensiveSnapshot,
+  SimCommand,
+  SimEvent,
+  SimSave,
+  SimSnapshot,
+  Stance,
+  ToWorker,
+  WorkerInit,
+  WorkerUpdate,
+} from '../sim/protocol.ts';
+import { traceRoute } from '../sim/route.ts';
 import { rebalance } from './allocation.ts';
+import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
+import { type SaveSlot, writeSave } from './saves.ts';
 
 export interface FrontOrder {
   allocation: number;
@@ -13,6 +30,17 @@ export interface FrontOrder {
 
 export const GAME_SPEEDS = [1, 2, 4] as const;
 const MESSAGE_MS = 3500;
+const AUTOSAVE_MS = 120_000;
+const JOURNAL_SIZE = 40;
+
+export interface GameStart {
+  player: number;
+  seed: number;
+  saved?: SaveFile;
+}
+
+/** Empreinte de la carte de départ : une sauvegarde ne vaut que pour cette carte. */
+export const mapHashOf = (world: LoadedWorld) => hashGrid(world.provinceGrid);
 
 export class GameClient {
   readonly player: number;
@@ -26,6 +54,11 @@ export class GameClient {
   speed = 1;
   offensiveShare = DEFAULT_OFFENSIVE_SHARE;
   message: string | null = null;
+  journal: SimEvent[] = [];
+  /** Vainqueur du joueur, s'il a capitulé. */
+  defeatedBy = 0;
+  defeatSeen = false;
+  saving = false;
 
   private readonly worker: Worker;
   private readonly world: LoadedWorld;
@@ -34,30 +67,47 @@ export class GameClient {
   private readonly controllers: Uint16Array;
   /** Ordres du joueur, à jour dès le geste sans attendre le retour du Worker. */
   private readonly orders = new Map<number, FrontOrder>();
+  /** Guerres demandées que la simulation n'a pas encore confirmées. */
+  private readonly pendingWars = new Set<number>();
+  /** Ennemis avec qui le joueur a déjà une frontière terrestre. */
+  private readonly inContact = new Set<number>();
+  private readonly labels = new Map<number, NationLabel>();
+  private readonly saveRequests = new Map<number, (save: SimSave) => void>();
+  private nextSaveRequest = 1;
   private frontCount = 0;
   private flipsWindow = 0;
   private windowStart = performance.now();
   private speedBeforePause = 1;
   private messageTimer = 0;
+  private readonly mapHash: number;
 
-  constructor(world: LoadedWorld, view: MapView, player: number, enemy: number, seed: number, onChange: () => void) {
+  constructor(world: LoadedWorld, view: MapView, start: GameStart, onChange: () => void) {
     this.world = world;
     this.view = view;
-    this.player = player;
+    this.player = start.player;
     this.onChange = onChange;
+    this.mapHash = mapHashOf(world);
     this.controllers = new Uint16Array(world.data.provinces.length + 1);
     world.data.provinces.forEach((province, index) => {
       this.controllers[index + 1] = province.nation + 1;
     });
-    this.startCells = world.data.nations[player - 1].cells;
+    this.startCells = world.data.nations[start.player - 1].cells;
 
     this.worker = new Worker(new URL('../sim/worker.ts', import.meta.url), { type: 'module' });
-    this.worker.onmessage = (event: MessageEvent<WorkerUpdate>) => this.receive(event.data);
+    this.worker.onmessage = (event: MessageEvent<FromWorker>) => {
+      if (event.data.type === 'saved') {
+        this.saveRequests.get(event.data.requestId)?.(event.data.save);
+        this.saveRequests.delete(event.data.requestId);
+      } else {
+        this.receive(event.data);
+      }
+    };
     this.worker.onerror = (event) => {
       this.error = event.message || 'La simulation s\'est arrêtée.';
       this.onChange();
     };
 
+    // Le Worker reçoit toujours la carte de départ, puis applique la sauvegarde.
     const provinceGrid = world.provinceGrid.slice();
     const ownerGrid = world.ownerGrid.slice();
     const terrainGrid = world.terrainGrid.slice();
@@ -70,12 +120,33 @@ export class GameClient {
       provinceGrid,
       ownerGrid,
       terrainGrid,
-      seed,
-      player,
+      seed: start.seed,
+      player: start.player,
+      saved: start.saved?.sim,
     };
     this.post(init, [provinceGrid.buffer, ownerGrid.buffer, terrainGrid.buffer]);
-    this.command({ type: 'declareWars', pairs: [[player, enemy]] });
-    this.orders.set(enemy, { allocation: DEFAULT_ALLOCATION, stance: 'hold' });
+
+    if (start.saved) this.applySave(start.saved);
+    window.setInterval(() => {
+      if (this.speed !== 0) void this.save('auto');
+    }, AUTOSAVE_MS);
+  }
+
+  private applySave({ meta, sim }: SaveFile): void {
+    this.offensiveShare = meta.offensiveShare;
+    this.journal = meta.journal;
+    this.controllers.set(sim.state.controller);
+    this.view.loadState(sim.owners, Uint16Array.from(sim.state.provinceHome));
+    for (const label of meta.labels) this.labels.set(label.id, label);
+    this.view.setNationLabels(meta.labels);
+    if (!sim.state.alive[this.player]) {
+      const defeat = [...meta.journal].reverse().find((event) => event.type === 'capitulation' && event.loser === this.player);
+      this.defeatedBy = defeat && defeat.type === 'capitulation' ? defeat.winner : this.player;
+      this.defeatSeen = true;
+      this.view.setCommandEnabled(false);
+    }
+    // Une partie reprise attend le joueur.
+    this.setSpeed(0);
   }
 
   private post(message: ToWorker, transfer: Transferable[] = []): void {
@@ -91,6 +162,13 @@ export class GameClient {
     for (let i = 0; i < update.provinces.length; i += 2) {
       this.controllers[update.provinces[i]] = update.provinces[i + 1];
     }
+    if (update.homes.length > 0) this.view.applyHomeChanges(update.homes);
+    if (update.labels.length > 0) {
+      for (const label of update.labels) this.labels.set(label.id, label);
+      this.view.setNationLabels(update.labels);
+    }
+    for (const event of update.events) this.handleEvent(event);
+
     this.tickMs = update.tickMs;
     this.maxTickMs = Math.max(this.maxTickMs, update.tickMs);
     this.flipsWindow += update.cells.length;
@@ -102,7 +180,8 @@ export class GameClient {
     }
     if (update.snapshot) {
       this.snapshot = update.snapshot;
-      if (update.snapshot.fronts.length !== this.frontCount) {
+      this.syncOrders(update.snapshot);
+      if (update.snapshot.fronts.length !== this.frontCount || update.events.length > 0) {
         this.frontCount = update.snapshot.fronts.length;
         this.view.setWars(update.snapshot.fronts.map((front) => [front.a, front.b]));
       }
@@ -111,8 +190,61 @@ export class GameClient {
     }
   }
 
+  private handleEvent(event: SimEvent): void {
+    this.journal.push(event);
+    if (this.journal.length > JOURNAL_SIZE) this.journal.shift();
+    const name = (id: number) => this.world.data.nations[id - 1].name;
+    if (event.type === 'war') {
+      const involved = event.a === this.player || event.b === this.player;
+      const enemy = event.a === this.player ? event.b : event.a;
+      if (involved && !this.pendingWars.has(enemy)) this.notify(`${name(enemy)} te déclare la guerre !`);
+    } else if (event.loser === this.player) {
+      this.defeatedBy = event.winner;
+      this.view.setCommandEnabled(false);
+      this.view.setAiming(false);
+    } else if (event.winner === this.player) {
+      this.notify(`${name(event.loser)} capitule : tu annexes tout son territoire.`);
+    } else if (this.isAtWarWith(event.loser)) {
+      this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
+    }
+  }
+
+  /** Les ordres suivent la simulation : guerres reçues, ennemis disparus, choix de l'IA. */
+  private syncOrders(snapshot: SimSnapshot): void {
+    const current = new Set<number>();
+    for (const front of snapshot.fronts) {
+      if (front.a !== this.player && front.b !== this.player) continue;
+      const mine = front.a === this.player ? 0 : 1;
+      const enemy = mine === 0 ? front.b : front.a;
+      current.add(enemy);
+      // Guerre nouvelle : la simulation a choisi l'allocation de départ selon la frontière.
+      if (this.pendingWars.delete(enemy) || !this.orders.has(enemy)) {
+        const side = front.sides[mine];
+        this.orders.set(enemy, { allocation: side.allocation, stance: side.stance });
+      }
+      // Un front né d'un débarquement démarre sans troupes : il faut le dire au joueur.
+      const contact = front.length > 0;
+      if (contact && !this.inContact.has(enemy) && this.orderFor(enemy).allocation === 0) {
+        this.notify(`Front ouvert avec ${this.world.data.nations[enemy - 1].name} : affecte-lui des forces !`);
+      }
+      if (contact) this.inContact.add(enemy);
+      else this.inContact.delete(enemy);
+    }
+    for (const enemy of [...this.orders.keys()]) {
+      if (!current.has(enemy) && !this.pendingWars.has(enemy)) this.orders.delete(enemy);
+    }
+  }
+
   get elapsedSeconds(): number {
     return (this.snapshot?.tick ?? 0) / TICKS_PER_SECOND;
+  }
+
+  get playerStats(): NationSnapshot | undefined {
+    return this.snapshot?.nations.find((nation) => nation.id === this.player);
+  }
+
+  get canCommand(): boolean {
+    return this.defeatedBy === 0;
   }
 
   controllerOf(province: number): number {
@@ -135,6 +267,14 @@ export class GameClient {
     return this.orders.has(nation);
   }
 
+  /** On peut attaquer un voisin par la terre, ou n'importe qui si l'on a une marine. */
+  canDeclareWar(nation: number): boolean {
+    if (!this.canCommand || nation === 0 || nation === this.player || this.isAtWarWith(nation)) return false;
+    if ((this.playerStats?.navy ?? 0) > 0) return true;
+    const { ownerGrid, data } = this.world;
+    return areLandNeighbors(ownerGrid, data.width, data.height, this.player, nation);
+  }
+
   /** Si le total dépasse 100 %, les autres fronts cèdent la différence. */
   setFront(enemy: number, allocation: number, stance: Stance): void {
     const current = new Map([...this.orders].map(([other, order]) => [other, order.allocation]));
@@ -152,15 +292,11 @@ export class GameClient {
     this.onChange();
   }
 
-  /** Le nouveau front prend ce qui reste disponible, dans la limite de l'allocation par défaut. */
-  openFront(enemy: number): void {
-    if (this.orders.has(enemy)) return;
-    let used = 0;
-    for (const order of this.orders.values()) used += order.allocation;
-    const allocation = Math.min(DEFAULT_ALLOCATION, Math.max(0, 1 - used));
-    this.orders.set(enemy, { allocation, stance: 'hold' });
+  declareWar(enemy: number): void {
+    if (!this.canDeclareWar(enemy)) return;
+    this.orders.set(enemy, { allocation: 0, stance: 'hold' });
+    this.pendingWars.add(enemy);
     this.command({ type: 'declareWars', pairs: [[this.player, enemy]] });
-    this.command({ type: 'setFront', nation: this.player, enemy, allocation, stance: 'hold' });
     this.onChange();
   }
 
@@ -172,14 +308,24 @@ export class GameClient {
   /** Vérifie l'ordre pour expliquer un refus : la simulation l'ignorerait sans rien dire. */
   launchOffensive(fromX: number, fromY: number, toX: number, toY: number): void {
     const { ownerGrid, data } = this.world;
-    const stats = this.snapshot?.nations.find((nation) => nation.id === this.player);
+    const stats = this.playerStats;
     const target = ownerGrid[toY * data.width + toX];
-    if (ownerGrid[fromY * data.width + fromX] !== this.player) {
+    const route = traceRoute(ownerGrid, data.width, data.height, fromX, fromY, toX, toY);
+    const landing = route.amphibious ? ownerGrid[route.landingY * data.width + route.landingX] : 0;
+    if (!this.canCommand) {
+      this.notify('Ton pays a capitulé : tu ne donnes plus d\'ordres.');
+    } else if (ownerGrid[fromY * data.width + fromX] !== this.player) {
       this.notify('Une offensive doit partir de ton territoire.');
     } else if (target === 0) {
       this.notify('La cible doit être sur la terre ferme.');
     } else if (target !== this.player && !this.isAtWarWith(target)) {
       this.notify('Tu n\'es pas en guerre contre ce pays.');
+    } else if (route.amphibious && (stats?.navy ?? 0) <= 0) {
+      this.notify('Sans accès à la mer, tu ne peux pas débarquer.');
+    } else if (route.amphibious && landing !== this.player && !this.isAtWarWith(landing)) {
+      this.notify('Ce trajet débarque chez un pays neutre : trace plus près de la côte ennemie.');
+    } else if (route.amphibious && landing === this.player) {
+      this.notify('Ce trajet revient sur ton territoire : trace vers la côte ennemie.');
     } else if (this.playerOffensives().length >= MAX_OFFENSIVES_PER_NATION) {
       this.notify(`${MAX_OFFENSIVES_PER_NATION} offensives au plus en même temps.`);
     } else if (!stats || stats.reserve * this.offensiveShare < OFFENSIVE_MIN_FORCE) {
@@ -204,6 +350,46 @@ export class GameClient {
     this.setSpeed(this.speed === 0 ? this.speedBeforePause : 0);
   }
 
+  acknowledgeDefeat(): void {
+    this.defeatSeen = true;
+    this.onChange();
+  }
+
+  /** Renvoie vrai si la partie est bien écrite dans le navigateur. */
+  async save(slot: SaveSlot): Promise<boolean> {
+    if (this.saving) return false;
+    this.saving = true;
+    this.onChange();
+    try {
+      const sim = await new Promise<SimSave>((resolve) => {
+        const requestId = this.nextSaveRequest++;
+        this.saveRequests.set(requestId, resolve);
+        this.post({ type: 'save', requestId });
+      });
+      const meta: SaveMeta = {
+        version: SAVE_VERSION,
+        mapHash: this.mapHash,
+        player: this.player,
+        playerName: this.world.data.nations[this.player - 1].name,
+        tick: sim.state.tick,
+        savedAt: Date.now(),
+        offensiveShare: this.offensiveShare,
+        journal: this.journal,
+        labels: [...this.labels.values()],
+      };
+      const blob = await encodeSave({ meta, sim });
+      await writeSave({ slot, meta, blob });
+      if (slot === 'manual') this.notify('Partie sauvegardée.');
+      return true;
+    } catch (error) {
+      this.notify(`Sauvegarde impossible : ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    } finally {
+      this.saving = false;
+      this.onChange();
+    }
+  }
+
   private notify(text: string): void {
     this.message = text;
     clearTimeout(this.messageTimer);
@@ -219,10 +405,6 @@ export class GameClient {
     const { ownerGrid, data } = this.world;
     const pairs = findLandNeighbors(ownerGrid, data.width, data.height);
     this.command({ type: 'declareWars', pairs });
-    for (const [a, b] of pairs) {
-      if (a === this.player && !this.orders.has(b)) this.orders.set(b, { allocation: 0, stance: 'hold' });
-      if (b === this.player && !this.orders.has(a)) this.orders.set(a, { allocation: 0, stance: 'hold' });
-    }
     return pairs.length;
   }
 }

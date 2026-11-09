@@ -1,10 +1,10 @@
 // Fait tourner la simulation hors du fil principal, à cadence fixe.
 import { Simulation } from './Simulation.ts';
-import { TICKS_PER_SECOND } from './balance.ts';
-import type { ToWorker, WorkerUpdate } from './protocol.ts';
+import { ADJACENCY_INTERVAL_TICKS, TICKS_PER_SECOND } from './balance.ts';
+import type { FromWorker, ToWorker, WorkerUpdate } from './protocol.ts';
 
 const scope = self as unknown as {
-  postMessage(message: WorkerUpdate, transfer: Transferable[]): void;
+  postMessage(message: FromWorker, transfer: Transferable[]): void;
   onmessage: ((event: MessageEvent<ToWorker>) => void) | null;
 };
 
@@ -17,16 +17,25 @@ let speed = 1;
 let last = 0;
 let accumulated = 0;
 let updates = 0;
+let lastLabelTick = 0;
 
 function send(tickMs: number, withSnapshot: boolean): void {
   const changes = sim!.drainChanges();
+  // Noms de pays : régulièrement, et tout de suite après une capitulation.
+  const capitulation = changes.events.some((event) => event.type === 'capitulation');
+  let labels: WorkerUpdate['labels'] = [];
+  if (capitulation || sim!.tick - lastLabelTick >= ADJACENCY_INTERVAL_TICKS) {
+    labels = sim!.updateLabels();
+    lastLabelTick = sim!.tick;
+  }
   const update: WorkerUpdate = {
     type: 'update',
     ...changes,
-    snapshot: withSnapshot ? sim!.snapshot() : null,
+    labels,
+    snapshot: withSnapshot || capitulation ? sim!.snapshot() : null,
     tickMs,
   };
-  scope.postMessage(update, [changes.cells.buffer, changes.owners.buffer, changes.provinces.buffer]);
+  scope.postMessage(update, [changes.cells.buffer, changes.owners.buffer, changes.provinces.buffer, changes.homes.buffer]);
 }
 
 function loop(): void {
@@ -57,12 +66,17 @@ scope.onmessage = (event) => {
   const message = event.data;
   if (message.type === 'init') {
     sim = new Simulation(message);
+    lastLabelTick = sim.tick;
     last = performance.now();
     setInterval(loop, BASE_TICK_MS / 8);
     send(0, true);
   } else if (message.type === 'speed') {
     speed = message.speed;
     accumulated = 0;
+  } else if (message.type === 'save') {
+    if (!sim) return;
+    const save = sim.save();
+    scope.postMessage({ type: 'saved', requestId: message.requestId, save }, [save.owners.buffer]);
   } else if (sim) {
     sim.apply(message.command);
     // En pause, le joueur doit voir tout de suite l'effet de ses ordres.

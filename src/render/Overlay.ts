@@ -9,8 +9,10 @@ export interface ArrowDraft {
   toX: number;
   toY: number;
   valid: boolean;
+  amphibious: boolean;
 }
 
+const SEA_COLOR = '96, 170, 214';
 const OWN_COLOR = '224, 184, 79';
 const ENEMY_COLOR = '216, 67, 47';
 const OTHER_COLOR = '70, 70, 70';
@@ -104,7 +106,9 @@ export function drawCampaign(
     const strength = Math.min(1, offensive.force / Math.max(1, offensive.startForce));
     const width = 4 + 7 * strength;
     const color = own ? OWN_COLOR : enemy ? ENEMY_COLOR : OTHER_COLOR;
-    drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, color, own || enemy ? 0.8 : 0.35);
+    // En mer, la flèche est pointillée : sa bordure dit qui débarque.
+    const fill = offensive.inTransit && (own || enemy) ? SEA_COLOR : color;
+    drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, fill, own || enemy ? 0.8 : 0.35, offensive.inTransit);
   }
 
   if (draft) {
@@ -112,6 +116,7 @@ export function drawCampaign(
     const y0 = toScreenY(draft.fromY);
     const dx = wrapDeltaX(draft.fromX, draft.toX) * zoom;
     const dy = (draft.toY - draft.fromY) * zoom;
-    drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, 9, draft.valid ? OWN_COLOR : ENEMY_COLOR, 0.55, true);
+    const color = !draft.valid ? ENEMY_COLOR : draft.amphibious ? SEA_COLOR : OWN_COLOR;
+    drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, 9, color, 0.55, true);
   }
 }

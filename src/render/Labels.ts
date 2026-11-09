@@ -1,5 +1,6 @@
 // Noms de pays, dessinés sur un canvas 2D au-dessus de la carte.
 import type { NationData } from '../map/types.ts';
+import type { NationLabel } from '../sim/protocol.ts';
 import type { Camera } from './Camera.ts';
 
 const MIN_FONT_PX = 9.5;
@@ -14,21 +15,44 @@ interface Box {
   y1: number;
 }
 
+interface LabelEntry {
+  id: number;
+  name: string;
+  label: NationData['label'];
+  refWidth: number;
+}
+
 export class Labels {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly canvas: HTMLCanvasElement;
-  private readonly nations: { name: string; label: NationData['label']; refWidth: number }[];
+  private entries: LabelEntry[];
 
   constructor(canvas: HTMLCanvasElement, nations: NationData[]) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.ctx.font = FONT(REFERENCE_FONT_PX);
-    this.nations = nations
-      .map((nation) => {
-        const name = nation.name.toUpperCase();
-        return { name, label: nation.label, refWidth: this.ctx.measureText(name).width };
-      })
-      .sort((a, b) => b.label.r - a.label.r);
+    this.entries = nations.map((nation, index) => {
+      const name = nation.name.toUpperCase();
+      return { id: index + 1, name, label: nation.label, refWidth: this.ctx.measureText(name).width };
+    });
+    this.sort();
+  }
+
+  private sort(): void {
+    this.entries.sort((a, b) => b.label.r - a.label.r);
+  }
+
+  /** Un rayon négatif retire le nom : la nation n'existe plus. */
+  update(labels: readonly NationLabel[]): void {
+    const byId = new Map(labels.map((label) => [label.id, label]));
+    this.entries = this.entries.filter((entry) => {
+      const label = byId.get(entry.id);
+      if (!label) return true;
+      if (label.r < 0) return false;
+      entry.label = { x: label.x, y: label.y, r: label.r };
+      return true;
+    });
+    this.sort();
   }
 
   get context(): CanvasRenderingContext2D {
@@ -50,7 +74,7 @@ export class Labels {
     ctx.lineJoin = 'round';
 
     const placed: Box[] = [];
-    for (const { name, label, refWidth } of this.nations) {
+    for (const { name, label, refWidth } of this.entries) {
       const inscribed = label.r * zoom;
       const fitted = (REFERENCE_FONT_PX * inscribed * 2.6) / refWidth;
       const fontPx = Math.min(MAX_FONT_PX, inscribed * 0.8, fitted);

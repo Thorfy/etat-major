@@ -16,6 +16,14 @@ export const SECTOR_SHIFT = 5;
 /** Part des secteurs qui évoluent à chaque tick. */
 export const SECTOR_CHURN = 0.004;
 
+/**
+ * Plafond de bascules par front et par tick, en moyenne. Un front long ou sans défense
+ * ne s'effondre pas d'un coup : la France ne tombe pas en moins d'une dizaine de minutes.
+ */
+export const MAX_FRONT_FLIPS_PER_TICK = 1.5;
+/** Budget accumulable, pour que les bascules restent irrégulières. */
+export const MAX_FRONT_FLIP_BUDGET = 4;
+
 export const MIN_FRONT_LENGTH = 20;
 /** Part de l'armée totale qui peut changer de position par tick. */
 export const TRANSFER_RATE = 0.004;
@@ -61,6 +69,47 @@ export const OFFENSIVE_MIN_FORCE = 5;
 export const OFFENSIVE_STALL_TICKS = 300;
 export const MAX_OFFENSIVES_PER_NATION = 3;
 export const DEFAULT_OFFENSIVE_SHARE = 0.7;
+
+// Mer. La puissance navale est une valeur unique par nation, en attendant mieux.
+/** Eau minimale sur le trajet pour qu'une flèche devienne un débarquement, en cellules. */
+export const AMPHIBIOUS_MIN_SEA = 3;
+export const AMPHIBIOUS_MAX_LENGTH = 1600;
+/** Vitesse de traversée, en cellules par tick. */
+export const AMPHIBIOUS_SPEED = 0.5;
+/** Part des forces perdue à l'arrivée, à marines égales. */
+export const AMPHIBIOUS_BASE_LOSS = 0.12;
+export const AMPHIBIOUS_LOSS_PER_CELL = 0.0003;
+export const AMPHIBIOUS_MIN_LOSS = 0.05;
+export const AMPHIBIOUS_MAX_LOSS = 0.8;
+export const BEACHHEAD_RADIUS = 2;
+/** Une zone côtière est ravitaillée si sa marine vaut au moins cette part de celle de l'ennemi. */
+export const NAVAL_SUPPLY_RATIO = 0.5;
+/** Part de la marine d'une nation annexée que récupère le vainqueur. */
+export const ANNEXED_NAVY = 0.25;
+
+export function baseNavy(gdpMusd: number): number {
+  return Math.sqrt(Math.max(1, gdpMusd / 1000));
+}
+
+// Capitulation.
+/** Une nation capitule quand elle tient moins que cette part de la valeur de son territoire. */
+export const CAPITULATION_SHARE = 0.25;
+export const CAPITULATION_INTERVAL_TICKS = 20;
+/** Une province annexée rapporte cette part de sa valeur d'origine. */
+export const ANNEXED_VALUE = 0.35;
+
+// Guerres déclarées par l'IA.
+export const WAR_INTERVAL_TICKS = 100;
+export const WAR_CHANCE = 0.5;
+/** Nombre maximal de guerres en cours, en part des nations encore en vie. */
+export const MAX_WAR_SHARE = 0.2;
+export const WAR_CAPACITY_RATIO = 1.2;
+/** Répit du joueur en début de partie. */
+export const PLAYER_GRACE_TICKS = 1800;
+export const ADJACENCY_INTERVAL_TICKS = 600;
+/** Portée des voisinages maritimes, en cellules de la grille à demi-résolution. */
+export const SEA_NEIGHBOR_RADIUS = 30;
+export const AI_AMPHIBIOUS_CHANCE = 0.1;
 
 // Ravitaillement et encerclements.
 export const SUPPLY_INTERVAL_TICKS = 20;

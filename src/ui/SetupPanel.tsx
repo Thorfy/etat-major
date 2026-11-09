@@ -1,52 +1,59 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
+import { type SaveSlot, type StoredSave, listSaves } from '../game/saves.ts';
 import type { NationData } from '../map/types.ts';
+import { formatClock } from './format.ts';
 
 interface SetupProps {
   nations: NationData[];
-  neighbors: Map<number, number[]>;
-  onStart(player: number, enemy: number): void;
+  onStart(player: number): void;
+  onResume(slot: SaveSlot): void;
 }
 
-export function SetupPanel({ nations, neighbors, onStart }: SetupProps) {
-  const idOf = (code: string) => nations.findIndex((nation) => nation.code === code) + 1;
-  const [player, setPlayer] = useState(idOf('FRA'));
-  const [enemy, setEnemy] = useState(idOf('DEU'));
+const SLOT_NAMES: Record<SaveSlot, string> = { auto: 'Sauvegarde automatique', manual: 'Ta sauvegarde' };
 
-  const byName = (a: number, b: number) => nations[a - 1].name.localeCompare(nations[b - 1].name, 'fr');
-  const playable = [...neighbors.keys()].sort(byName);
-  const enemies = [...(neighbors.get(player) ?? [])].sort(byName);
-  const options = (ids: number[]) =>
-    ids.map((id) => (
-      <option key={id} value={id}>
-        {nations[id - 1].name}
-      </option>
-    ));
+const savedDate = (time: number) =>
+  new Date(time).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+export function SetupPanel({ nations, onStart, onResume }: SetupProps) {
+  const [player, setPlayer] = useState(nations.findIndex((nation) => nation.code === 'FRA') + 1);
+  const [saves, setSaves] = useState<StoredSave[]>([]);
+  useEffect(() => {
+    void listSaves().then(setSaves);
+  }, []);
+
+  const options = nations
+    .map((nation, index) => ({ id: index + 1, name: nation.name }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   return (
     <section class="panel setup" aria-label="Nouvelle partie">
+      {saves.length > 0 && (
+        <div class="saves">
+          <h2>Continuer</h2>
+          {saves.map(({ slot, meta }) => (
+            <button key={slot} class="save-entry" onClick={() => onResume(slot)}>
+              <b>{meta.playerName}</b> · {formatClock(meta.tick / 10)}
+              <small>
+                {SLOT_NAMES[slot]} · {savedDate(meta.savedAt)}
+              </small>
+            </button>
+          ))}
+        </div>
+      )}
       <h2>Nouvelle partie</h2>
       <label>
         Ton pays
-        <select
-          value={player}
-          onChange={(event) => {
-            const next = Number(event.currentTarget.value);
-            setPlayer(next);
-            const candidates = neighbors.get(next) ?? [];
-            if (!candidates.includes(enemy)) setEnemy([...candidates].sort(byName)[0]);
-          }}
-        >
-          {options(playable)}
+        <select value={player} onChange={(event) => setPlayer(Number(event.currentTarget.value))}>
+          {options.map(({ id, name }) => (
+            <option key={id} value={id}>
+              {name}
+            </option>
+          ))}
         </select>
       </label>
-      <label>
-        Ton adversaire
-        <select value={enemy} onChange={(event) => setEnemy(Number(event.currentTarget.value))}>
-          {options(enemies)}
-        </select>
-      </label>
-      <button class="action" onClick={() => onStart(player, enemy)}>
-        Commencer la guerre
+      <p class="setup-note">Tu commences en paix. Le reste du monde, lui, n'attendra pas.</p>
+      <button class="action" onClick={() => onStart(player)}>
+        Commencer
       </button>
     </section>
   );

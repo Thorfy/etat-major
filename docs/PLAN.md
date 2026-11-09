@@ -17,8 +17,9 @@ Une partie dure 1 à 2 h, avec pause, vitesse réglable et sauvegarde.
 
 Choix par défaut, à confirmer :
 
-- **Mers :** zones maritimes abstraites avec une puissance navale, et flèches amphibies
-  depuis les ports. Pas de flottes individuelles.
+- **Mers :** version de base en place depuis le jalon 3 : une puissance navale par nation
+  et des flèches amphibies depuis n'importe quelle côte. Les zones maritimes et les ports
+  restent à décider. Pas de flottes individuelles.
 - **Aviation :** intégrée à la puissance militaire et aux doctrines.
 - **Micro-États :** ceux qui sont trop petits pour la grille sont rattachés à un voisin.
 - **Frontières contestées :** contrôle effectif, modifiable dans `data/map-config.json`.
@@ -37,6 +38,73 @@ Choix par défaut, à confirmer :
 | 6 | Diplomatie, alliances, tension mondiale | Une coalition se forme contre un pays trop expansionniste |
 | 7 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
 | 8 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
+
+## État du jalon 3
+
+Terminé : une partie complète se joue, de la paix à la capitulation, avec sauvegarde.
+**Le test de plaisir du jalon 2 reste ouvert** : toutes les parties ont été jouées par des
+scripts ou des clics simulés.
+
+**Règles ajoutées.** Toutes sont des premiers réglages, dans `src/sim/balance.ts`.
+
+- **Monde :** on choisit un pays, on démarre en paix. Une nation en paix attaque parfois un
+  voisin au moins 1,2 fois plus faible, par terre ou par mer. Le joueur a 3 min de répit.
+- **Déclarer la guerre :** à un voisin, ou à n'importe qui avec une marine. Sans frontière
+  commune, le front démarre à 0 % de forces, avec une alerte au premier contact.
+- **Débarquements :** une flèche qui traverse au moins 3 cellules d'eau part en mer. La
+  traversée prend du temps, les pertes dépendent de la distance et du rapport des marines,
+  puis une tête de pont apparaît. La flèche peut faire 1 600 cellules, puis reprend la
+  portée normale après le débarquement.
+- **Marine :** une seule valeur par nation, tirée du PIB, nulle sans accès à la mer. Une zone
+  côtière coupée reste ravitaillée si sa marine vaut au moins la moitié de celle de l'ennemi.
+  Il n'y a ni flottes ni zones maritimes.
+- **Capitulation :** sous 25 % de la valeur de son territoire d'origine. L'ennemi qui en tient
+  le plus annexe le reste, îles comprises. Les provinces annexées ne valent plus que 35 % et
+  ne sont plus hachurées. Les autres guerres du vaincu s'arrêtent.
+- **Plafond :** 1,5 cellule par tick et par front, pour qu'aucun pays ne s'écroule en une minute.
+- **Noms de pays :** ils suivent le territoire et disparaissent avec le pays.
+- **Sauvegarde :** deux emplacements dans le navigateur, automatique toutes les 2 min et
+  manuel. Une partie reprise démarre en pause.
+- **Défaite :** on peut revenir au menu ou regarder le monde continuer.
+
+**Vérifié.**
+
+- Une partie reprise après une sauvegarde suit la même partie qu'une partie jamais
+  interrompue : même carte et même empreinte d'état après 2 400 ticks, avec IA et offensives.
+- Dans le navigateur, la carte reprise après rechargement a la même empreinte. Un fichier
+  fait environ 230 Ko au début d'une partie.
+- Le build de production marche depuis un sous-dossier, sauvegarde comprise.
+
+**Parties mondiales sans joueur** (IA seule, 60 min à ×1, deux graines) : environ 145 nations
+sur 193 à la fin, soit 0,8 capitulation par minute, et 15 à 20 guerres en cours en moyenne.
+À ce rythme, il faudrait bien plus de 2 h pour qu'il ne reste que quelques blocs.
+
+**Pire cas**, toutes les nations voisines en guerre :
+
+| Mesure | Résultat |
+|---|---|
+| Tick sans navigateur, 10 min de jeu | Médiane 6,4 ms, p95 37 ms, p99 88 ms, **max 170 ms** |
+| Tick dans le Worker, à ×4 | Environ 6 ms, **max 170 ms** |
+| Image, carte entière, à ×4 | Médiane 4,2 ms, p99 5,5 ms, max 9,2 ms |
+
+Le budget de 100 ms est donc dépassé par pics. Cela se produit dans le Worker : l'image ne
+saute pas, la simulation prend un court retard qu'elle rattrape. Causes probables, non isolées :
+le contrôle du ravitaillement, toutes les 2 s, et le recalcul des voisinages, toutes les 60 s.
+
+Points à reprendre :
+
+- **Équilibre à éprouver par un joueur.** Les scripts jouant la France contre l'Allemagne n'ont
+  jamais gagné de terrain, et ces duels n'ont pas été remesurés depuis le plafond par front.
+- **Pas de paix.** Une guerre ne finit que par une capitulation. Un front bloqué le reste. La
+  diplomatie arrive au jalon 6.
+- **Prudence de l'IA :** elle attaque sur la seule capacité, sans regarder ses autres fronts.
+- **Géants peu inquiétés :** la Russie reste autour de 23 % de la terre dans ces parties, et
+  peu de pays sont assez forts pour l'attaquer. À revoir avec l'économie.
+- **Une carte régénérée invalide les sauvegardes**, ce qui est volontaire : la reprise refuse
+  alors la partie, avec un message.
+- **Pas de reconquête après une annexion :** impossible de libérer un pays disparu.
+- **Sauvegarde automatique :** une partie reprise en pause n'est pas ré-enregistrée tant que
+  le temps ne repart pas, et la dernière sauvegarde peut donc dater de 2 min.
 
 ## État du jalon 2
 
@@ -57,8 +125,9 @@ les parties ont été jouées par des scripts ou des clics simulés.
 - **Pause et vitesse :** ×1, ×2, ×4, avec ordres possibles en pause.
 - **IA :** elle engage presque tout en sous-nombre, et lance des offensives sinon.
 
-**Parties scriptées de 30 min sur la vraie carte** (gain du joueur, en cellules, avec une
-seule graine). Les stratégies sont rigides : elles ne réagissent pas comme un joueur.
+**Parties scriptées de 30 min sur la vraie carte, avant le jalon 3 et donc sans le reste du
+monde** (gain du joueur, en cellules, avec une seule graine). Les stratégies sont rigides :
+elles ne réagissent pas comme un joueur.
 
 | Stratégie | France contre IA allemande | Allemagne contre IA française |
 |---|---|---|
@@ -88,8 +157,6 @@ Points à reprendre :
   scripts, ou un vrai déséquilibre pour le camp faible.
 - **Résultats très variables selon la graine** dans certains matchs. Il faudra plus de
   graines pour conclure sur une stratégie.
-- **Poches côtières :** une poche au bord de la mer s'effrite aussi. Le ravitaillement
-  maritime reste à décider avec les traversées (jalon 3).
 - **Point d'ancrage perdu :** si une exclave perd sa cellule d'ancrage, elle peut devenir
   une poche. C'est voulu, mais le joueur ne le voit pas sur la carte.
 - **Panneau des fronts** long à faible hauteur d'écran : il défile.
@@ -118,14 +185,8 @@ La grille 4096×2048 est donc confirmée : le repli en 2048×1024 n'est pas néc
 
 Points à reprendre :
 
-- **Îles et territoires d'outre-mer** hors d'atteinte tant que les traversées maritimes
-  n'existent pas (jalon 3). Une nation sans frontière terrestre reste en vie : il n'y a
-  pas encore de capitulation.
 - **Puissance militaire provisoire** : `baseCapacity` dépend du PIB et de la population de
   départ. Elle sera remplacée par l'économie au jalon 4.
-- **Noms de pays** : ils restent à leur place d'origine, même sur un pays entièrement conquis.
-- **Sauvegarde et rejeu** : la simulation est déterministe à ordres égaux, mais les ordres
-  ne sont pas encore journalisés avec leur tick. Il faudra le faire au jalon 3.
 
 ## État du jalon 0
 

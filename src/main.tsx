@@ -1,52 +1,53 @@
 import { render } from 'preact';
-import { GAME_SPEEDS, GameClient } from './game/GameClient.ts';
-import { findLandNeighbors } from './map/adjacency.ts';
-import type { LoadedWorld } from './map/loadWorld.ts';
+import { GAME_SPEEDS, GameClient, type GameStart, mapHashOf } from './game/GameClient.ts';
+import { SAVE_VERSION, decodeSave } from './game/saveFormat.ts';
+import { type SaveSlot, readSave } from './game/saves.ts';
 import { loadWorld } from './map/loadWorld.ts';
-import { wrapDeltaX } from './map/projection.ts';
 import { MapView } from './render/MapView.ts';
 import { App, type UiState } from './ui/App.tsx';
 
 const ui = document.getElementById('ui')!;
 const message = (text: string) => render(<div class="fullscreen-message">{text}</div>, ui);
 
-function neighborsOf(world: LoadedWorld): Map<number, number[]> {
-  const neighbors = new Map<number, number[]>();
-  const add = (from: number, to: number) => {
-    const list = neighbors.get(from);
-    if (list) list.push(to);
-    else neighbors.set(from, [to]);
-  };
-  for (const [a, b] of findLandNeighbors(world.ownerGrid, world.data.width, world.data.height)) {
-    add(a, b);
-    add(b, a);
-  }
-  return neighbors;
-}
+const MIN_FOCUS_SPAN = 160;
 
 async function start(): Promise<void> {
   message('Chargement de la carte…');
   const world = await loadWorld();
-  const neighbors = neighborsOf(world);
   const noCell = { province: 0, owner: 0, terrain: 0 };
-  const state: UiState = { hover: noCell, selected: noCell, debug: false, aiming: false, game: null };
+  const state: UiState = { hover: noCell, selected: noCell, debug: false, aiming: false, game: null, startError: null };
 
   let view: MapView | null = null;
   const refresh = () => {
     if (!view) return;
-    render(<App world={world} view={view} state={{ ...state }} neighbors={neighbors} onStart={startGame} />, ui);
+    render(<App world={world} view={view} state={{ ...state }} onStart={startGame} onResume={(slot) => void resume(slot)} />, ui);
   };
 
-  const startGame = (player: number, enemy: number) => {
-    const a = world.data.nations[player - 1].label;
-    const b = world.data.nations[enemy - 1].label;
-    const dx = wrapDeltaX(a.x, b.x);
-    const span = Math.max(Math.hypot(dx, b.y - a.y) * 2.2, 160);
-    view!.focus(a.x + dx / 2, (a.y + b.y) / 2, span);
-    const game = new GameClient(world, view!, player, enemy, Date.now() >>> 0, refresh);
+  const launch = (settings: GameStart) => {
+    const label = world.data.nations[settings.player - 1].label;
+    view!.focus(label.x, label.y, Math.max(label.r * 8, MIN_FOCUS_SPAN));
+    const game = new GameClient(world, view!, settings, refresh);
     state.game = game;
-    view!.setPlayer(player, (nation) => game.isAtWarWith(nation));
+    state.startError = null;
+    view!.setPlayer(settings.player, (nation) => game.isAtWarWith(nation));
+    if (!game.canCommand) view!.setCommandEnabled(false);
     refresh();
+  };
+
+  const startGame = (player: number) => launch({ player, seed: Date.now() >>> 0 });
+
+  const resume = async (slot: SaveSlot) => {
+    try {
+      const stored = await readSave(slot);
+      if (!stored) throw new Error('sauvegarde introuvable.');
+      if (stored.meta.version !== SAVE_VERSION) throw new Error('elle vient d\'une autre version du jeu.');
+      if (stored.meta.mapHash !== mapHashOf(world)) throw new Error('elle a été jouée sur une autre carte.');
+      const saved = await decodeSave(stored.blob, world.data.width * world.data.height);
+      launch({ player: stored.meta.player, seed: 1, saved });
+    } catch (error) {
+      state.startError = `Reprise impossible : ${error instanceof Error ? error.message : String(error)}`;
+      refresh();
+    }
   };
 
   view = new MapView(

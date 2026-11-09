@@ -82,10 +82,11 @@ describe('invariants du front', () => {
     expect(sim.owners.filter((owner) => owner === A).length).toBe(sim.cellsOf(A));
   });
 
-  it('garde une frontière active exacte après des milliers de bascules', () => {
+  it('garde une frontière active exacte après de nombreuses bascules', () => {
     const sim = makeSim(9, A);
     aOverwhelmsB(sim);
-    run(sim, 1000);
+    // Assez pour bouger le front, pas assez pour que B capitule et vide la frontière.
+    run(sim, 300);
     let expected = 0;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {

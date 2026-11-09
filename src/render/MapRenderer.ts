@@ -35,6 +35,7 @@ export class MapRenderer {
   private readonly timerExt: object | null;
   private query: WebGLQuery | null = null;
   private readonly dirtyTiles = new Set<number>();
+  private readonly homes: Uint16Array;
   /** Dernière durée GPU mesurée, en ms (null si le navigateur ne l'expose pas). */
   gpuMs: number | null = null;
 
@@ -48,6 +49,7 @@ export class MapRenderer {
     this.gl = gl;
     this.canvas = canvas;
     this.world = world;
+    this.homes = new Uint16Array(world.data.provinces.length + 1);
     this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.setup();
   }
@@ -87,15 +89,37 @@ export class MapRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
 
-    const homes = new Uint16Array(world.data.provinces.length + 1);
     world.data.provinces.forEach((province, index) => {
-      homes[index + 1] = province.nation + 1;
+      this.homes[index + 1] = province.nation + 1;
     });
-    this.bindDataTexture(4, 'uProvinceHome', gl.R16UI, homes.length, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, homes);
+    this.bindDataTexture(4, 'uProvinceHome', gl.R16UI, this.homes.length, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, this.homes);
 
     const size = nations.length + 1;
     this.bindDataTexture(5, 'uWars', gl.R8, size, size, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(size * size));
     this.bindDataTexture(6, 'uTerrain', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, world.terrainGrid);
+  }
+
+  /** Une province annexée n'est plus hachurée : elle appartient à son nouveau pays. */
+  private uploadHomes(): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE4);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.homes.length, 1, gl.RED_INTEGER, gl.UNSIGNED_SHORT, this.homes);
+  }
+
+  updateHomes(pairs: Uint16Array): void {
+    for (let i = 0; i < pairs.length; i += 2) this.homes[pairs[i]] = pairs[i + 1];
+    this.uploadHomes();
+  }
+
+  /** Remplace toute la carte, à la reprise d'une partie. */
+  loadState(owners: Uint16Array, homes: Uint16Array): void {
+    const { gl, world } = this;
+    world.ownerGrid.set(owners);
+    this.homes.set(homes);
+    this.uploadHomes();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, world.data.width, world.data.height, gl.RED_INTEGER, gl.UNSIGNED_SHORT, world.ownerGrid);
+    this.dirtyTiles.clear();
   }
 
   /** Reporte les bascules dans la grille ; l'envoi au GPU se fait au prochain rendu. */

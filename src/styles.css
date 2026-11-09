@@ -523,6 +523,144 @@ canvas {
   text-align: center;
 }
 
+.action:disabled,
+.game-menu button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.action.quiet {
+  border-color: var(--panel-line);
+  background: none;
+  font-weight: 400;
+}
+
+.setup-note {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.saves {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.save-entry {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: rgba(224, 184, 79, 0.1);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.save-entry:hover,
+.save-entry:focus-visible {
+  background: rgba(224, 184, 79, 0.24);
+}
+
+.save-entry b {
+  font-weight: 600;
+}
+
+.save-entry small {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.game-menu {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.game-menu button {
+  min-height: 28px;
+  padding: 2px 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.game-menu button:not(:disabled):hover,
+.game-menu button:not(:disabled):focus-visible {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+
+.front-note.peace {
+  margin: 10px 0 0;
+}
+
+.front dl + dl {
+  margin-top: 3px;
+}
+
+.journal {
+  right: 12px;
+  bottom: 52px;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  padding: 6px 12px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.journal p {
+  margin: 2px 0;
+  color: var(--ink-soft);
+}
+
+.journal p.mine {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.journal time {
+  font-family: var(--mono);
+}
+
+.dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(10, 14, 17, 0.55);
+  pointer-events: auto;
+}
+
+.dialog {
+  position: static;
+  width: 380px;
+  max-width: 100%;
+  padding: 20px;
+}
+
+.dialog h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.dialog p {
+  margin: 0 0 8px;
+  color: var(--ink-soft);
+}
+
 .fullscreen-message {
   position: absolute;
   inset: 0;
@@ -536,7 +674,8 @@ canvas {
 }
 
 @media (max-width: 640px) {
-  .hints {
+  .hints,
+  .journal {
     display: none;
   }
 

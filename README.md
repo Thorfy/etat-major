@@ -15,6 +15,8 @@ npm run dev
 
 Puis ouvrir http://localhost:5173. La carte générée est versionnée dans `public/map/` : rien d'autre n'est nécessaire.
 
+Les parties sont sauvegardées dans le navigateur. Régénérer la carte rend les anciennes sauvegardes illisibles.
+
 ## Commandes
 
 | Commande | Rôle |
@@ -22,7 +24,7 @@ Puis ouvrir http://localhost:5173. La carte générée est versionnée dans `pub
 | `npm run dev` | Serveur de développement |
 | `npm test` | Tests unitaires |
 | `npm run build` | Vérification des types et build de production dans `dist/` |
-| `npm run bench` | Joue des parties scriptées et mesure le pire cas de la simulation, sans navigateur |
+| `npm run bench` | Joue une partie mondiale sans navigateur (`-- duels` : stratégies scriptées, `-- stress` : pire cas) |
 | `npm run map:fetch` | Télécharge Natural Earth 5.1.2 dans `data/raw/` (environ 60 Mo) |
 | `npm run map:build` | Régénère `public/map/` depuis ces données |
 

@@ -37,10 +37,27 @@ function SpeedControls({ game }: { game: GameClient }) {
   );
 }
 
+function GameMenu({ game }: { game: GameClient }) {
+  const backToMenu = async () => {
+    // Quitter ne perd rien : la partie part d'abord en sauvegarde automatique.
+    if (game.canCommand) await game.save('auto');
+    window.location.reload();
+  };
+  return (
+    <div class="game-menu">
+      <button disabled={game.saving} onClick={() => void game.save('manual')}>
+        {game.saving ? 'Sauvegarde…' : 'Sauvegarder'}
+      </button>
+      <button disabled={game.saving} onClick={() => void backToMenu()}>
+        Quitter vers le menu
+      </button>
+    </div>
+  );
+}
+
 function OffensivesSection({ game, nations, view, aiming }: { game: GameClient; nations: NationData[]; view: MapView; aiming: boolean }) {
   const offensives = game.playerOffensives();
-  const reserve = game.snapshot?.nations.find((entry) => entry.id === game.player)?.reserve ?? 0;
-  const committed = reserve * game.offensiveShare;
+  const committed = (game.playerStats?.reserve ?? 0) * game.offensiveShare;
   const enemyOffensives = (game.snapshot?.offensives ?? []).filter(
     (offensive) => offensive.nation !== game.player && game.isAtWarWith(offensive.nation),
   );
@@ -70,7 +87,8 @@ function OffensivesSection({ game, nations, view, aiming }: { game: GameClient; 
           <div class="offensive" key={offensive.id}>
             <div class="offensive-row">
               <span>
-                {integer.format(offensive.force)} <small>· {integer.format(offensive.captured)} cellules prises</small>
+                {integer.format(offensive.force)}{' '}
+                <small>· {offensive.inTransit ? 'en mer' : `${integer.format(offensive.captured)} cellules prises`}</small>
               </span>
               <button class="close-inline" aria-label="Arrêter l'offensive et rendre ses forces à la réserve" onClick={() => game.cancelOffensive(offensive.id)}>
                 ×
@@ -103,7 +121,7 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
   const ratio = Math.exp(mine === 0 ? front.logRatio : -front.logRatio);
   const balance = (ratio / (1 + ratio)) * 100;
   const net = own.captured - theirs.captured;
-  const closed = front.length === 0 && game.snapshot!.tick > 0;
+  const noContact = front.length === 0;
   const enemyPocket = game.snapshot?.nations.find((entry) => entry.id === enemyId)?.pocketCells ?? 0;
 
   return (
@@ -113,10 +131,10 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
           <span class="swatch" style={{ background: enemy.color }} />
           {enemy.name}
         </h3>
-        <span class={`ratio ${ratio >= 1 ? 'ahead' : 'behind'}`}>{formatRatio(ratio)}</span>
+        {!noContact && <span class={`ratio ${ratio >= 1 ? 'ahead' : 'behind'}`}>{formatRatio(ratio)}</span>}
       </header>
-      {closed ? (
-        <p class="front-note">Plus de frontière terrestre commune.</p>
+      {noContact ? (
+        <p class="front-note">Pas de frontière commune : trace une flèche au-dessus de la mer pour débarquer.</p>
       ) : (
         <>
           <div class="balance" role="img" aria-label={`Rapport de force ${formatRatio(ratio)}`}>
@@ -147,15 +165,17 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
               onInput={(event) => game.setFront(enemyId, Number(event.currentTarget.value) / 100, order.stance)}
             />
           </label>
+          <dl>
+            <dt>Sur le front</dt>
+            <dd>{integer.format(own.force)} / {integer.format(theirs.force)}</dd>
+            <dt>Adversaire</dt>
+            <dd>{STANCE_STATUS[theirs.stance]}</dd>
+            <dt>Longueur</dt>
+            <dd>{integer.format(front.length)}</dd>
+          </dl>
         </>
       )}
       <dl>
-        <dt>Sur le front</dt>
-        <dd>{integer.format(own.force)} / {integer.format(theirs.force)}</dd>
-        <dt>Adversaire</dt>
-        <dd>{STANCE_STATUS[theirs.stance]}</dd>
-        <dt>Longueur</dt>
-        <dd>{integer.format(front.length)}</dd>
         <dt>Gains nets</dt>
         <dd class={net > 0 ? 'ahead' : net < 0 ? 'behind' : ''}>
           {net > 0 ? '+' : ''}
@@ -184,7 +204,7 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
     return <div class="panel fronts"><p class="front-note">Simulation arrêtée : {game.error}</p></div>;
   }
   const nation = nations[game.player - 1];
-  const stats = game.snapshot?.nations.find((entry) => entry.id === game.player);
+  const stats = game.playerStats;
   const fronts = game.playerFronts();
   const delta = stats ? stats.cells - game.startCells : 0;
 
@@ -198,12 +218,16 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
         <span class="clock">{game.speed === 0 ? 'en pause' : formatClock(game.elapsedSeconds)}</span>
       </header>
       <SpeedControls game={game} />
-      {stats && (
+      <GameMenu game={game} />
+      {!game.canCommand && <p class="alert">Ton pays a capitulé : tu observes le reste de la partie.</p>}
+      {stats && game.canCommand && (
         <dl>
           <dt>Armée</dt>
           <dd>{integer.format(stats.army)} / {integer.format(stats.capacity)}</dd>
           <dt>Réserve</dt>
           <dd>{integer.format(stats.reserve)}</dd>
+          <dt>Marine</dt>
+          <dd>{stats.navy > 0 ? integer.format(stats.navy) : 'aucune'}</dd>
           <dt>Territoire</dt>
           <dd class={delta > 0 ? 'ahead' : delta < 0 ? 'behind' : ''}>
             {integer.format(stats.cells)} ({delta > 0 ? '+' : ''}{integer.format(delta)})
@@ -214,10 +238,15 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
               <dd class="behind">{integer.format(stats.pocketCells)}</dd>
             </>
           )}
+          <dt>Nations en vie</dt>
+          <dd>{game.snapshot?.aliveNations ?? ''}</dd>
         </dl>
       )}
-      <OffensivesSection game={game} nations={nations} view={view} aiming={aiming} />
-      {fronts.map((front) => (
+      {game.canCommand && fronts.length === 0 && (
+        <p class="front-note peace">Tu es en paix. Clique sur un pays pour lui déclarer la guerre.</p>
+      )}
+      {game.canCommand && <OffensivesSection game={game} nations={nations} view={view} aiming={aiming} />}
+      {game.canCommand && fronts.map((front) => (
         <FrontCard key={`${front.a}-${front.b}`} game={game} front={front} nations={nations} />
       ))}
     </section>

@@ -1,6 +1,7 @@
-// Mesure la simulation sur la vraie carte, sans navigateur : parties jouées par des
-// stratégies scriptées (rythme, équilibre) et pire cas (toutes les nations en guerre).
-//   node tools/bench-sim.ts [ticks du pire cas]
+// Mesure la simulation sur la vraie carte, sans navigateur.
+//   node tools/bench-sim.ts world [minutes] [graine]   partie mondiale jouée par l'IA
+//   node tools/bench-sim.ts duels                      stratégies scriptées, France/Allemagne
+//   node tools/bench-sim.ts stress [ticks]             toutes les nations voisines en guerre
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,60 @@ const make = (player: number, seed = 1) =>
   });
 const minutes = (ticks: number) => (ticks / 600).toFixed(1);
 const percentile = (sorted: number[], p: number) => sorted[Math.floor(sorted.length * p)];
+const summary = (durations: number[]) => {
+  const sorted = [...durations].sort((a, b) => a - b);
+  return `médiane ${percentile(sorted, 0.5).toFixed(2)} ms, p95 ${percentile(sorted, 0.95).toFixed(2)} ms, p99 ${percentile(sorted, 0.99).toFixed(2)} ms, max ${sorted[sorted.length - 1].toFixed(2)} ms`;
+};
+
+// ---------------------------------------------------------------------------
+// Partie mondiale
+// ---------------------------------------------------------------------------
+
+function worldGame(durationMinutes: number, seed: number) {
+  const sim = make(0, seed);
+  const ticks = durationMinutes * 600;
+  const landTotal = world.nations.reduce((sum, nation) => sum + nation.cells, 0);
+  const durations: number[] = [];
+  let capitulations = 0;
+  let wars = 0;
+  let maxBytes = 0;
+  const firstLosses: string[] = [];
+  console.log(`--- Partie mondiale, graine ${seed}, ${durationMinutes} min de jeu à ×1`);
+  for (let t = 1; t <= ticks; t++) {
+    const begin = performance.now();
+    sim.step();
+    const changes = sim.drainChanges();
+    durations.push(performance.now() - begin);
+    maxBytes = Math.max(maxBytes, changes.cells.byteLength + changes.owners.byteLength);
+    for (const event of changes.events) {
+      if (event.type === 'war') wars++;
+      else {
+        capitulations++;
+        if (firstLosses.length < 8) {
+          firstLosses.push(`${world.nations[event.loser - 1].name} → ${world.nations[event.winner - 1].name} (${minutes(event.tick)}′)`);
+        }
+      }
+    }
+    if (t % 6000 === 0) {
+      const ranking = world.nations
+        .map((nation, index) => ({ name: nation.name, cells: sim.cellsOf(index + 1) }))
+        .sort((a, b) => b.cells - a.cells)
+        .slice(0, 5)
+        .map((entry) => `${entry.name} ${((entry.cells / landTotal) * 100).toFixed(0)} %`);
+      console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
+    }
+  }
+  console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);
+  console.log(`  Tick : ${summary(durations)} ; ${(maxBytes / 1024).toFixed(0)} Ko au plus en un tick`);
+  const begin = performance.now();
+  const save = sim.save();
+  const json = JSON.stringify(save.state);
+  console.log(`  Sauvegarde : ${(performance.now() - begin).toFixed(0)} ms, ${(json.length / 1024).toFixed(0)} Ko de JSON avant compression`);
+}
+
+// ---------------------------------------------------------------------------
+// Duels scriptés
+// ---------------------------------------------------------------------------
 
 interface Strategy {
   label: string;
@@ -46,7 +101,6 @@ interface Strategy {
   orders(sim: Simulation, player: number, enemy: number, tick: number): void;
 }
 
-/** Une cellule du joueur au contact de l'ennemi, la plus proche d'une ligne verticale ou horizontale donnée. */
 function frontCells(sim: Simulation, player: number, enemy: number): { x: number; y: number }[] {
   const { owners, width: W, height: H } = sim;
   const cells: { x: number; y: number }[] = [];
@@ -70,7 +124,7 @@ const wrapDelta = (from: number, to: number) => {
 };
 
 /** Joueur humain simplifié : fronts tenus, réserve gardée, offensives répétées vers le cœur ennemi. */
-function arrowPlayer(allocation: number, everyTicks: number, pincer: boolean): Strategy['orders'] {
+function arrowPlayer(allocation: number, everyTicks: number): Strategy['orders'] {
   return (sim, player, enemy, tick) => {
     sim.setFront(player, enemy, allocation, 'hold');
     if (tick % everyTicks !== 0 || sim.reserveOf(player) < sim.armyOf(player) * 0.15) return;
@@ -82,16 +136,13 @@ function arrowPlayer(allocation: number, everyTicks: number, pincer: boolean): S
     if (provinces.length === 0) return;
     const center = provinces.reduce((sum, { province }) => ({ x: sum.x + province.x, y: sum.y + province.y }), { x: 0, y: 0 });
     const target = { x: Math.floor(center.x / provinces.length), y: Math.floor(center.y / provinces.length) };
-    const start = pincer ? [cells[0], cells[cells.length - 1]] : [cells[cells.length >> 1]];
-    for (const from of start) {
-      const dx = wrapDelta(from.x, target.x);
-      const dy = target.y - from.y;
-      const length = Math.hypot(dx, dy) || 1;
-      const reach = Math.min(length, 80);
-      const toX = ((from.x + Math.round((dx / length) * reach)) % world.width + world.width) % world.width;
-      const toY = from.y + Math.round((dy / length) * reach);
-      sim.launchOffensive(player, from.x, from.y, toX, toY, pincer ? 0.5 : 0.8);
-    }
+    const from = cells[cells.length >> 1];
+    const dx = wrapDelta(from.x, target.x);
+    const dy = target.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const reach = Math.min(length, 80);
+    const toX = ((from.x + Math.round((dx / length) * reach)) % world.width + world.width) % world.width;
+    sim.launchOffensive(player, from.x, from.y, toX, from.y + Math.round((dy / length) * reach), 0.8);
   };
 }
 
@@ -99,75 +150,71 @@ const STRATEGIES: Strategy[] = [
   { label: 'Tient à 100 %, sans réserve', orders: (sim, p, e) => sim.setFront(p, e, 1, 'hold') },
   { label: 'Tient à 60 %, sans offensive', orders: (sim, p, e) => sim.setFront(p, e, 0.6, 'hold') },
   { label: 'Attaque à 100 %', orders: (sim, p, e) => sim.setFront(p, e, 1, 'attack') },
-  { label: 'Tient à 60 %, une offensive par minute', orders: arrowPlayer(0.6, 600, false) },
-  { label: 'Tient à 60 %, tenailles toutes les 2 min', orders: arrowPlayer(0.6, 1200, true) },
-  { label: 'Tient à 40 %, offensives toutes les 30 s', orders: arrowPlayer(0.4, 300, false) },
+  { label: 'Tient à 60 %, une offensive par minute', orders: arrowPlayer(0.6, 600) },
+  { label: 'Tient à 40 %, offensives toutes les 30 s', orders: arrowPlayer(0.4, 300) },
 ];
 
-function campaign(playerCode: string, enemyCode: string, strategy: Strategy, durationTicks: number, seed: number) {
-  const player = idOf(playerCode);
-  const enemy = idOf(enemyCode);
-  const sim = make(player, seed);
-  sim.declareWars([[player, enemy]]);
-  const playerStart = sim.cellsOf(player);
-  const enemyStart = sim.cellsOf(enemy);
-  const samples: string[] = [];
-  let maxEnemyPocket = 0;
-  let ended = '';
-  for (let t = 1; t <= durationTicks; t++) {
-    strategy.orders(sim, player, enemy, t);
+function duels() {
+  const duration = 18000;
+  console.log(`--- Duels de ${minutes(duration)} min, le reste du monde joue aussi (gain du joueur en cellules)`);
+  for (const [playerCode, enemyCode] of [['FRA', 'DEU'], ['DEU', 'FRA']] as const) {
+    console.log(`\n${playerCode} (joueur) contre ${enemyCode} (IA)`);
+    for (const strategy of STRATEGIES) {
+      for (const seed of [1, 2]) {
+        const player = idOf(playerCode);
+        const enemy = idOf(enemyCode);
+        // L'IA du reste du monde reste active : seule compte la différence pour le joueur.
+        const sim = make(player, seed);
+        sim.declareWars([[player, enemy]]);
+        const start = sim.cellsOf(player);
+        const samples: string[] = [];
+        let end = '';
+        for (let t = 1; t <= duration; t++) {
+          if (sim.isAlive(player) && sim.isAlive(enemy)) strategy.orders(sim, player, enemy, t);
+          sim.step();
+          sim.drainChanges();
+          if (t % 6000 === 0) samples.push(`${minutes(t)}′ ${sim.cellsOf(player) - start >= 0 ? '+' : ''}${sim.cellsOf(player) - start}`);
+          if (!end && !sim.isAlive(enemy)) end = `ennemi capitule en ${minutes(t)}′`;
+          if (!end && !sim.isAlive(player)) end = `joueur capitule en ${minutes(t)}′`;
+        }
+        console.log(`  ${strategy.label} [graine ${seed}] : ${samples.join(' | ')}${end ? ` — ${end}` : ''}`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pire cas
+// ---------------------------------------------------------------------------
+
+function stress(ticks: number) {
+  console.log(`--- Pire cas : guerre mondiale, IA active, ${ticks} ticks (${minutes(ticks)} min de jeu)`);
+  const sim = make(0);
+  const pairs = findLandNeighbors(ownerGrid, world.width, world.height);
+  const before = performance.now();
+  sim.declareWars(pairs);
+  console.log(`${pairs.length} fronts déclarés en ${(performance.now() - before).toFixed(0)} ms, frontière ${sim.frontierSize} cellules`);
+  const durations: number[] = [];
+  let maxBytes = 0;
+  let maxOffensives = 0;
+  let capitulations = 0;
+  for (let t = 0; t < ticks; t++) {
+    const begin = performance.now();
     sim.step();
-    sim.drainChanges();
-    if (t % 20 === 0) {
-      const stats = sim.snapshot().nations.find((n) => n.id === enemy);
-      maxEnemyPocket = Math.max(maxEnemyPocket, stats?.pocketCells ?? 0);
-    }
-    if (t % 6000 === 0) samples.push(`${minutes(t)}′ ${sim.cellsOf(player) - playerStart >= 0 ? '+' : ''}${sim.cellsOf(player) - playerStart}`);
-    if (!ended && sim.cellsOf(enemy) < enemyStart * 0.25) ended = `ennemi à 25 % en ${minutes(t)}′`;
-    if (!ended && sim.cellsOf(player) < playerStart * 0.25) ended = `joueur à 25 % en ${minutes(t)}′`;
-  }
-  return { samples, maxEnemyPocket, ended, armies: `${sim.armyOf(player).toFixed(0)}/${sim.armyOf(enemy).toFixed(0)}` };
-}
-
-const DURATION = 18000;
-console.log(`--- Parties de ${minutes(DURATION)} min (gain du joueur en cellules, par graine)`);
-for (const [playerCode, enemyCode] of [['FRA', 'DEU'], ['DEU', 'FRA']] as const) {
-  console.log(`\n${playerCode} (joueur) contre ${enemyCode} (IA)`);
-  for (const strategy of STRATEGIES) {
-    for (const seed of [1, 2]) {
-      const result = campaign(playerCode, enemyCode, strategy, DURATION, seed);
-      console.log(`  ${strategy.label} [graine ${seed}] : ${result.samples.join(' | ')} — armées ${result.armies}, poche ennemie max ${result.maxEnemyPocket}${result.ended ? `, ${result.ended}` : ''}`);
+    const changes = sim.drainChanges();
+    durations.push(performance.now() - begin);
+    maxBytes = Math.max(maxBytes, changes.cells.byteLength + changes.owners.byteLength + changes.provinces.byteLength);
+    maxOffensives = Math.max(maxOffensives, sim.offensives.length);
+    capitulations += changes.events.filter((event) => event.type === 'capitulation').length;
+    if ((t + 1) % Math.ceil(ticks / 5) === 0) {
+      console.log(`  tick ${t + 1} : frontière ${sim.frontierSize}, offensives ${sim.offensives.length}, nations ${sim.aliveCount}, capitulations ${capitulations}`);
     }
   }
+  console.log(`Tick : ${summary(durations)} (budget : 100 ms)`);
+  console.log(`${(maxBytes / 1024).toFixed(0)} Ko au plus en un tick ; ${maxOffensives} offensives en même temps au plus`);
 }
 
-const ticks = Number(process.argv[2] ?? 6000);
-console.log(`\n--- Pire cas : guerre mondiale, IA active avec offensives, ${ticks} ticks (${minutes(ticks)} min de jeu)`);
-const sim = make(0);
-const pairs = findLandNeighbors(ownerGrid, world.width, world.height);
-const before = performance.now();
-sim.declareWars(pairs);
-console.log(`${pairs.length} fronts déclarés en ${(performance.now() - before).toFixed(0)} ms, frontière ${sim.frontierSize} cellules`);
-const durations: number[] = [];
-let maxFlips = 0;
-let maxBytes = 0;
-let totalFlips = 0;
-let maxOffensives = 0;
-let maxPockets = 0;
-for (let t = 0; t < ticks; t++) {
-  const begin = performance.now();
-  sim.step();
-  const changes = sim.drainChanges();
-  durations.push(performance.now() - begin);
-  maxFlips = Math.max(maxFlips, changes.cells.length);
-  totalFlips += changes.cells.length;
-  maxBytes = Math.max(maxBytes, changes.cells.byteLength + changes.owners.byteLength + changes.provinces.byteLength);
-  maxOffensives = Math.max(maxOffensives, sim.offensives.length);
-  if (t % 200 === 0) maxPockets = Math.max(maxPockets, sim.snapshot().pockets.length);
-  if ((t + 1) % Math.ceil(ticks / 5) === 0) {
-    console.log(`  tick ${t + 1} : frontière ${sim.frontierSize}, offensives ${sim.offensives.length}, bascules cumulées ${totalFlips}`);
-  }
-}
-durations.sort((a, b) => a - b);
-console.log(`Tick : médiane ${percentile(durations, 0.5).toFixed(2)} ms, p95 ${percentile(durations, 0.95).toFixed(2)} ms, p99 ${percentile(durations, 0.99).toFixed(2)} ms, max ${durations[durations.length - 1].toFixed(2)} ms (budget : 100 ms)`);
-console.log(`Bascules par tick au plus : ${maxFlips}, soit ${(maxBytes / 1024).toFixed(1)} Ko ; ${maxOffensives} offensives et ${maxPockets} poches en même temps au plus`);
+const [mode, argument, argument2] = process.argv.slice(2);
+if (mode === 'duels') duels();
+else if (mode === 'stress') stress(Number(argument ?? 6000));
+else worldGame(Number(argument ?? 60), Number(argument2 ?? 1));

@@ -2,7 +2,8 @@
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { wrapDeltaX } from '../map/projection.ts';
 import { MAX_OFFENSIVE_LENGTH } from '../sim/balance.ts';
-import type { OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import type { NationLabel, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import { traceRoute } from '../sim/route.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
@@ -63,6 +64,7 @@ export class MapView {
   private draft: ArrowDraft | null = null;
   private draftPointer = -1;
   private aimingMode = false;
+  private commandEnabled = false;
   private selectedProvince = 0;
   private selectedOwner = 0;
   /** Force un rendu à chaque image, pour mesurer les performances. */
@@ -96,7 +98,45 @@ export class MapView {
   setPlayer(player: number, atWar: (nation: number) => boolean): void {
     this.player = player;
     this.atWar = atWar;
+    this.commandEnabled = true;
     this.dirty = true;
+  }
+
+  /** Faux après une défaite : le joueur observe, sans tracer d'offensive. */
+  setCommandEnabled(enabled: boolean): void {
+    this.commandEnabled = enabled;
+    if (!enabled) this.cancelDraft();
+  }
+
+  applyHomeChanges(pairs: Uint16Array): void {
+    this.renderer.updateHomes(pairs);
+    this.dirty = true;
+  }
+
+  loadState(owners: Uint16Array, homes: Uint16Array): void {
+    this.renderer.loadState(owners, homes);
+    this.dirty = true;
+  }
+
+  setNationLabels(labels: readonly NationLabel[]): void {
+    this.labels.update(labels);
+    this.dirty = true;
+  }
+
+  /** Trajet d'une flèche : portée réelle, et débarquement ou non. */
+  private planArrow(fromX: number, fromY: number, endX: number, endY: number): { toX: number; toY: number; amphibious: boolean } {
+    const { width, height } = this.world.data;
+    const route = traceRoute(this.world.ownerGrid, width, height, fromX, fromY, endX, endY);
+    if (route.amphibious) return { toX: endX, toY: endY, amphibious: true };
+    const dx = wrapDeltaX(fromX, endX);
+    const dy = endY - fromY;
+    const length = Math.hypot(dx, dy);
+    const scale = length > MAX_OFFENSIVE_LENGTH ? MAX_OFFENSIVE_LENGTH / length : 1;
+    return {
+      toX: ((fromX + Math.round(dx * scale)) % width + width) % width,
+      toY: fromY + Math.round(dy * scale),
+      amphibious: false,
+    };
   }
 
   setCampaign(offensives: readonly OffensiveSnapshot[], pockets: readonly PocketSnapshot[]): void {
@@ -187,11 +227,11 @@ export class MapView {
 
     canvas.addEventListener('pointerdown', (event) => {
       canvas.setPointerCapture(event.pointerId);
-      const wantsArrow = this.player !== 0 && (event.button === 2 || (this.aimingMode && event.button === 0));
+      const wantsArrow = this.commandEnabled && (event.button === 2 || (this.aimingMode && event.button === 0));
       if (wantsArrow) {
         const start = this.camera.screenToCell(event.clientX, event.clientY);
         if (start) {
-          this.draft = { fromX: start.x, fromY: start.y, toX: start.x, toY: start.y, valid: this.isOwnCell(start.x, start.y) };
+          this.draft = { fromX: start.x, fromY: start.y, toX: start.x, toY: start.y, valid: this.isOwnCell(start.x, start.y), amphibious: false };
           this.draftPointer = event.pointerId;
           this.zoomTarget = null;
           this.dirty = true;
@@ -211,17 +251,7 @@ export class MapView {
         const end = this.camera.screenToCell(event.clientX, event.clientY);
         if (end) {
           // Le tracé montre la portée réelle : au-delà, la flèche s'arrête.
-          const { fromX, fromY } = this.draft;
-          const dx = wrapDeltaX(fromX, end.x);
-          const dy = end.y - fromY;
-          const length = Math.hypot(dx, dy);
-          const scale = length > MAX_OFFENSIVE_LENGTH ? MAX_OFFENSIVE_LENGTH / length : 1;
-          const { width } = this.world.data;
-          this.draft = {
-            ...this.draft,
-            toX: ((fromX + Math.round(dx * scale)) % width + width) % width,
-            toY: fromY + Math.round(dy * scale),
-          };
+          this.draft = { ...this.draft, ...this.planArrow(this.draft.fromX, this.draft.fromY, end.x, end.y) };
           this.dirty = true;
         }
         return;
