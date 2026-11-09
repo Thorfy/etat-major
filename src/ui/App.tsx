@@ -3,11 +3,11 @@ import type { GameClient } from '../game/GameClient.ts';
 import type { SaveSlot } from '../game/saves.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { TERRAIN_NAMES } from '../map/terrain.ts';
-import type { CellInfo, MapView } from '../render/MapView.ts';
+import type { CellInfo, MapMode, MapView } from '../render/MapView.ts';
 import type { SimEvent } from '../sim/protocol.ts';
 import { FrontsPanel } from './FrontsPanel.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
-import { formatClock, formatGdp, integer } from './format.ts';
+import { formatClock, formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
   hover: CellInfo;
@@ -16,6 +16,7 @@ export interface UiState {
   aiming: boolean;
   game: GameClient | null;
   startError: string | null;
+  mapMode: MapMode;
 }
 
 interface AppProps {
@@ -24,6 +25,7 @@ interface AppProps {
   state: UiState;
   onStart(player: number): void;
   onResume(slot: SaveSlot): void;
+  onMapMode(mode: MapMode): void;
 }
 
 const JOURNAL_LINES = 5;
@@ -74,6 +76,32 @@ function Journal({ game, nameOf }: { game: GameClient; nameOf(id: number): strin
   );
 }
 
+function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: MapMode): void }) {
+  const modes: { id: MapMode; label: string }[] = [
+    { id: 'political', label: 'Pays' },
+    { id: 'economic', label: 'Économie' },
+  ];
+  return (
+    <div class="panel map-mode">
+      <div class="speeds" role="group" aria-label="Carte affichée (touche E)">
+        {modes.map(({ id, label }) => (
+          <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === 'economic' && (
+        <div class="legend">
+          <div class="ramp" role="img" aria-label="Du plus pauvre au plus riche" />
+          <span>Rural</span>
+          <span>Industriel</span>
+          <small>PIB par km² de chaque province</small>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): string }) {
   return (
     <div class="dialog-backdrop">
@@ -93,7 +121,7 @@ function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): 
   );
 }
 
-export function App({ world, view, state, onStart, onResume }: AppProps) {
+export function App({ world, view, state, onStart, onResume, onMapMode }: AppProps) {
   const { nations, provinces } = world.data;
   const { game } = state;
   const nameOf = (owner: number) => nations[owner - 1].name;
@@ -102,12 +130,17 @@ export function App({ world, view, state, onStart, onResume }: AppProps) {
   const owner = state.selected.owner;
   const holder = owner ? nations[owner - 1] : null;
   const origin = selected ? selected.nation + 1 : 0;
+  const economy = game?.economy ?? null;
+  const provinceId = state.selected.province;
+  const development = economy ? economy.development[provinceId] : 1;
+  const provinceGdp = economy ? economy.provinceGdp[provinceId] * development : selected?.gdpMusd ?? 0;
 
   return (
     <>
       <div class="panel title">
         <strong>Risk</strong> · titre provisoire
       </div>
+      <MapModeSwitch mode={state.mapMode} onMapMode={onMapMode} />
       {state.debug && <DebugOverlay view={view} game={game} />}
       {game ? (
         <FrontsPanel game={game} nations={nations} view={view} aiming={state.aiming} />
@@ -126,8 +159,8 @@ export function App({ world, view, state, onStart, onResume }: AppProps) {
       {game && <Journal game={game} nameOf={nameOf} />}
       <div class="panel hints">
         {game
-          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · Molette : zoomer · F3 : mesures'
-          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · F3 : mesures'}
+          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E : carte économique · F3 : mesures'
+          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E : carte économique · F3 : mesures'}
       </div>
       {selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
@@ -140,15 +173,38 @@ export function App({ world, view, state, onStart, onResume }: AppProps) {
           </h2>
           <p class="province">{selected.name}</p>
           <dl>
-            <dt>Population de départ</dt>
-            <dd>{integer.format(holder.population)}</dd>
-            <dt>PIB de départ</dt>
-            <dd>{formatGdp(holder.gdpMusd)}</dd>
+            {economy ? (
+              <>
+                <dt>PIB</dt>
+                <dd>{formatGdp(game!.nationEconomy(owner).output)}</dd>
+                <dt>Capacité militaire</dt>
+                <dd>{integer.format(game!.nationEconomy(owner).capacity)}</dd>
+                <dt>Effort de guerre</dt>
+                <dd>{formatPercent(game!.nationEconomy(owner).effort)}</dd>
+              </>
+            ) : (
+              <>
+                <dt>Population</dt>
+                <dd>{integer.format(holder.population)}</dd>
+                <dt>PIB</dt>
+                <dd>{formatGdp(holder.gdpMusd)}</dd>
+              </>
+            )}
             <dt>Superficie de départ</dt>
             <dd>{integer.format(holder.areaKm2)} km²</dd>
           </dl>
           <h3>Province</h3>
           <dl>
+            <dt>Population</dt>
+            <dd>{integer.format(selected.population)}</dd>
+            <dt>PIB</dt>
+            <dd>{formatGdp(provinceGdp)}</dd>
+            {economy && (
+              <>
+                <dt>Développement</dt>
+                <dd class={development > 1.005 ? 'ahead' : development < 0.995 ? 'behind' : ''}>{formatPercent(development)}</dd>
+              </>
+            )}
             <dt>Superficie</dt>
             <dd>{integer.format(selected.areaKm2)} km²</dd>
             <dt>Terrain ici</dt>

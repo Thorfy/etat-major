@@ -4,6 +4,7 @@ import type { LoadedWorld } from '../map/loadWorld.ts';
 import type { MapView } from '../render/MapView.ts';
 import { DEFAULT_OFFENSIVE_SHARE, MAX_OFFENSIVES_PER_NATION, OFFENSIVE_MIN_FORCE, TICKS_PER_SECOND } from '../sim/balance.ts';
 import type {
+  EconomySnapshot,
   FromWorker,
   FrontSnapshot,
   NationLabel,
@@ -20,6 +21,7 @@ import type {
 } from '../sim/protocol.ts';
 import { traceRoute } from '../sim/route.ts';
 import { rebalance } from './allocation.ts';
+import { provinceWealth } from './economy.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
 import { type SaveSlot, writeSave } from './saves.ts';
 
@@ -59,6 +61,10 @@ export class GameClient {
   defeatedBy = 0;
   defeatSeen = false;
   saving = false;
+  /** Économie du monde, rafraîchie toutes les quelques secondes. */
+  economy: EconomySnapshot | null = null;
+  /** Effort de guerre demandé, à jour dès le geste. */
+  private effortOrder: number | null = null;
 
   private readonly worker: Worker;
   private readonly world: LoadedWorld;
@@ -116,7 +122,7 @@ export class GameClient {
       width: world.data.width,
       height: world.data.height,
       nations: world.data.nations.map(({ population, gdpMusd }) => ({ population, gdpMusd })),
-      provinces: world.data.provinces.map(({ nation, areaKm2, x, y }) => ({ nation, areaKm2, x, y })),
+      provinces: world.data.provinces.map(({ nation, areaKm2, x, y, population, gdpMusd }) => ({ nation, areaKm2, x, y, population, gdpMusd })),
       provinceGrid,
       ownerGrid,
       terrainGrid,
@@ -168,6 +174,11 @@ export class GameClient {
       this.view.setNationLabels(update.labels);
     }
     for (const event of update.events) this.handleEvent(event);
+    if (update.economy) {
+      this.economy = update.economy;
+      const areas = this.world.data.provinces.map((province) => province.areaKm2);
+      this.view.setEconomy(provinceWealth(areas, update.economy.provinceGdp, update.economy.development));
+    }
 
     this.tickMs = update.tickMs;
     this.maxTickMs = Math.max(this.maxTickMs, update.tickMs);
@@ -197,7 +208,8 @@ export class GameClient {
     if (event.type === 'war') {
       const involved = event.a === this.player || event.b === this.player;
       const enemy = event.a === this.player ? event.b : event.a;
-      if (involved && !this.pendingWars.has(enemy)) this.notify(`${name(enemy)} te déclare la guerre !`);
+      if (involved && !this.pendingWars.has(enemy)) this.notify(`${name(enemy)} te déclare la guerre !${this.effortReminder()}`);
+      else if (involved) this.notify(`Guerre déclarée : ${name(enemy)}.${this.effortReminder()}`);
     } else if (event.loser === this.player) {
       this.defeatedBy = event.winner;
       this.view.setCommandEnabled(false);
@@ -207,6 +219,11 @@ export class GameClient {
     } else if (this.isAtWarWith(event.loser)) {
       this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
     }
+  }
+
+  /** Une économie restée en temps de paix arme moins vite que celle de l'adversaire. */
+  private effortReminder(): string {
+    return this.effortTarget <= 0.5 ? ' Relève ton effort de guerre pour armer davantage.' : '';
   }
 
   /** Les ordres suivent la simulation : guerres reçues, ennemis disparus, choix de l'IA. */
@@ -297,6 +314,32 @@ export class GameClient {
     this.orders.set(enemy, { allocation: 0, stance: 'hold' });
     this.pendingWars.add(enemy);
     this.command({ type: 'declareWars', pairs: [[this.player, enemy]] });
+    this.onChange();
+  }
+
+  /**
+   * Économie d'une nation. Celle du joueur et de ses ennemis vient de l'état le plus
+   * récent ; celle des autres, du relevé mondial, plus espacé.
+   */
+  nationEconomy(nation: number): { output: number; capacity: number; effort: number } {
+    const live = this.snapshot?.nations.find((entry) => entry.id === nation);
+    if (live) return { output: live.output, capacity: live.capacity, effort: live.effort };
+    return {
+      output: this.economy?.output[nation] ?? 0,
+      capacity: this.economy?.capacity[nation] ?? 0,
+      effort: this.economy?.effort[nation] ?? 0,
+    };
+  }
+
+  /** Effort de guerre visé : celui qu'affiche le curseur. */
+  get effortTarget(): number {
+    return this.effortOrder ?? this.playerStats?.effortTarget ?? 0.5;
+  }
+
+  setEffort(effort: number): void {
+    if (!this.canCommand) return;
+    this.effortOrder = effort;
+    this.command({ type: 'setEffort', nation: this.player, effort });
     this.onChange();
   }
 

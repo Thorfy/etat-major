@@ -673,6 +673,64 @@ canvas {
   letter-spacing: 0.04em;
 }
 
+.map-mode {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  padding: 6px;
+}
+
+.map-mode .speeds {
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 0;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  margin: 8px 4px 2px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.legend .ramp {
+  grid-column: 1 / -1;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ddd5be, #c9804d 55%, #6b1b13);
+}
+
+.legend span:last-of-type {
+  text-align: right;
+}
+
+.legend small {
+  grid-column: 1 / -1;
+  font-size: 11px;
+}
+
+.economy {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.economy h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.economy dd small {
+  font-size: 12px;
+}
+
+.economy .front-note {
+  margin-bottom: 0;
+}
+
 @media (max-width: 640px) {
   .hints,
   .journal {
@@ -690,5 +748,12 @@ canvas {
 
   .fronts {
     max-height: 45vh;
+  }
+
+  .map-mode {
+    left: auto;
+    right: 12px;
+    transform: none;
+    width: 170px;
   }
 }

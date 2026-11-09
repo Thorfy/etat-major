@@ -2,7 +2,8 @@
 import { decodeRle, encodeRle } from '../map/codec.ts';
 import type { NationLabel, SimEvent, SimSave } from '../sim/protocol.ts';
 
-export const SAVE_VERSION = 1;
+/** 2 : économie (jalon 4). */
+export const SAVE_VERSION = 2;
 
 /** Ce que le jeu garde en plus de la simulation. */
 export interface SaveMeta {

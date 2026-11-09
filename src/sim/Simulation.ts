@@ -21,7 +21,24 @@ import {
   AMPHIBIOUS_MAX_LOSS,
   AMPHIBIOUS_MIN_LOSS,
   AMPHIBIOUS_SPEED,
+  AI_DESPERATE_EFFORT,
+  AI_EFFORT_SPREAD,
+  AI_PEACE_EFFORT,
+  AI_WAR_EFFORT,
   ANNEXED_NAVY,
+  AT_WAR_GROWTH,
+  CAPTURE_DAMAGE,
+  DEFAULT_WAR_EFFORT,
+  DEMOBILIZE_PER_TICK,
+  ECONOMY_INTERVAL_TICKS,
+  EFFORT_CAPACITY_BASE,
+  EFFORT_CHANGE_PER_SECOND,
+  GROWTH_PER_MINUTE,
+  MAX_DEVELOPMENT,
+  MIN_DAMAGED_DEVELOPMENT,
+  MIN_DEVELOPMENT,
+  TICKS_PER_SECOND,
+  VALUE_GDP_WEIGHT,
   ANNEXED_VALUE,
   ATTRITION_PER_TICK,
   BEACHHEAD_RADIUS,
@@ -76,6 +93,7 @@ import {
   baseNavy,
 } from './balance.ts';
 import type {
+  EconomySnapshot,
   FrontSnapshot,
   NationLabel,
   PocketSnapshot,
@@ -91,8 +109,11 @@ export interface SimConfig {
   width: number;
   height: number;
   nations: { population: number; gdpMusd: number }[];
-  /** Le propriétaire initial d'une province est `nation + 1`. */
-  provinces: { nation: number; areaKm2: number; x: number; y: number }[];
+  /**
+   * Le propriétaire initial d'une province est `nation + 1`. Sans population ni PIB,
+   * la valeur d'une province suit la racine de sa surface.
+   */
+  provinces: { nation: number; areaKm2: number; x: number; y: number; population?: number; gdpMusd?: number }[];
   provinceGrid: Uint16Array;
   /** Carte de départ, copiée : la simulation possède sa propre grille. */
   ownerGrid: Uint16Array;
@@ -199,6 +220,24 @@ export class Simulation {
   private readonly provinceValue: Float64Array;
   private readonly controller: Uint16Array;
   private readonly provinceCounts: (Map<number, number> | null)[];
+  private capacityDirty = false;
+  /** Vrai pendant une annexion : les provinces changent de mains sans destructions. */
+  private peacefulTransfer = false;
+  private readonly demobilized: Float64Array;
+
+  // Économie.
+  /** PIB de départ de chaque province, en millions de dollars (réduit par l'annexion). */
+  private readonly provinceGdp: Float64Array;
+  /** Développement de chaque province, relatif à son niveau de départ. */
+  readonly development: Float64Array;
+  private readonly effort: Float64Array;
+  private readonly effortTarget: Float64Array;
+  /** Tempérament de chaque IA : décalage de l'effort qu'elle choisit. */
+  private readonly temperament: Float64Array;
+  /** PIB courant, provinces occupées et perdues comprises. */
+  private readonly output: Float64Array;
+  /** Croissance du PIB courant, par minute (négative en cas d'usure). */
+  private readonly growth: Float64Array;
 
   // Ravitaillement.
   private readonly landCells: Int32Array;
@@ -272,6 +311,15 @@ export class Simulation {
     this.heldHome = new Float64Array(this.stride);
     this.totalHome = new Float64Array(this.stride);
     this.labelCells = new Int32Array(this.stride);
+    this.provinceGdp = new Float64Array(provinceCount);
+    this.development = new Float64Array(provinceCount).fill(1);
+    this.effort = new Float64Array(this.stride).fill(DEFAULT_WAR_EFFORT);
+    this.effortTarget = new Float64Array(this.stride).fill(DEFAULT_WAR_EFFORT);
+    this.temperament = new Float64Array(this.stride);
+    for (let n = 1; n < this.stride; n++) this.temperament[n] = (this.random() * 2 - 1) * AI_EFFORT_SPREAD;
+    this.output = new Float64Array(this.stride);
+    this.growth = new Float64Array(this.stride);
+    this.demobilized = new Float64Array(this.stride);
 
     let land = 0;
     for (let i = 0; i < this.owners.length; i++) {
@@ -294,18 +342,29 @@ export class Simulation {
     this.isAnchor = new Uint8Array(this.owners.length);
     this.placeAnchors();
 
-    // La capacité militaire se répartit entre les provinces (racine de la surface
-    // pour ne pas tout donner aux déserts) : elle change de camp avec elles.
-    const weights = new Float64Array(this.stride);
+    // La capacité militaire se répartit entre les provinces selon leur part du PIB et de
+    // la population : elle change de camp avec elles. Sans ces données, la racine de la
+    // surface, pour ne pas tout donner aux déserts.
+    const gdpTotal = new Float64Array(this.stride);
+    const populationTotal = new Float64Array(this.stride);
+    const rootArea = new Float64Array(this.stride);
     config.provinces.forEach((province, index) => {
-      this.provinceHome[index + 1] = province.nation + 1;
-      this.controller[index + 1] = province.nation + 1;
-      weights[province.nation + 1] += Math.sqrt(province.areaKm2);
+      const n = province.nation + 1;
+      this.provinceHome[index + 1] = n;
+      this.controller[index + 1] = n;
+      gdpTotal[n] += province.gdpMusd ?? 0;
+      populationTotal[n] += province.population ?? 0;
+      rootArea[n] += Math.sqrt(province.areaKm2);
     });
     config.provinces.forEach((province, index) => {
+      const n = province.nation + 1;
       const nation = config.nations[province.nation];
-      this.provinceValue[index + 1] =
-        (baseCapacity(nation.population, nation.gdpMusd) * Math.sqrt(province.areaKm2)) / weights[province.nation + 1];
+      const area = Math.sqrt(province.areaKm2) / rootArea[n];
+      const population = populationTotal[n] > 0 ? (province.population ?? 0) / populationTotal[n] : area;
+      const gdp = gdpTotal[n] > 0 ? (province.gdpMusd ?? 0) / gdpTotal[n] : population;
+      const weight = VALUE_GDP_WEIGHT * gdp + (1 - VALUE_GDP_WEIGHT) * population;
+      this.provinceValue[index + 1] = baseCapacity(nation.population, nation.gdpMusd) * weight;
+      this.provinceGdp[index + 1] = gdpTotal[n] > 0 ? (province.gdpMusd ?? 0) : nation.gdpMusd * gdp;
     });
     this.recomputeCapacity();
 
@@ -372,6 +431,15 @@ export class Simulation {
     return this.capacity[nation];
   }
 
+  /** PIB courant, en millions de dollars. */
+  outputOf(nation: number): number {
+    return this.output[nation];
+  }
+
+  effortOf(nation: number): number {
+    return this.effort[nation];
+  }
+
   isAlive(nation: number): boolean {
     return this.alive[nation] === 1;
   }
@@ -413,7 +481,16 @@ export class Simulation {
       case 'cancelOffensive':
         this.cancelOffensive(command.nation, command.id);
         break;
+      case 'setEffort':
+        this.setEffort(command.nation, command.effort);
+        break;
     }
+  }
+
+  /** L'économie se reconvertit progressivement vers l'effort demandé. */
+  setEffort(nation: number, effort: number): void {
+    if (nation <= 0 || nation >= this.stride || !Number.isFinite(effort)) return;
+    this.effortTarget[nation] = Math.max(0, Math.min(1, effort));
   }
 
   declareWars(pairs: [number, number][]): void {
@@ -596,8 +673,10 @@ export class Simulation {
       if (this.tick % AI_INTERVAL_TICKS === 0) {
         this.decideAllocations();
         this.decideOffensives();
+        this.decideEfforts();
       }
     }
+    if (this.tick % ECONOMY_INTERVAL_TICKS === 0) this.updateEconomy();
     this.computeArmies();
     this.updateFronts();
     this.reinforce();
@@ -639,6 +718,24 @@ export class Simulation {
         const planned = army * side.allocation;
         side.stance = planned > enemy.force * AI_ATTACK_RATIO ? 'attack' : 'hold';
       }
+    }
+  }
+
+  /** L'IA grandit en paix, s'arme en guerre, et jette tout dans la balance en sous-nombre. */
+  private decideEfforts(): void {
+    const opposing = new Float64Array(this.stride);
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+      opposing[front.a] += front.sides[1].force;
+      opposing[front.b] += front.sides[0].force;
+    }
+    for (let n = 1; n < this.stride; n++) {
+      if (n === this.player || !this.alive[n]) continue;
+      let effort = AI_PEACE_EFFORT;
+      if (atWar[n]) effort = opposing[n] > this.armies[n] * AI_ENGAGED_SHARE ? AI_DESPERATE_EFFORT : AI_WAR_EFFORT;
+      this.effortTarget[n] = Math.max(0, Math.min(1, effort + this.temperament[n]));
     }
   }
 
@@ -866,6 +963,7 @@ export class Simulation {
 
     // Tout ce qu'il reste au vaincu, îles comprises, revient au vainqueur.
     const transferred: number[] = [];
+    this.peacefulTransfer = true;
     for (let k = 0; k < this.landCells.length; k++) {
       const cell = this.landCells[k];
       if (this.owners[cell] !== loser) continue;
@@ -878,6 +976,7 @@ export class Simulation {
       this.pendingOwners.push(winner);
       this.transferProvinceCell(this.provinceGrid[cell], loser, winner);
     }
+    this.peacefulTransfer = false;
 
     for (let p = 1; p < this.controller.length; p++) {
       if (this.provinceHome[p] !== loser) continue;
@@ -887,6 +986,7 @@ export class Simulation {
       }
       this.provinceHome[p] = this.controller[p];
       this.provinceValue[p] *= ANNEXED_VALUE;
+      this.provinceGdp[p] *= ANNEXED_VALUE;
       this.pendingHomes.push(p, this.controller[p]);
     }
 
@@ -933,19 +1033,76 @@ export class Simulation {
     });
   }
 
+  /**
+   * Capacité militaire et PIB courant. Une province rapporte selon son développement ;
+   * occupée, presque rien à l'occupant, et une part à son pays d'origine. L'effort de
+   * guerre multiplie ensuite la capacité. La capitulation, elle, ne regarde que la valeur
+   * de départ du territoire : bâtir ou détruire ne la rapproche pas.
+   */
   private recomputeCapacity(): void {
-    this.capacity.fill(0);
+    const { capacity, output, development, provinceGdp } = this;
+    capacity.fill(0);
+    output.fill(0);
     this.heldHome.fill(0);
     this.totalHome.fill(0);
     for (let p = 1; p < this.controller.length; p++) {
       const value = this.provinceValue[p];
       const home = this.provinceHome[p];
       const holder = this.controller[p];
+      const developed = development[p];
       this.totalHome[home] += value;
-      this.capacity[holder] += this.provinceWorth(p, holder);
-      if (holder === home) this.heldHome[home] += value;
-      else this.capacity[home] += value * LOST_PROVINCE_RETAINED;
+      if (holder === home) {
+        this.heldHome[home] += value;
+        capacity[home] += value * developed;
+        output[home] += provinceGdp[p] * developed;
+      } else {
+        capacity[holder] += value * developed * OCCUPIED_VALUE;
+        output[holder] += provinceGdp[p] * developed * OCCUPIED_VALUE;
+        capacity[home] += value * developed * LOST_PROVINCE_RETAINED;
+        output[home] += provinceGdp[p] * developed * LOST_PROVINCE_RETAINED;
+      }
     }
+    for (let n = 1; n < this.stride; n++) capacity[n] *= EFFORT_CAPACITY_BASE + this.effort[n];
+    this.capacityDirty = false;
+  }
+
+  /**
+   * Chaque seconde : l'économie se reconvertit vers l'effort voulu, puis les provinces
+   * tenues par leur pays grandissent (effort bas) ou s'usent (effort haut).
+   */
+  private updateEconomy(): void {
+    const { effort, effortTarget, development, provinceGdp } = this;
+    const step = (EFFORT_CHANGE_PER_SECOND * ECONOMY_INTERVAL_TICKS) / TICKS_PER_SECOND;
+    for (let n = 1; n < this.stride; n++) {
+      const gap = effortTarget[n] - effort[n];
+      effort[n] += Math.max(-step, Math.min(step, gap));
+    }
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+    }
+    const minutes = ECONOMY_INTERVAL_TICKS / TICKS_PER_SECOND / 60;
+    const rate = new Float64Array(this.stride);
+    for (let n = 1; n < this.stride; n++) {
+      rate[n] = 2 * GROWTH_PER_MINUTE * (DEFAULT_WAR_EFFORT - effort[n]) * minutes;
+      if (rate[n] > 0 && atWar[n]) rate[n] *= AT_WAR_GROWTH;
+    }
+    const gained = new Float64Array(this.stride);
+    const base = new Float64Array(this.stride);
+    for (let p = 1; p < this.controller.length; p++) {
+      const holder = this.controller[p];
+      if (holder !== this.provinceHome[p] || rate[holder] === 0) continue;
+      const before = development[p];
+      // Croissance et usure ralentissent à l'approche de leurs bornes.
+      const room = rate[holder] > 0 ? (MAX_DEVELOPMENT - before) / (MAX_DEVELOPMENT - 1) : (before - MIN_DEVELOPMENT) / (1 - MIN_DEVELOPMENT);
+      const after = before + rate[holder] * Math.max(0, Math.min(1, room));
+      development[p] = after;
+      gained[holder] += provinceGdp[p] * (after - before);
+      base[holder] += provinceGdp[p] * before;
+    }
+    for (let n = 1; n < this.stride; n++) this.growth[n] = base[n] > 0 ? gained[n] / base[n] / minutes : 0;
+    this.recomputeCapacity();
   }
 
   private computeArmies(): void {
@@ -1014,13 +1171,32 @@ export class Simulation {
     }
   }
 
+  /**
+   * L'armée tend vers la capacité militaire : elle se renforce en dessous et se
+   * démobilise au-dessus, quand l'économie ne peut plus l'entretenir.
+   */
   private reinforce(): void {
     this.computeArmies();
+    let shrinking = false;
+    const keep = this.demobilized;
+    keep.fill(1);
     for (let n = 1; n < this.stride; n++) {
       if (!this.alive[n]) continue;
       const missing = this.capacity[n] - this.armies[n];
-      if (missing > 0) this.reserve[n] += missing * REINFORCE_PER_TICK;
+      if (missing > 0) {
+        this.reserve[n] += missing * REINFORCE_PER_TICK;
+      } else if (missing < 0 && this.armies[n] > 0) {
+        keep[n] = 1 + (missing / this.armies[n]) * DEMOBILIZE_PER_TICK;
+        this.reserve[n] *= keep[n];
+        shrinking = true;
+      }
     }
+    if (!shrinking) return;
+    for (const front of this.fronts) {
+      front.sides[0].force *= keep[front.a];
+      front.sides[1].force *= keep[front.b];
+    }
+    for (const offensive of this.offensives) offensive.force *= keep[offensive.nation];
   }
 
   private updateOffensives(): void {
@@ -1068,6 +1244,7 @@ export class Simulation {
       }
     }
     for (const cell of taken) this.refreshAround(cell);
+    if (this.capacityDirty) this.recomputeCapacity();
 
     let dx = this.wrapDelta(x, offensive.targetX);
     let dy = offensive.targetY - y;
@@ -1264,6 +1441,7 @@ export class Simulation {
       }
     }
     for (let i = 0; i < this.flipCount; i++) this.refreshAround(this.flipCells[i]);
+    if (this.capacityDirty) this.recomputeCapacity();
   }
 
   private transferProvinceCell(province: number, from: number, to: number): void {
@@ -1279,26 +1457,18 @@ export class Simulation {
       const previous = this.controller[province];
       const home = this.provinceHome[province];
       const value = this.provinceValue[province];
-      const retained = value * LOST_PROVINCE_RETAINED;
-      this.capacity[previous] -= this.provinceWorth(province, previous);
-      this.capacity[to] += this.provinceWorth(province, to);
-      // Le pays d'origine garde une part de la valeur tant que la province est perdue.
-      if (previous === home) {
-        this.capacity[home] += retained;
-        this.heldHome[home] -= value;
-      }
-      if (to === home) {
-        this.capacity[home] -= retained;
-        this.heldHome[home] += value;
+      if (previous === home) this.heldHome[home] -= value;
+      if (to === home) this.heldHome[home] += value;
+      // Les combats détruisent une part de l'industrie, à chaque changement de mains.
+      // Une annexion se fait sans combat, donc sans destructions.
+      if (!this.peacefulTransfer) {
+        const damaged = this.development[province] * (1 - CAPTURE_DAMAGE);
+        this.development[province] = Math.min(this.development[province], Math.max(MIN_DAMAGED_DEVELOPMENT, damaged));
       }
       this.controller[province] = to;
+      this.capacityDirty = true;
       this.pendingProvinces.push(province, to);
     }
-  }
-
-  private provinceWorth(province: number, holder: number): number {
-    const value = this.provinceValue[province];
-    return holder === this.provinceHome[province] ? value : value * OCCUPIED_VALUE;
   }
 
   // -------------------------------------------------------------------------
@@ -1554,6 +1724,17 @@ export class Simulation {
     return updates;
   }
 
+  /** Économie de tout le monde, pour la carte économique et la fiche des pays. */
+  economySnapshot(): EconomySnapshot {
+    return {
+      development: Float32Array.from(this.development),
+      provinceGdp: Float32Array.from(this.provinceGdp),
+      output: Float32Array.from(this.output),
+      capacity: Float32Array.from(this.capacity),
+      effort: Float32Array.from(this.effort),
+    };
+  }
+
   snapshot(): SimSnapshot {
     const fronts: FrontSnapshot[] = this.fronts.map((front) => {
       const side = (s: FrontSide) => ({ allocation: s.allocation, stance: s.stance, force: s.force, captured: s.captured });
@@ -1584,6 +1765,10 @@ export class Simulation {
         cells: this.cellCounts[id],
         pocketCells: this.pocketCounts[id],
         navy: this.navy[id],
+        output: this.output[id],
+        effort: this.effort[id],
+        effortTarget: this.effortTarget[id],
+        growth: this.growth[id],
       })),
       offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured, transitUntil, targetX, targetY }) => ({
         id,
@@ -1635,6 +1820,11 @@ export class Simulation {
         landNeighbors: this.landNeighbors,
         seaNeighbors: this.seaNeighbors,
         labelCells: Array.from(this.labelCells),
+        provinceGdp: Array.from(this.provinceGdp),
+        development: Array.from(this.development),
+        effort: Array.from(this.effort),
+        effortTarget: Array.from(this.effortTarget),
+        growth: Array.from(this.growth),
       },
     };
   }
@@ -1667,6 +1857,12 @@ export class Simulation {
     this.landNeighbors = state.landNeighbors;
     this.seaNeighbors = state.seaNeighbors;
     this.labelCells.set(state.labelCells);
+    this.provinceGdp.set(state.provinceGdp);
+    this.development.set(state.development);
+    this.effort.set(state.effort);
+    this.effortTarget.set(state.effortTarget);
+    this.growth.set(state.growth);
+    this.recomputeCapacity();
 
     this.fronts = state.fronts.map((front) => ({ ...front, sides: front.sides.map((side) => ({ ...side })) }));
     this.reindexFronts();
@@ -1697,7 +1893,11 @@ export class Simulation {
       mix(Math.round(front.sides[1].force * 1000));
     }
     for (const offensive of this.offensives) mix(Math.round(offensive.force * 1000));
-    for (let n = 1; n < this.stride; n++) mix(Math.round(this.reserve[n] * 1000));
+    for (let n = 1; n < this.stride; n++) {
+      mix(Math.round(this.reserve[n] * 1000));
+      mix(Math.round(this.effort[n] * 1e6));
+    }
+    for (let p = 1; p < this.development.length; p++) mix(Math.round(this.development[p] * 1e6));
     mix(this.rngState);
     return hash;
   }

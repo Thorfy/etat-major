@@ -7,6 +7,19 @@ export function formatGdp(millions: number): string {
   return `${integer.format(millions)} M $`;
 }
 
+export function formatPercent(share: number): string {
+  return `${integer.format(share * 100)} %`;
+}
+
+/** Variation signée, en pourcentage : « +1,2 % ». */
+export function formatChange(share: number, digits = 1): string {
+  const rounded = Math.round(share * 100 * 10 ** digits) / 10 ** digits;
+  // Pas de « −0 % » : une variation qui s'arrondit à zéro n'a pas de signe.
+  if (rounded === 0) return `${(0).toLocaleString('fr-FR', { minimumFractionDigits: digits })} %`;
+  const value = rounded.toLocaleString('fr-FR', { maximumFractionDigits: digits, minimumFractionDigits: digits });
+  return `${rounded > 0 ? '+' : ''}${value} %`;
+}
+
 export function formatClock(seconds: number): string {
   const total = Math.floor(seconds);
   const minutes = Math.floor(total / 60);

@@ -11,6 +11,8 @@ const scope = self as unknown as {
 const BASE_TICK_MS = 1000 / TICKS_PER_SECOND;
 const MAX_CATCH_UP_TICKS = 3;
 const SNAPSHOT_EVERY = 2;
+/** L'économie du monde change lentement : toutes les 5 s de jeu. */
+const ECONOMY_EVERY_TICKS = 50;
 
 let sim: Simulation | null = null;
 let speed = 1;
@@ -18,8 +20,9 @@ let last = 0;
 let accumulated = 0;
 let updates = 0;
 let lastLabelTick = 0;
+let lastEconomyTick = -Infinity;
 
-function send(tickMs: number, withSnapshot: boolean): void {
+function send(tickMs: number, withSnapshot: boolean, withEconomy = false): void {
   const changes = sim!.drainChanges();
   // Noms de pays : régulièrement, et tout de suite après une capitulation.
   const capitulation = changes.events.some((event) => event.type === 'capitulation');
@@ -28,14 +31,22 @@ function send(tickMs: number, withSnapshot: boolean): void {
     labels = sim!.updateLabels();
     lastLabelTick = sim!.tick;
   }
+  let economy: WorkerUpdate['economy'] = null;
+  if (withEconomy || capitulation || sim!.tick - lastEconomyTick >= ECONOMY_EVERY_TICKS) {
+    economy = sim!.economySnapshot();
+    lastEconomyTick = sim!.tick;
+  }
   const update: WorkerUpdate = {
     type: 'update',
     ...changes,
     labels,
     snapshot: withSnapshot || capitulation ? sim!.snapshot() : null,
+    economy,
     tickMs,
   };
-  scope.postMessage(update, [changes.cells.buffer, changes.owners.buffer, changes.provinces.buffer, changes.homes.buffer]);
+  const transfer: Transferable[] = [changes.cells.buffer, changes.owners.buffer, changes.provinces.buffer, changes.homes.buffer];
+  if (economy) transfer.push(...Object.values(economy).map((array: Float32Array) => array.buffer));
+  scope.postMessage(update, transfer);
 }
 
 function loop(): void {
@@ -69,7 +80,7 @@ scope.onmessage = (event) => {
     lastLabelTick = sim.tick;
     last = performance.now();
     setInterval(loop, BASE_TICK_MS / 8);
-    send(0, true);
+    send(0, true, true);
   } else if (message.type === 'speed') {
     speed = message.speed;
     accumulated = 0;
@@ -80,6 +91,6 @@ scope.onmessage = (event) => {
   } else if (sim) {
     sim.apply(message.command);
     // En pause, le joueur doit voir tout de suite l'effet de ses ordres.
-    send(0, true);
+    send(0, true, message.command.type === 'setEffort');
   }
 };

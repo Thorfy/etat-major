@@ -36,6 +36,7 @@ export class MapRenderer {
   private query: WebGLQuery | null = null;
   private readonly dirtyTiles = new Set<number>();
   private readonly homes: Uint16Array;
+  private mapMode = 0;
   /** Dernière durée GPU mesurée, en ms (null si le navigateur ne l'expose pas). */
   gpuMs: number | null = null;
 
@@ -67,7 +68,7 @@ export class MapRenderer {
     gl.bindVertexArray(gl.createVertexArray());
     for (const name of [
       'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
-      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner',
+      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
@@ -97,6 +98,19 @@ export class MapRenderer {
     const size = nations.length + 1;
     this.bindDataTexture(5, 'uWars', gl.R8, size, size, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(size * size));
     this.bindDataTexture(6, 'uTerrain', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, world.terrainGrid);
+    this.bindDataTexture(7, 'uEconomy', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
+  }
+
+  /** Richesse de chaque province, de 0 à 255 (indice = identifiant de province). */
+  updateEconomy(wealth: Uint8Array): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE7);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, wealth);
+  }
+
+  /** 0 : carte politique, 1 : carte économique. */
+  setMapMode(mode: number): void {
+    this.mapMode = mode;
   }
 
   /** Une province annexée n'est plus hachurée : elle appartient à son nouveau pays. */
@@ -206,6 +220,7 @@ export class MapRenderer {
     gl.uniform1ui(uniforms.get('uHoverProvince')!, highlights.hoverProvince);
     gl.uniform1ui(uniforms.get('uSelectedProvince')!, highlights.selectedProvince);
     gl.uniform1ui(uniforms.get('uSelectedOwner')!, highlights.selectedOwner);
+    gl.uniform1ui(uniforms.get('uMapMode')!, this.mapMode);
 
     const measuring = this.beginTiming();
     gl.drawArrays(gl.TRIANGLES, 0, 3);

@@ -7,7 +7,9 @@ export type SimCommand =
   | { type: 'declareWars'; pairs: [number, number][] }
   | { type: 'setFront'; nation: number; enemy: number; allocation: number; stance: Stance }
   | { type: 'launchOffensive'; nation: number; fromX: number; fromY: number; toX: number; toY: number; share: number }
-  | { type: 'cancelOffensive'; nation: number; id: number };
+  | { type: 'cancelOffensive'; nation: number; id: number }
+  /** Effort de guerre voulu, de 0 à 1 : l'économie s'y reconvertit progressivement. */
+  | { type: 'setEffort'; nation: number; effort: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -33,6 +35,25 @@ export interface NationSnapshot {
   cells: number;
   pocketCells: number;
   navy: number;
+  /** PIB courant, en millions de dollars. */
+  output: number;
+  /** Effort de guerre atteint, et effort visé. */
+  effort: number;
+  effortTarget: number;
+  /** Croissance du PIB par minute (négative : usure de l'économie de guerre). */
+  growth: number;
+}
+
+/** Économie du monde entier, envoyée moins souvent que le reste. */
+export interface EconomySnapshot {
+  /** Par province (indice = identifiant, 0 inutilisé). */
+  development: Float32Array;
+  /** PIB de départ de chaque province, réduit après une annexion. */
+  provinceGdp: Float32Array;
+  /** Par nation (indice = identifiant). */
+  output: Float32Array;
+  capacity: Float32Array;
+  effort: Float32Array;
 }
 
 export interface OffensiveSnapshot {
@@ -83,7 +104,7 @@ export interface WorkerInit {
   width: number;
   height: number;
   nations: { population: number; gdpMusd: number }[];
-  provinces: { nation: number; areaKm2: number; x: number; y: number }[];
+  provinces: { nation: number; areaKm2: number; x: number; y: number; population: number; gdpMusd: number }[];
   provinceGrid: Uint16Array;
   ownerGrid: Uint16Array;
   terrainGrid: Uint8Array;
@@ -111,6 +132,7 @@ export interface WorkerUpdate {
   events: SimEvent[];
   labels: NationLabel[];
   snapshot: SimSnapshot | null;
+  economy: EconomySnapshot | null;
   /** Durée du dernier calcul de tick, en ms. */
   tickMs: number;
 }
@@ -183,4 +205,9 @@ export interface SimSaveState {
   landNeighbors: number[][];
   seaNeighbors: number[][];
   labelCells: number[];
+  provinceGdp: number[];
+  development: number[];
+  effort: number[];
+  effortTarget: number[];
+  growth: number[];
 }

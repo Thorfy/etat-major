@@ -21,6 +21,8 @@ uniform sampler2D uCoast;
 uniform usampler2D uProvinceHome;
 uniform sampler2D uWars;
 uniform sampler2D uTerrain;
+uniform sampler2D uEconomy;
+uniform uint uMapMode;      // 0 : politique, 1 : économique
 uniform vec2 uCenter;
 uniform vec2 uResolution;
 uniform float uZoom;        // pixels physiques par cellule
@@ -43,6 +45,10 @@ const vec3 PROVINCE_LINE = vec3(0.235, 0.212, 0.180);
 const vec3 HIGHLIGHT = vec3(0.961, 0.784, 0.286);
 const vec3 FRONT_LINE = vec3(0.847, 0.169, 0.102);
 const vec3 FRONT_GLOW = vec3(0.984, 0.553, 0.294);
+// Carte économique : du papier pâle des campagnes à la brique sombre des bassins industriels.
+const vec3 ECONOMY_LOW = vec3(0.866, 0.835, 0.745);
+const vec3 ECONOMY_MID = vec3(0.788, 0.502, 0.302);
+const vec3 ECONOMY_HIGH = vec3(0.420, 0.106, 0.075);
 
 ivec2 wrapCell(ivec2 c) {
   return ivec2(c.x & (MAP_W - 1), clamp(c.y, 0, MAP_H - 1));
@@ -146,7 +152,15 @@ vec3 shade(vec2 p, float gratAlpha) {
     color = mix(color, SEA_LINE, 0.28 * gratAlpha);
   } else {
     color = texelFetch(uPalette, ivec2(int(owner), 0), 0).rgb;
-    color = applyTerrain(color, p);
+    if (uMapMode == 1u) {
+      // Densité de PIB de la province, avec un soupçon de la couleur du pays qui la tient.
+      float wealth = texelFetch(uEconomy, ivec2(int(province), 0), 0).r;
+      vec3 ramp = mix(ECONOMY_LOW, ECONOMY_MID, smoothstep(0.0, 0.6, wealth));
+      ramp = mix(ramp, ECONOMY_HIGH, smoothstep(0.55, 1.0, wealth));
+      color = mix(ramp, color, 0.2);
+    } else {
+      color = applyTerrain(color, p);
+    }
     // Territoire occupé : hachures aux couleurs de son pays d'origine.
     uint home = texelFetch(uProvinceHome, ivec2(int(province), 0), 0).r;
     if (home != 0u && home != owner) {
@@ -158,7 +172,7 @@ vec3 shade(vec2 p, float gratAlpha) {
     if (province == uHoverProvince) color = mix(color, vec3(1.0), 0.16);
     if (province == uSelectedProvince) color = mix(color, HIGHLIGHT, 0.42);
 
-    float provinceVisible = smoothstep(0.75, 2.4, uZoom);
+    float provinceVisible = uMapMode == 1u ? smoothstep(0.3, 1.2, uZoom) : smoothstep(0.75, 2.4, uZoom);
     if (provinceVisible > 0.0 && provinceMargin < 0.999) {
       color = mix(color, PROVINCE_LINE, 0.42 * provinceVisible * lineAlpha(provinceDist, 0.35));
     }

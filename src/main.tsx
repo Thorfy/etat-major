@@ -3,7 +3,8 @@ import { GAME_SPEEDS, GameClient, type GameStart, mapHashOf } from './game/GameC
 import { SAVE_VERSION, decodeSave } from './game/saveFormat.ts';
 import { type SaveSlot, readSave } from './game/saves.ts';
 import { loadWorld } from './map/loadWorld.ts';
-import { MapView } from './render/MapView.ts';
+import { provinceWealth } from './game/economy.ts';
+import { type MapMode, MapView } from './render/MapView.ts';
 import { App, type UiState } from './ui/App.tsx';
 
 const ui = document.getElementById('ui')!;
@@ -15,12 +16,36 @@ async function start(): Promise<void> {
   message('Chargement de la carte…');
   const world = await loadWorld();
   const noCell = { province: 0, owner: 0, terrain: 0 };
-  const state: UiState = { hover: noCell, selected: noCell, debug: false, aiming: false, game: null, startError: null };
+  const state: UiState = {
+    hover: noCell,
+    selected: noCell,
+    debug: false,
+    aiming: false,
+    game: null,
+    startError: null,
+    mapMode: 'political',
+  };
 
   let view: MapView | null = null;
   const refresh = () => {
     if (!view) return;
-    render(<App world={world} view={view} state={{ ...state }} onStart={startGame} onResume={(slot) => void resume(slot)} />, ui);
+    render(
+      <App
+        world={world}
+        view={view}
+        state={{ ...state }}
+        onStart={startGame}
+        onResume={(slot) => void resume(slot)}
+        onMapMode={setMapMode}
+      />,
+      ui,
+    );
+  };
+
+  const setMapMode = (mode: MapMode) => {
+    state.mapMode = mode;
+    view?.setMapMode(mode);
+    refresh();
   };
 
   const launch = (settings: GameStart) => {
@@ -77,9 +102,17 @@ async function start(): Promise<void> {
     },
   );
 
+  // Avant la partie, la carte économique montre la richesse de départ.
+  const gdp = [0, ...world.data.provinces.map((province) => province.gdpMusd)];
+  view.setEconomy(provinceWealth(world.data.provinces.map((province) => province.areaKm2), gdp));
+
   window.addEventListener('keydown', (event) => {
     const { target } = event;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
+    if (event.key.toLowerCase() === 'e' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      setMapMode(state.mapMode === 'economic' ? 'political' : 'economic');
+      return;
+    }
     const game = state.game;
     if (!game) return;
     // Sur un bouton, Espace reste réservé au bouton.

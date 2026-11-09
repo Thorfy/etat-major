@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { rebalance } from '../src/game/allocation.ts';
 import { areLandNeighbors, findLandNeighbors } from '../src/map/adjacency.ts';
-import { formatClock, formatRatio } from '../src/ui/format.ts';
+import { effortEffect, provinceWealth } from '../src/game/economy.ts';
+import { formatChange, formatClock, formatPercent, formatRatio } from '../src/ui/format.ts';
 
 const total = (map: Map<number, number>) => [...map.values()].reduce((a, b) => a + b, 0);
 
@@ -61,5 +62,30 @@ describe('affichage', () => {
   it('formate le temps écoulé', () => {
     expect(formatClock(0)).toBe('0:00');
     expect(formatClock(92.7)).toBe('1:32');
+  });
+});
+
+describe("affichage de l'économie", () => {
+  it('écrit les variations sans « −0 % »', () => {
+    expect(formatChange(-0.001, 0)).toBe('0 %');
+    expect(formatChange(0.0123)).toBe('+1,2 %');
+    expect(formatChange(-0.0151, 0)).toBe('-2 %');
+    expect(formatPercent(0.535)).toBe('54 %');
+  });
+
+  it('teinte les provinces selon leur densité de PIB, pas leur taille', () => {
+    // Même PIB : la petite province est la plus dense.
+    const wealth = provinceWealth([100, 1_000_000, 50], [0, 10_000, 10_000, 0]);
+    expect(wealth[1]).toBeGreaterThan(wealth[2]);
+    expect(wealth[3]).toBe(0);
+    // Le développement compte : une province détruite pâlit.
+    const damaged = provinceWealth([100], [0, 1000], [0, 0.5]);
+    expect(damaged[1]).toBeLessThan(provinceWealth([100], [0, 1000])[1]);
+  });
+
+  it("explique l'effet de l'effort de guerre", () => {
+    expect(effortEffect(0.2, false)).toMatch(/grandit/);
+    expect(effortEffect(0.5, true)).toMatch(/Équilibre/);
+    expect(effortEffect(0.9, true)).toMatch(/s'use/);
   });
 });

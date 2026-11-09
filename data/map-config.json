@@ -81,5 +81,12 @@
       "terrain": "desert",
       "ring": [[37.0, 30.5], [46.0, 29.5], [51.0, 24.5], [55.0, 22.5], [53.5, 18.5], [47.0, 17.5], [44.0, 20.0], [39.0, 25.5], [37.0, 30.5]]
     }
-  ]
+  ],
+  "economy": {
+    "_comment": "Population et PIB d'un pays sont répartis entre ses provinces : une part rurale selon la surface habitable, le reste selon la population des villes (Natural Earth, populated places).",
+    "ruralPopulationShare": 0.35,
+    "ruralGdpShare": 0.15,
+    "habitability": { "plain": 1, "mountain": 0.3, "highland": 0.5, "desert": 0.05, "arctic": 0.02, "jungle": 0.3 },
+    "citySearchRadiusCells": 4
+  }
 }

@@ -39,6 +39,95 @@ Choix par défaut, à confirmer :
 | 7 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
 | 8 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
 
+## État du jalon 4
+
+Terminé : la puissance militaire vient de l'économie, et le critère est tenu. Prendre la
+province industrielle d'un pays de test fait passer le rapport de capacité au-delà de 2 contre 1,
+contre moins de 1,3 pour une province pauvre de même taille. **Le test de plaisir reste ouvert** :
+personne n'a encore joué à la main.
+
+**Données.** Natural Earth ne donne population et PIB que par pays. Chaque pays les répartit
+entre ses provinces : 35 % de la population et 15 % du PIB selon la surface habitable (pondérée
+par le terrain), le reste selon la population des villes (`populated places`, 7 342 villes).
+Exemples : l'Île-de-France porte 33 % du PIB français, la Rhénanie-du-Nord-Westphalie 21 % de
+l'allemand, Moscou 11 % du russe. Les réglages sont dans `data/map-config.json` (`economy`).
+
+**Règles.** Toutes sont des premiers réglages, dans `src/sim/balance.ts`.
+
+- **Valeur d'une province :** 75 % de sa part du PIB et 25 % de sa part de la population de son
+  pays. La capacité militaire totale d'un pays au départ ne change pas, elle se concentre dans
+  ses régions industrielles. Les capitulations suivent cette valeur : perdre Paris et le Nord
+  rapproche bien plus la France de la capitulation que perdre la Lozère.
+- **Développement :** chaque province part à 100 %. Il multiplie sa valeur et son PIB.
+- **Effort de guerre :** un curseur de 0 à 100 %, 50 % au départ. La capacité militaire est
+  multipliée par 0,5 + l'effort (de ×0,5 à ×1,5). L'économie se reconvertit à 0,8 point par
+  seconde : passer de 50 à 100 % prend environ une minute.
+- **Croissance et usure :** sous 50 %, les provinces tenues par leur pays grandissent, jusqu'à
+  +2 % par minute à effort nul (moitié moins en guerre), dans la limite de 180 %. Au-dessus, elles
+  s'usent au même rythme, sans descendre sous 60 %. Une économie de guerre totale est donc un
+  sprint : elle paie pendant une vingtaine de minutes, puis l'industrie usée la rattrape.
+- **Destructions :** une province qui change de mains au combat perd 15 % de son développement,
+  sans descendre sous 30 %. Une annexion après capitulation se fait sans destructions.
+- **Démobilisation :** une armée au-dessus de la capacité fond de 0,04 % de l'excédent par tick.
+- **IA :** effort de 35 % en paix, 65 % en guerre, 90 % en sous-nombre, avec un tempérament de
+  ±10 points tiré au début de la partie.
+- **Interface :** section Économie du panneau (PIB, croissance ou usure, effort de guerre),
+  fiche des pays et des provinces (PIB, population, développement), et carte économique
+  (bouton en haut ou touche E) teintée par la densité de PIB. Un message rappelle de relever
+  l'effort au début d'une guerre s'il est encore à 50 % ou moins.
+- **Sauvegarde :** l'économie est sauvegardée. Le format passe en version 2 : les parties du
+  jalon 3 sont refusées avec un message.
+
+**Duels de 30 min sur la vraie carte, le reste du monde jouant aussi** (gain du joueur en
+cellules, deux graines, et rapport de capacité joueur/ennemi à la fin) :
+
+| Stratégie du joueur | France contre IA allemande | Allemagne contre IA française |
+|---|---|---|
+| Tient à 100 %, sans réserve | −574 et −647 (0,74) | −59 et 0 (1,23) |
+| Tient à 60 %, sans offensive | Capitule en 24 et 29 min | −245 et −246 (1,23) |
+| Attaque à 100 % | Capitule en 22 et 26 min | −36 et −3 (1,23) |
+| Tient à 60 %, une offensive par minute | Capitule en 22 et 26 min | +286 et +32 (1,16) |
+| Tient à 40 %, offensives toutes les 30 s | Capitule en 13 min | +1 003 et +76 (1,30) |
+| **Même chose qu'une offensive par minute, effort à 100 %** | **+192 et +50 (0,9)** | **+2 424 et +676 (1,35)** |
+
+L'effort de guerre est le levier décisif. Pour la première fois, un script français gagne du
+terrain contre l'Allemagne, mais seulement s'il relève son effort. Les autres scripts restent
+à 50 % alors que l'IA monte à 65 ou 90 % dès la guerre : face à elle, ils perdent bien plus
+qu'au jalon 3. À l'inverse, l'Allemagne ne balaie plus la France, car l'IA française mobilise
+aussi. Un joueur qui ignore le curseur sera donc nettement puni, d'où le rappel en début de guerre.
+
+**Mesures.**
+
+| Mesure | Résultat |
+|---|---|
+| Monde sans joueur, 60 min à ×1, deux graines | 145 et 138 nations sur 193 à la fin (jalon 3 : environ 145) |
+| Tick de ces parties | Médiane 0,4 et 0,8 ms, p99 22 et 29 ms, max 81 et 82 ms |
+| Pire cas, guerre mondiale, 10 min de jeu | Médiane 3,5 ms, p95 36 ms, p99 44 ms, **max 89 ms** (jalon 3 : 170 ms) |
+| Sauvegarde, après 60 min | 584 et 755 Ko de JSON avant compression |
+| Tests | 95 réussis, dont 13 sur l'économie |
+
+Le pire cas repasse sous le budget de 100 ms, sans optimisation dédiée : la cause des pics du
+jalon 3 reste non isolée, et ce résultat peut varier d'une partie à l'autre.
+
+Points à reprendre :
+
+- **Équilibre de l'effort à éprouver par un joueur.** L'écart entre 50 % et 100 % d'effort
+  décide presque seul des duels. Si c'est trop tranché à la main, pistes : une IA moins prompte
+  à mobiliser, ou une reconversion plus lente.
+- **Provinces par population.** Le découpage suit toujours la surface : la Russie a 403
+  provinces, et une province industrielle peut être immense (« Sussex de l'Ouest et environs »
+  porte 25 % du PIB britannique avec Londres).
+- **Données approximatives.** La répartition par les villes est une estimation : elle ignore
+  les zones industrielles sans grande ville et compte les agglomérations qui débordent sur
+  plusieurs provinces. 43 villes tombent hors de toute province, et les pays sans ville connue
+  répartissent tout selon la surface habitable.
+- **Pas de commerce ni de ressources :** le PIB ne dépend que du territoire et de l'effort.
+  Pétrole, blocus et échanges pourraient venir avec la logistique (jalon 5) ou la diplomatie
+  (jalon 6).
+- **La richesse va aux pays épargnés.** Sur 60 min, les États-Unis, souvent en guerre, perdent
+  19 % de PIB, quand le Japon en paix en gagne 44 %. C'est voulu, mais il n'y a encore aucun
+  frein à la croissance d'un pays en paix. La Russie garde ses 23 % de terres.
+
 ## État du jalon 3
 
 Terminé : une partie complète se joue, de la paix à la capitulation, avec sauvegarde.
@@ -185,8 +274,8 @@ La grille 4096×2048 est donc confirmée : le repli en 2048×1024 n'est pas néc
 
 Points à reprendre :
 
-- **Puissance militaire provisoire** : `baseCapacity` dépend du PIB et de la population de
-  départ. Elle sera remplacée par l'économie au jalon 4.
+- **Puissance militaire provisoire** : réglé au jalon 4. `baseCapacity` ne fixe plus que la
+  capacité de départ d'un pays, que l'économie fait ensuite évoluer.
 
 ## État du jalon 0
 
@@ -208,10 +297,10 @@ Points à reprendre plus tard :
   (240 fps) et le rendu logiciel (2 à 7 fps, mesuré au jalon 0) ont été testés. Le dézoom
   coûte environ 3,5 fois plus cher, car il prend 4 échantillons par pixel. Ce serait la
   première optimisation à faire.
-- **Provinces par population (jalon 4).** Le découpage suit la surface : la Russie en a
-  403, le Groenland 116, la Chine 95. Il faudra fusionner les zones vides et affiner les
-  zones denses.
-- **Données par province (jalon 4).** Population et PIB n'existent que par pays, avec des
-  années variables. La source par province reste à choisir.
+- **Provinces par population.** Toujours ouvert après le jalon 4. Le découpage suit la
+  surface : la Russie en a 403, le Groenland 116, la Chine 95. Il faudra fusionner les zones
+  vides et affiner les zones denses.
+- **Données par province :** réglé au jalon 4, par la population des villes. Les données
+  par pays restent d'années variables.
 - **Noms de provinces.** Certains viennent bruts de Natural Earth (« autonome juif ») ou
   de fusions et scissions (« Dorset-Jersey », « Sakha Ouest 13 »).

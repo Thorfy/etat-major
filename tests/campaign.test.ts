@@ -345,12 +345,16 @@ describe('capacité militaire', () => {
       if (sim.controllerOf(5) === A) takenBy = A;
     }
     expect(takenBy).toBe(A);
-    // D'autres provinces de B ont pu tomber en même temps : on les compte.
+    // D'autres provinces de B ont pu tomber en même temps : on les compte. Une province
+    // prise est abîmée par les combats, et chacune compte selon son développement.
     const value = startB / 4;
-    const lost = [5, 6, 7, 8].filter((province) => sim.controllerOf(province) === A).length;
-    expect(lost).toBeGreaterThan(0);
-    expect(capacity(sim, B)).toBeCloseTo(startB - lost * value * (1 - 0.35), 6);
-    expect(capacity(sim, A)).toBeCloseTo(startA + lost * value * 0.12, 6);
+    const lost = [5, 6, 7, 8].filter((province) => sim.controllerOf(province) === A);
+    expect(lost.length).toBeGreaterThan(0);
+    for (const province of lost) expect(sim.development[province]).toBeCloseTo(0.85, 6);
+    const kept = [5, 6, 7, 8].filter((province) => sim.controllerOf(province) === B);
+    const sum = (provinces: number[]) => provinces.reduce((total, province) => total + sim.development[province] * value, 0);
+    expect(capacity(sim, B)).toBeCloseTo(sum(kept) + sum(lost) * 0.35, 6);
+    expect(capacity(sim, A)).toBeCloseTo(startA + sum(lost) * 0.12, 6);
 
     for (let t = 0; t < 40000 && sim.controllerOf(5) !== B; t++) {
       sim.setFront(A, B, 0, 'retreat');

@@ -22,6 +22,10 @@ export interface ProvinceData {
   y: number;
   cells: number;
   areaKm2: number;
+  /** Part de la population du pays, estimée d'après ses villes et sa surface habitable. */
+  population: number;
+  /** Part du PIB du pays, en millions de dollars US, estimée de la même façon. */
+  gdpMusd: number;
 }
 
 export interface WorldData {

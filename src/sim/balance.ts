@@ -136,7 +136,41 @@ export const AI_TARGET_MAX_DISTANCE = 90;
 
 export const DEFAULT_ALLOCATION = 0.6;
 
-/** Capacité militaire de départ. Formule provisoire en attendant l'économie. */
+// Économie.
+export const ECONOMY_INTERVAL_TICKS = 10;
+/**
+ * Valeur militaire d'une province : sa part du PIB et de la population de son pays,
+ * dans ces proportions. Les régions industrielles comptent donc le plus.
+ */
+export const VALUE_GDP_WEIGHT = 0.75;
+/** Effort de guerre : part de l'économie tournée vers l'armée, de 0 à 1. */
+export const DEFAULT_WAR_EFFORT = 0.5;
+/** Multiplicateur de la capacité militaire : ce réglage + effort (de 0,5 à 1,5). */
+export const EFFORT_CAPACITY_BASE = 0.5;
+/** Vitesse de reconversion de l'économie, en effort par seconde de jeu. */
+export const EFFORT_CHANGE_PER_SECOND = 0.008;
+/**
+ * Croissance de l'industrie par minute, à effort nul : (effort par défaut − effort) × 2 ×
+ * ce réglage. Au-dessus de l'effort par défaut, l'industrie s'use au même rythme.
+ */
+export const GROWTH_PER_MINUTE = 0.02;
+/** En guerre, la croissance est réduite d'autant. */
+export const AT_WAR_GROWTH = 0.5;
+/** Bornes du développement d'une province, relatif à son niveau de départ. */
+export const MAX_DEVELOPMENT = 1.8;
+export const MIN_DEVELOPMENT = 0.6;
+/** Destructions : part du développement perdue quand une province change de mains. */
+export const CAPTURE_DAMAGE = 0.15;
+export const MIN_DAMAGED_DEVELOPMENT = 0.3;
+/** Part de l'excédent démobilisée par tick quand la capacité passe sous l'armée. */
+export const DEMOBILIZE_PER_TICK = 0.0004;
+/** Effort de l'IA : en paix, en guerre, en sous-nombre, et écart de tempérament. */
+export const AI_PEACE_EFFORT = 0.35;
+export const AI_WAR_EFFORT = 0.65;
+export const AI_DESPERATE_EFFORT = 0.9;
+export const AI_EFFORT_SPREAD = 0.1;
+
+/** Capacité militaire de départ d'une nation, répartie ensuite entre ses provinces. */
 export function baseCapacity(population: number, gdpMusd: number): number {
   const gdpBillions = Math.max(1, gdpMusd / 1000);
   const populationMillions = Math.max(0.05, population / 1e6);

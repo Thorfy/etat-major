@@ -2,7 +2,8 @@ import { GAME_SPEEDS, type GameClient } from '../game/GameClient.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapView } from '../render/MapView.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
-import { formatClock, formatRatio, integer } from './format.ts';
+import { effortEffect } from '../game/economy.ts';
+import { formatChange, formatClock, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
 const STANCES: { id: Stance; label: string }[] = [
   { id: 'attack', label: 'Attaquer' },
@@ -52,6 +53,44 @@ function GameMenu({ game }: { game: GameClient }) {
         Quitter vers le menu
       </button>
     </div>
+  );
+}
+
+function EconomySection({ game, nation }: { game: GameClient; nation: NationData }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
+  const target = game.effortTarget;
+  const converting = Math.abs(stats.effort - target) > 0.005;
+  const change = stats.output / Math.max(1, nation.gdpMusd) - 1;
+  const atWar = game.playerFronts().length > 0;
+  return (
+    <section class="economy">
+      <h3>Économie</h3>
+      <dl>
+        <dt>PIB</dt>
+        <dd>
+          {formatGdp(stats.output)}{' '}
+          <small class={change > 0.005 ? 'ahead' : change < -0.005 ? 'behind' : ''}>({formatChange(change, 0)})</small>
+        </dd>
+        <dt>{stats.growth < 0 ? 'Usure' : 'Croissance'}</dt>
+        <dd class={stats.growth > 0.0005 ? 'ahead' : stats.growth < -0.0005 ? 'behind' : ''}>{formatChange(stats.growth)} / min</dd>
+      </dl>
+      <label class="allocation">
+        <span>
+          Effort de guerre <b>{formatPercent(target)}{converting ? ` · atteint ${formatPercent(stats.effort)}` : ''}</b>
+        </span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={Math.round(target * 100)}
+          aria-label="Effort de guerre"
+          onInput={(event) => game.setEffort(Number(event.currentTarget.value) / 100)}
+        />
+      </label>
+      <p class="front-note">{converting ? 'Reconversion de l\'économie en cours. ' : ''}{effortEffect(target, atWar)}</p>
+    </section>
   );
 }
 
@@ -242,6 +281,7 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
           <dd>{game.snapshot?.aliveNations ?? ''}</dd>
         </dl>
       )}
+      {game.canCommand && <EconomySection game={game} nation={nation} />}
       {game.canCommand && fronts.length === 0 && (
         <p class="front-note peace">Tu es en paix. Clique sur un pays pour lui déclarer la guerre.</p>
       )}

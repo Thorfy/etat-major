@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 import { encodeRle } from '../src/map/codec.ts';
 import { distanceToBoundary } from '../src/map/distance.ts';
-import { MAP_HEIGHT as H, MAP_WIDTH as W, cellAreaKm2, latToY, wrapDeltaX } from '../src/map/projection.ts';
+import { MAP_HEIGHT as H, MAP_WIDTH as W, cellAreaKm2, latToY, lonToX, wrapDeltaX } from '../src/map/projection.ts';
 import { TERRAIN_IDS, TERRAIN_NAMES, type TerrainKey } from '../src/map/terrain.ts';
 import type { NationData, ProvinceData, WorldData } from '../src/map/types.ts';
 import { type GeoGeometry, type GeoPolygon, polygonsOf, rasterizePolygon } from './lib/rasterize.ts';
@@ -551,6 +551,8 @@ const provinces: ProvinceData[] = order.map((e) => ({
   y: 0,
   cells: 0,
   areaKm2: 0,
+  population: 0,
+  gdpMusd: 0,
 }));
 const nationOfCell = new Uint16Array(W * H);
 const nationCells = new Uint32Array(nationList.length);
@@ -677,6 +679,76 @@ const terrainGrid = new Uint16Array(W * H);
   }
 }
 
+// ---------------------------------------------------------------------------
+// Économie : Natural Earth ne donne population et PIB que par pays. Une part rurale
+// suit la surface habitable, le reste suit la population des villes : l'industrie se
+// concentre là où vivent les gens.
+// ---------------------------------------------------------------------------
+
+const cityPopulation = new Float64Array(provinces.length);
+const habitable = new Float64Array(provinces.length);
+let unplacedCities = 0;
+{
+  const economy = config.economy;
+  const weights = TERRAIN_NAMES.map(() => 0);
+  for (const [key, weight] of Object.entries(economy.habitability as Record<TerrainKey, number>)) {
+    weights[TERRAIN_IDS[key as TerrainKey]] = weight;
+  }
+  for (let y = 0; y < H; y++) {
+    const area = cellAreaKm2(y);
+    for (let x = 0; x < W; x++) {
+      const id = grid[y * W + x];
+      if (id !== 0) habitable[id - 1] += area * weights[terrainGrid[y * W + x]];
+    }
+  }
+  // Une ville côtière peut tomber dans l'eau de la grille : on prend la terre la plus proche.
+  const radius: number = economy.citySearchRadiusCells;
+  const provinceAt = (cx: number, cy: number): number => {
+    let best = 0;
+    let bestDistance = Infinity;
+    for (let dy = -radius; dy <= radius; dy++) {
+      const y = cy + dy;
+      if (y < 0 || y >= H) continue;
+      for (let dx = -radius; dx <= radius; dx++) {
+        const id = grid[y * W + ((cx + dx + W) % W)];
+        const distance = dx * dx + dy * dy;
+        if (id !== 0 && distance < bestDistance) {
+          bestDistance = distance;
+          best = id;
+        }
+      }
+    }
+    return best;
+  };
+  for (const place of load('ne_10m_populated_places_simple.geojson')) {
+    const population = place.properties.pop_max;
+    const point = place.geometry as unknown as { type: string; coordinates: [number, number] };
+    if (!(population > 0) || point.type !== 'Point') continue;
+    const [lon, lat] = point.coordinates;
+    const id = provinceAt(Math.floor(lonToX(lon)) % W, Math.floor(latToY(lat)));
+    if (id === 0) unplacedCities++;
+    else cityPopulation[id - 1] += population;
+  }
+
+  const cityTotal = new Float64Array(nationList.length);
+  const habitableTotal = new Float64Array(nationList.length);
+  const areaTotal = new Float64Array(nationList.length);
+  provinces.forEach((province, index) => {
+    cityTotal[province.nation] += cityPopulation[index];
+    habitableTotal[province.nation] += habitable[index];
+    areaTotal[province.nation] += province.areaKm2;
+  });
+  provinces.forEach((province, index) => {
+    const n = province.nation;
+    const rural = habitableTotal[n] > 0 ? habitable[index] / habitableTotal[n] : province.areaKm2 / Math.max(1, areaTotal[n]);
+    // Sans ville connue, tout suit la surface habitable.
+    const urban = cityTotal[n] > 0 ? cityPopulation[index] / cityTotal[n] : rural;
+    const share = (ruralShare: number) => ruralShare * rural + (1 - ruralShare) * urban;
+    province.population = Math.round(nationList[n].population * share(economy.ruralPopulationShare));
+    province.gdpMusd = Math.round(nationList[n].gdpMusd * share(economy.ruralGdpShare) * 10) / 10;
+  });
+}
+
 mkdirSync(outDir, { recursive: true });
 const terrainRle = encodeRle(terrainGrid);
 const terrainCompressed = deflateSync(Buffer.from(terrainRle.buffer, terrainRle.byteOffset, terrainRle.byteLength), { level: 9 });
@@ -713,6 +785,19 @@ console.log('\nContrôle des surfaces (grille / référence) :');
 for (const [code, reference] of Object.entries(REFERENCE_KM2)) {
   const n = nationData.find((d) => d.code === code);
   if (n) console.log(`  ${code} ${n.name} : ${(n.areaKm2 / 1e3).toFixed(0)}k / ${(reference / 1e3).toFixed(0)}k km² (${((n.areaKm2 / reference) * 100).toFixed(0)} %)`);
+}
+{
+  const richest = [...provinces]
+    .sort((a, b) => b.gdpMusd - a.gdpMusd)
+    .slice(0, 10)
+    .map((p) => `${p.name} (${nationData[p.nation].code}) ${(p.gdpMusd / 1000).toFixed(0)} Md $`);
+  console.log(`\nÉconomie : ${unplacedCities} villes hors de toute province. Provinces les plus riches : ${richest.join(', ')}`);
+  for (const code of ['FRA', 'DEU', 'GBR', 'RUS', 'USA', 'CHN']) {
+    const index = nationData.findIndex((n) => n.code === code);
+    const own = provinces.filter((p) => p.nation === index).sort((a, b) => b.gdpMusd - a.gdpMusd);
+    const total = own.reduce((sum, p) => sum + p.gdpMusd, 0);
+    console.log(`  ${code} : ${own.slice(0, 4).map((p) => `${p.name} ${((p.gdpMusd / total) * 100).toFixed(0)} %`).join(', ')}`);
+  }
 }
 const smallest = [...nationData].sort((a, b) => a.cells - b.cells).slice(0, 12);
 console.log(`\nPlus petites nations : ${smallest.map((n) => `${n.name} (${n.cells})`).join(', ')}`);

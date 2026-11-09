@@ -13,6 +13,9 @@ const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
 
+/** Carte politique (pays) ou économique (richesse des provinces). */
+export type MapMode = 'political' | 'economic';
+
 export interface CellInfo {
   province: number;
   owner: number;
@@ -45,6 +48,7 @@ export class MapView {
   private readonly events: MapEvents;
   private readonly pointers = new Map<number, { x: number; y: number }>();
   private readonly keys = new Set<string>();
+  private mode: MapMode = 'political';
 
   private dpr = 1;
   private dirty = true;
@@ -106,6 +110,22 @@ export class MapView {
   setCommandEnabled(enabled: boolean): void {
     this.commandEnabled = enabled;
     if (!enabled) this.cancelDraft();
+  }
+
+  get mapMode(): MapMode {
+    return this.mode;
+  }
+
+  setMapMode(mode: MapMode): void {
+    this.mode = mode;
+    this.renderer.setMapMode(mode === 'economic' ? 1 : 0);
+    this.dirty = true;
+  }
+
+  /** Richesse de chaque province, pour la carte économique. */
+  setEconomy(wealth: Uint8Array): void {
+    this.renderer.updateEconomy(wealth);
+    if (this.mode === 'economic') this.dirty = true;
   }
 
   applyHomeChanges(pairs: Uint16Array): void {

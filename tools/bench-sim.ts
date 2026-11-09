@@ -80,7 +80,13 @@ function worldGame(durationMinutes: number, seed: number) {
         .sort((a, b) => b.cells - a.cells)
         .slice(0, 5)
         .map((entry) => `${entry.name} ${((entry.cells / landTotal) * 100).toFixed(0)} %`);
+      const richest = world.nations
+        .map((nation, index) => ({ name: nation.name, output: sim.outputOf(index + 1), start: nation.gdpMusd }))
+        .sort((a, b) => b.output - a.output)
+        .slice(0, 5)
+        .map((entry) => `${entry.name} ${(entry.output / 1e6).toFixed(1)} Bn (${entry.output >= entry.start ? '+' : ''}${((entry.output / entry.start - 1) * 100).toFixed(0)} %)`);
       console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
+      console.log(`         PIB : ${richest.join(', ')}`);
     }
   }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);
@@ -152,6 +158,13 @@ const STRATEGIES: Strategy[] = [
   { label: 'Attaque à 100 %', orders: (sim, p, e) => sim.setFront(p, e, 1, 'attack') },
   { label: 'Tient à 60 %, une offensive par minute', orders: arrowPlayer(0.6, 600) },
   { label: 'Tient à 40 %, offensives toutes les 30 s', orders: arrowPlayer(0.4, 300) },
+  {
+    label: 'Effort de guerre 100 %, tient à 60 %, une offensive par minute',
+    orders: (sim, p, e, t) => {
+      sim.setEffort(p, 1);
+      arrowPlayer(0.6, 600)(sim, p, e, t);
+    },
+  },
 ];
 
 function duels() {
@@ -173,7 +186,11 @@ function duels() {
           if (sim.isAlive(player) && sim.isAlive(enemy)) strategy.orders(sim, player, enemy, t);
           sim.step();
           sim.drainChanges();
-          if (t % 6000 === 0) samples.push(`${minutes(t)}′ ${sim.cellsOf(player) - start >= 0 ? '+' : ''}${sim.cellsOf(player) - start}`);
+          if (t % 6000 === 0) {
+            const gain = sim.cellsOf(player) - start;
+            const balance = sim.capacityOf(player) / Math.max(1, sim.capacityOf(enemy));
+            samples.push(`${minutes(t)}′ ${gain >= 0 ? '+' : ''}${gain} (capacité ${balance.toFixed(2)})`);
+          }
           if (!end && !sim.isAlive(enemy)) end = `ennemi capitule en ${minutes(t)}′`;
           if (!end && !sim.isAlive(player)) end = `joueur capitule en ${minutes(t)}′`;
         }
