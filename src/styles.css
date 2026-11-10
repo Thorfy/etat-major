@@ -95,11 +95,16 @@ canvas {
 }
 
 .info {
-  top: 12px;
+  top: calc(var(--bar) + 10px);
   right: 12px;
-  width: 290px;
+  width: 300px;
   max-width: calc(100vw - 24px);
-  padding: 14px 16px;
+  max-height: calc(100vh - var(--bar) - 62px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--panel-line) transparent;
+  padding: 14px 10px 14px 16px;
 }
 
 .info h2 {
@@ -173,8 +178,8 @@ canvas {
 }
 
 .debug {
-  top: 52px;
-  left: 12px;
+  top: calc(var(--bar) + 10px);
+  left: 354px;
   padding: 6px 12px;
   font: 12px/1.5 var(--mono);
   pointer-events: none;
@@ -235,40 +240,99 @@ canvas {
   font: inherit;
 }
 
-.fronts {
-  top: 52px;
+.side {
+  top: calc(var(--bar) + 10px);
   left: 12px;
-  width: 300px;
+  bottom: 52px;
+  width: 330px;
   max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.tabs button {
+  position: relative;
+  white-space: nowrap;
+  min-height: 40px;
+  padding: 10px 2px 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tabs button:hover,
+.tabs button:focus-visible {
+  color: var(--ink);
+}
+
+.tabs button.on {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: rgba(208, 196, 164, 0.18);
+  color: var(--ink);
+  font: 10px/14px var(--mono);
+  text-align: center;
+  vertical-align: 1px;
+}
+
+.badge:empty {
+  visibility: hidden;
+}
+
+.badge.alert {
+  margin-top: 0;
+  background: #c4503c;
+  color: #fff;
+}
+
+.tab-body {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--panel-line) transparent;
-  padding: 12px 14px;
+  padding: 4px 10px 12px 14px;
 }
 
-.fronts .nation {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+.side section {
+  padding: 10px 0 4px;
 }
 
-.fronts h2 {
-  margin: 0;
-  font-size: 17px;
+.side section + section {
+  border-top: 1px solid var(--panel-line);
+}
+
+.side h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
   font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.fronts .clock {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--ink-soft);
-  font-family: var(--mono);
 }
 
-.fronts .swatch,
-.info .swatch {
+.swatch {
   display: inline-block;
   width: 10px;
   height: 10px;
@@ -276,28 +340,44 @@ canvas {
   border: 1px solid rgba(0, 0, 0, 0.5);
 }
 
-.fronts dl {
+.side dl {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 3px 12px;
-  margin: 0;
+  margin: 0 0 10px;
 }
 
-.fronts dt {
+.side dl.wide dd {
+  max-width: 190px;
+  overflow-wrap: anywhere;
+}
+
+.side dt {
   color: var(--ink-soft);
 }
 
-.fronts dd {
+.side dd {
   margin: 0;
   text-align: right;
   font-family: var(--mono);
   font-size: 13px;
 }
 
+.note {
+  margin: 6px 0 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.note.alert {
+  color: #ec8f7c;
+}
+
 .front {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--panel-line);
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 2px;
 }
 
 .front header {
@@ -308,14 +388,18 @@ canvas {
   margin-bottom: 6px;
 }
 
-.front h3 {
+.side .front h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
 .front .ratio {
+  color: var(--ink-soft);
   flex: none;
   font-family: var(--mono);
   font-size: 13px;
@@ -439,34 +523,101 @@ canvas {
   font-weight: 600;
 }
 
-.offensives,
-.defense {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--panel-line);
-}
-
-.offensives h3,
-.defense h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.offensives .action {
-  margin-top: 0;
-}
-
-.defense .action {
+.side .action {
   margin: 0 0 6px;
 }
 
-.defense .offensive-row {
+.offensive-row.zone {
   margin-bottom: 4px;
 }
 
-.front .fortify {
+.front-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
   margin-top: 8px;
+}
+
+.front-actions .action {
+  margin: 0;
+  padding: 6px 4px;
+  font-size: 12px;
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.card-actions .action {
+  margin: 0;
+  padding: 7px 4px;
+  font-size: 13px;
+}
+
+.action.danger {
+  border-color: #c4503c;
+  background: rgba(196, 80, 60, 0.16);
+}
+
+.action.danger:not(:disabled):hover,
+.action.danger:not(:disabled):focus-visible {
+  background: rgba(196, 80, 60, 0.32);
+}
+
+.stances.two {
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 0;
+}
+
+.stances button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.offer {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+}
+
+.region {
+  margin-bottom: 8px;
+}
+
+.region.offer {
+  padding: 8px;
+}
+
+.region-status {
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.gauge.unrest {
+  position: relative;
+  margin-top: 3px;
+}
+
+.gauge.unrest div.high {
+  background: #c4503c;
+}
+
+/* Repères : seuils des demandes d'investissements et d'indépendance. */
+.gauge.unrest i {
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 8px;
+  background: var(--ink-soft);
+}
+
+.offer p {
+  margin: 0 0 6px;
 }
 
 .action.armed {
@@ -527,7 +678,7 @@ canvas {
 }
 
 .toast {
-  bottom: 56px;
+  bottom: 128px;
   left: 50%;
   transform: translateX(-50%);
   max-width: calc(100vw - 24px);
@@ -632,19 +783,15 @@ canvas {
   border-color: var(--ink-soft);
 }
 
-.front-note.peace {
-  margin: 10px 0 0;
-}
-
-.front dl + dl {
-  margin-top: 3px;
-}
 
 .journal {
-  right: 12px;
-  bottom: 52px;
-  width: 340px;
-  max-width: calc(100vw - 24px);
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  width: 440px;
+  max-width: calc(100vw - 720px);
+  height: 104px;
+  overflow: hidden;
   padding: 6px 12px;
   font-size: 12px;
   pointer-events: none;
@@ -653,6 +800,9 @@ canvas {
 .journal p {
   margin: 2px 0;
   color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .journal p.mine {
@@ -747,19 +897,7 @@ canvas {
   font-size: 11px;
 }
 
-.economy {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--panel-line);
-}
-
-.economy h3 {
-  margin: 0 0 8px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.economy dd small {
+.side dd small {
   font-size: 12px;
 }
 
@@ -782,8 +920,134 @@ canvas {
   text-align: left;
 }
 
-.economy .front-note {
-  margin-bottom: 0;
+/* Un bouton désactivé ne reçoit pas la souris : c'est son cadre qui détecte le survol. */
+.build-option .action:disabled {
+  pointer-events: none;
+}
+
+.build-effect {
+  min-height: 8.4em;
+}
+
+
+/* Barre du haut */
+:root {
+  --bar: 0px;
+}
+
+.topbar {
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 18px;
+  padding: 7px 12px;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar h2 {
+  max-width: 180px;
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topbar .clock {
+  min-width: 17ch;
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.topbar .speeds,
+.topbar .game-menu {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+}
+
+.topbar .speeds button,
+.topbar .game-menu button {
+  min-width: 38px;
+  min-height: 30px;
+  padding: 2px 9px;
+  font-size: 13px;
+}
+
+.topbar .indicators {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 0;
+}
+
+.indicator {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 84px;
+  padding: 0 10px;
+  border-left: 1px solid var(--panel-line);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.indicator:first-child {
+  min-width: 112px;
+}
+
+.indicator span {
+  color: var(--ink-soft);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.indicator b {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.topbar .alert {
+  margin: 0;
+}
+
+.map-legend {
+  top: calc(var(--bar) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  padding: 4px 6px;
+  pointer-events: none;
+}
+
+/* Écran moyen : les indicateurs passent sur une seconde ligne, toujours la même. */
+@media (max-width: 1500px) {
+  .topbar .indicators {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+    padding-top: 6px;
+    border-top: 1px solid var(--panel-line);
+  }
+
+  .indicator:first-child {
+    border-left: 0;
+    padding-left: 2px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -795,14 +1059,76 @@ canvas {
   .info,
   .setup {
     top: auto;
-    bottom: 52px;
-    left: 12px;
-    right: 12px;
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
     width: auto;
   }
 
-  .fronts {
-    max-height: 45vh;
+  .side {
+    bottom: auto;
+    height: 36vh;
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+
+  .info {
+    max-height: 46vh;
+  }
+
+  /* Sur téléphone, la fiche ouverte remplace le panneau de gauche. */
+  #ui:has(.info) .side {
+    display: none;
+  }
+
+  .toast {
+    bottom: 56px;
+  }
+
+  .topbar {
+    gap: 6px 8px;
+    padding: 6px 8px;
+  }
+
+  .topbar-group {
+    gap: 6px;
+  }
+
+  .topbar h2 {
+    max-width: 120px;
+    font-size: 14px;
+  }
+
+  .topbar .clock {
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  .topbar .speeds button,
+  .topbar .game-menu button {
+    min-width: 30px;
+    padding: 2px 6px;
+    font-size: 12px;
+  }
+
+  .topbar .identity,
+  .topbar .actions {
+    flex-wrap: wrap;
+  }
+
+  .topbar .indicators {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .indicator {
+    min-width: 72px;
+    padding: 0 7px;
+  }
+
+  .indicator:first-child {
+    min-width: 96px;
   }
 
   .map-mode {

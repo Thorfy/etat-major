@@ -58,6 +58,9 @@ function worldGame(durationMinutes: number, seed: number) {
   let wars = 0;
   let maxBytes = 0;
   const firstLosses: string[] = [];
+  const diplomacy: Record<string, number> = {};
+  const coalitions: string[] = [];
+  const secessions: string[] = [];
   console.log(`--- Partie mondiale, graine ${seed}, ${durationMinutes} min de jeu à ×1`);
   for (let t = 1; t <= ticks; t++) {
     const begin = performance.now();
@@ -66,12 +69,17 @@ function worldGame(durationMinutes: number, seed: number) {
     durations.push(performance.now() - begin);
     maxBytes = Math.max(maxBytes, changes.cells.byteLength + changes.owners.byteLength);
     for (const event of changes.events) {
+      diplomacy[event.type] = (diplomacy[event.type] ?? 0) + 1;
       if (event.type === 'war') wars++;
-      else {
+      else if (event.type === 'capitulation') {
         capitulations++;
         if (firstLosses.length < 8) {
           firstLosses.push(`${world.nations[event.loser - 1].name} → ${world.nations[event.winner - 1].name} (${minutes(event.tick)}′)`);
         }
+      } else if (event.type === 'coalition' && coalitions.length < 6) {
+        coalitions.push(`contre ${world.nations[event.target - 1].name} (${event.members.length} pays, ${minutes(event.tick)}′)`);
+      } else if ((event.type === 'secession' || event.type === 'independence') && secessions.length < 8) {
+        secessions.push(`${world.nations[event.rebel - 1].name} ${event.type === 'secession' ? 'se soulève contre' : 'quitte en paix'} ${world.nations[event.parent - 1].name} (${minutes(event.tick)}′)`);
       }
     }
     if (t % 6000 === 0) {
@@ -86,6 +94,10 @@ function worldGame(durationMinutes: number, seed: number) {
         .slice(0, 5)
         .map((entry) => `${entry.name} ${(entry.output / 1e6).toFixed(1)} Bn (${entry.output >= entry.start ? '+' : ''}${((entry.output / entry.start - 1) * 100).toFixed(0)} %)`);
       console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
+      const movements = (sim as unknown as { movements: { unrest: number; investing: boolean }[] }).movements;
+      const restless = movements.filter((movement) => movement.unrest > 0);
+      console.log(`         Diplomatie : ${diplomacy.peace ?? 0} paix, ${diplomacy.coalition ?? 0} coalitions, ${diplomacy.secession ?? 0} soulèvements, ${diplomacy.independence ?? 0} indépendances accordées`);
+      console.log(`         Régions annexées : ${movements.length}, dont ${restless.length} agitées (max ${(Math.max(0, ...restless.map((movement) => movement.unrest)) * 100).toFixed(0)} %), ${movements.filter((movement) => movement.investing).length} avec investissements en chantier`);
       console.log(`         PIB : ${richest.join(', ')}`);
       let atWar = 0;
       let stabilitySum = 0;
@@ -107,13 +119,17 @@ function worldGame(durationMinutes: number, seed: number) {
         if (sim.isBlockaded(n)) blockaded++;
       }
       for (let p = 1; p < sim.factories.length; p++) factories += sim.factories[p];
+      const levels = Object.entries(sim.buildings).map(([kind, values]) => `${kind} ${values.reduce((sum, value) => sum + value, 0)}`).join(', ');
       let fortified = 0;
       for (let i = 0; i < sim.forts.length; i++) if (sim.forts[i] > 0) fortified++;
       const counters = sim.offensives.filter((offensive) => offensive.counter).length;
       console.log(`         Arrière : ${atWar} nations en guerre, stabilité moyenne ${atWar ? (stabilitySum / atWar).toFixed(2) : '-'}, réservoir moyen ${atWar ? ((manpowerSum / atWar) * 100).toFixed(0) : '-'} %, ${blockaded} sous blocus, ${factories} niveaux d'usine bâtis, ${fortified} cellules fortifiées, ${counters} contre-attaques en cours`);
+      console.log(`         Bâtiments : ${levels}`);
     }
   }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);
+  console.log(`  Coalitions : ${coalitions.join(', ') || 'aucune'}`);
+  console.log(`  Séparations : ${secessions.join(', ') || 'aucune'}`);
   console.log(`  Tick : ${summary(durations)} ; ${(maxBytes / 1024).toFixed(0)} Ko au plus en un tick`);
   const begin = performance.now();
   const save = sim.save();

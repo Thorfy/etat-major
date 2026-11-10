@@ -76,7 +76,7 @@ export class MapRenderer {
     gl.bindVertexArray(gl.createVertexArray());
     for (const name of [
       'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
-      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply', 'uFort',
+      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply', 'uFort', 'uAllies',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
@@ -109,6 +109,16 @@ export class MapRenderer {
     this.bindDataTexture(7, 'uEconomy', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
     this.bindDataTexture(8, 'uSupply', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.supply);
     this.bindDataTexture(9, 'uFort', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.forts);
+    this.bindDataTexture(10, 'uAllies', gl.R8, nations.length + 1, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(nations.length + 1));
+  }
+
+  /** Nations à mettre en évidence comme alliées du pays sélectionné. */
+  setAllies(nations: readonly number[]): void {
+    const { gl } = this;
+    const flags = new Uint8Array(this.world.data.nations.length + 1);
+    for (const nation of nations) flags[nation] = 255;
+    gl.activeTexture(gl.TEXTURE10);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, flags.length, 1, gl.RED, gl.UNSIGNED_BYTE, flags);
   }
 
   updateForts(cells: Uint32Array, values: Uint8Array): void {

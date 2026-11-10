@@ -87,6 +87,7 @@ async function start(): Promise<void> {
       },
       onSelect(cell) {
         state.selected = cell;
+        state.game?.highlightAlliesOf(cell.owner);
         refresh();
       },
       onToggleDebug() {

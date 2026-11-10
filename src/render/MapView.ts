@@ -146,6 +146,16 @@ export class MapView {
     if (this.mode === 'economic') this.dirty = true;
   }
 
+  /** Pays sélectionné, pour mettre ses alliés en évidence. */
+  get selectedNation(): number {
+    return this.selectedOwner;
+  }
+
+  setAllies(nations: readonly number[]): void {
+    this.renderer.setAllies(nations);
+    this.dirty = true;
+  }
+
   applyFortChanges(cells: Uint32Array, values: Uint8Array): void {
     if (cells.length === 0) return;
     this.renderer.updateForts(cells, values);

@@ -4,10 +4,12 @@ import type { LoadedWorld } from '../map/loadWorld.ts';
 import type { MapView } from '../render/MapView.ts';
 import {
   BUILD_COST,
+  PROVINCE_BUILDINGS,
+  type ProvinceBuilding,
   DEFAULT_OFFENSIVE_SHARE,
   GAME_SPEEDS,
   DEPOT_MIN_CONSOLIDATION,
-  MAX_BUILD_QUEUE,
+  MAX_ALLIES,
   MAX_PRIORITY_ZONES,
   MAX_FACTORY_LEVEL,
   MAX_INFRASTRUCTURE_LEVEL,
@@ -31,7 +33,8 @@ import type {
   WorkerInit,
   WorkerUpdate,
 } from '../sim/protocol.ts';
-import { traceRoute } from '../sim/route.ts';
+import { landingProblem, traceRoute } from '../sim/route.ts';
+import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
 import { provinceWealth } from './economy.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
@@ -70,6 +73,10 @@ export const mapHashOf = (world: LoadedWorld) => hashGrid(world.provinceGrid);
 export class GameClient {
   readonly player: number;
   readonly startCells: number;
+  /** Carte des mers, calculée au premier ordre de débarquement. */
+  private seas: Uint16Array | null = null;
+  /** Provinces côtières, calculées à la première demande. */
+  private coastal: Uint8Array | null = null;
   snapshot: SimSnapshot | null = null;
   tickMs = 0;
   maxTickMs = 0;
@@ -89,6 +96,7 @@ export class GameClient {
   /** Effort de guerre demandé, à jour dès le geste. */
   private effortOrder: number | null = null;
   private counterOrder: number | null = null;
+  private highlighted = 0;
 
   private readonly worker: Worker;
   private readonly world: LoadedWorld;
@@ -215,6 +223,8 @@ export class GameClient {
       this.economy = update.economy;
       const areas = this.world.data.provinces.map((province) => province.areaKm2);
       this.view.setEconomy(provinceWealth(areas, update.economy.provinceGdp, update.economy.development));
+      // Les alliances changent : la carte suit.
+      if (this.highlighted !== 0) this.highlightAlliesOf(this.highlighted);
     }
 
     this.tickMs = update.tickMs;
@@ -245,20 +255,144 @@ export class GameClient {
     this.journal.push(event);
     if (this.journal.length > JOURNAL_SIZE) this.journal.shift();
     const name = (id: number) => this.world.data.nations[id - 1].name;
-    if (event.type === 'war') {
-      const involved = event.a === this.player || event.b === this.player;
-      const enemy = event.a === this.player ? event.b : event.a;
-      if (involved && !this.pendingWars.has(enemy)) this.notify(`${name(enemy)} te déclare la guerre !${this.effortReminder()}`);
-      else if (involved) this.notify(`Guerre déclarée : ${name(enemy)}.${this.effortReminder()}`);
-    } else if (event.loser === this.player) {
-      this.defeatedBy = event.winner;
-      this.view.setCommandEnabled(false);
-      this.view.setTool(null);
-    } else if (event.winner === this.player) {
-      this.notify(`${name(event.loser)} capitule : tu annexes tout son territoire.`);
-    } else if (this.isAtWarWith(event.loser)) {
-      this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
+    const me = this.player;
+    switch (event.type) {
+      case 'war': {
+        if (event.a !== me && event.b !== me) break;
+        const enemy = event.a === me ? event.b : event.a;
+        if (this.pendingWars.has(enemy)) this.notify(`Guerre déclarée : ${name(enemy)}.${this.effortReminder()}`);
+        else this.notify(`${name(enemy)} te déclare la guerre !${this.effortReminder()}`);
+        break;
+      }
+      case 'capitulation':
+        if (event.loser === me) {
+          this.defeatedBy = event.winner;
+          this.view.setCommandEnabled(false);
+          this.view.setTool(null);
+        } else if (event.winner === me) {
+          this.notify(`${name(event.loser)} capitule : tu annexes tout son territoire.`);
+        } else if (this.isAtWarWith(event.loser)) {
+          this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
+        }
+        break;
+      case 'peace':
+        if (event.a === me || event.b === me) {
+          const other = event.a === me ? event.b : event.a;
+          this.notify(`Paix avec ${name(other)} : chaque province disputée revient à qui la tient. Trêve d'un an.`);
+        }
+        break;
+      case 'peaceRefused':
+        if (event.from === me) this.notify(`${name(event.to)} refuse la paix : elle se croit encore en mesure de gagner.`);
+        break;
+      case 'peaceOffer':
+        if (event.to === me) this.notify(`${name(event.from)} propose la paix : réponds dans la section Diplomatie.`);
+        break;
+      case 'alliance':
+        if (event.a === me || event.b === me) this.notify(`Pacte de non-agression signé avec ${name(event.a === me ? event.b : event.a)}.`);
+        break;
+      case 'allianceRefused':
+        if (event.from === me) this.notify(`${name(event.to)} refuse le pacte : tu es trop agressif, ou trop faible à ses yeux.`);
+        break;
+      case 'allianceBroken':
+        if (event.b === me) this.notify(`${name(event.a)} rompt son pacte de non-agression avec toi.`);
+        break;
+      case 'coalition':
+        if (event.target === me) this.notify(`Soulèvement : ${event.members.map(name).join(', ')} se révoltent ensemble contre toi !`);
+        break;
+      case 'secession':
+        if (event.parent === me) this.notify(`${name(event.rebel)} se soulève contre toi : ses demandes n'ont pas été entendues !`);
+        break;
+      case 'independence':
+        if (event.parent === me) this.notify(`${name(event.rebel)} redevient indépendant, sans combat. Une trêve d'un an est signée.`);
+        break;
+      case 'demand':
+        if (event.parent === me) {
+          this.notify(
+            event.kind === 'investment'
+              ? `${name(event.origin)} s'agite et demande des investissements : réponds dans l'onglet Diplomatie.`
+              : `${name(event.origin)} demande son indépendance, sans combat : réponds dans l'onglet Diplomatie.`,
+          );
+        }
+        break;
     }
+  }
+
+  /** Alliés d'une nation, d'après le relevé mondial : par traité, et partenaires de coalition. */
+  alliancesOf(nation: number): { treaty: number[]; coalition: number[] } {
+    const treaty: number[] = [];
+    const coalition: number[] = [];
+    const pairs = this.economy?.alliances ?? new Uint16Array(0);
+    for (let i = 0; i + 2 < pairs.length; i += 3) {
+      const other = pairs[i] === nation ? pairs[i + 1] : pairs[i + 1] === nation ? pairs[i] : 0;
+      if (other === 0) continue;
+      (pairs[i + 2] === 1 ? treaty : coalition).push(other);
+    }
+    return { treaty, coalition };
+  }
+
+  /** Met en évidence sur la carte les alliés du pays sélectionné. */
+  highlightAlliesOf(nation: number): void {
+    this.highlighted = nation;
+    if (nation === 0) {
+      this.view.setAllies([]);
+      return;
+    }
+    const { treaty, coalition } = this.alliancesOf(nation);
+    this.view.setAllies([...treaty, ...coalition]);
+  }
+
+  /** Pays liés au joueur par un pacte de non-agression. */
+  get allies(): number[] {
+    return this.playerStats?.allies ?? [];
+  }
+
+  /** Relation du joueur avec une nation. */
+  relationOf(nation: number): 'war' | 'ally' | 'truce' | 'peace' {
+    if (this.isAtWarWith(nation)) return 'war';
+    const stats = this.playerStats;
+    if (stats?.allies.includes(nation)) return 'ally';
+    if (stats?.truces.some((truce) => truce.nation === nation)) return 'truce';
+    return 'peace';
+  }
+
+  truceUntil(nation: number): number {
+    return this.playerStats?.truces.find((truce) => truce.nation === nation)?.until ?? 0;
+  }
+
+  proposePeace(enemy: number): void {
+    if (!this.canCommand || !this.isAtWarWith(enemy)) return;
+    this.command({ type: 'proposePeace', nation: this.player, enemy });
+  }
+
+  answerPeace(enemy: number, accept: boolean): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'answerPeace', nation: this.player, enemy, accept });
+  }
+
+  /** Répondre à la demande d'une région agitée de son pays. */
+  answerDemand(origin: number, accept: boolean): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'answerDemand', nation: this.player, origin, accept });
+  }
+
+  /** Agitation d'une région annexée (pays d'origine `origin`) dans le pays `parent` ; -1 si elle est calme. */
+  unrestOf(parent: number, origin: number): number {
+    const nation = this.snapshot?.nations.find((entry) => entry.id === parent);
+    return nation?.movements.find((movement) => movement.origin === origin)?.unrest ?? -1;
+  }
+
+  proposeAlliance(other: number): void {
+    if (!this.canCommand) return;
+    if (this.allies.length >= MAX_ALLIES) {
+      this.notify(`${MAX_ALLIES} pactes au plus.`);
+      return;
+    }
+    this.command({ type: 'proposeAlliance', nation: this.player, other });
+  }
+
+  breakAlliance(other: number): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'breakAlliance', nation: this.player, other });
   }
 
   /** Annonce les contre-attaques lancées d'elles-mêmes par la réserve du joueur. */
@@ -351,6 +485,8 @@ export class GameClient {
   /** On peut attaquer un voisin par la terre, ou n'importe qui si l'on a une marine. */
   canDeclareWar(nation: number): boolean {
     if (!this.canCommand || nation === 0 || nation === this.player || this.isAtWarWith(nation)) return false;
+    // Un allié ou un pays en trêve ne s'attaque pas : il faut d'abord rompre, ou attendre.
+    if (this.relationOf(nation) !== 'peace') return false;
     if ((this.playerStats?.navy ?? 0) > 0) return true;
     const { ownerGrid, data } = this.world;
     return areLandNeighbors(ownerGrid, data.width, data.height, this.player, nation);
@@ -418,7 +554,6 @@ export class GameClient {
     const national = this.homeOf(province) === this.player;
     const queue = this.playerStats?.builds ?? [];
     const queued = (kind: BuildKind) => queue.filter((order) => order.province === province && order.kind === kind).length;
-    const full = queue.length >= MAX_BUILD_QUEUE ? `File pleine (${MAX_BUILD_QUEUE} chantiers).` : '';
     const options: BuildOption[] = [];
     if (national) {
       const level = economy.factories[province] + queued('factory');
@@ -426,29 +561,74 @@ export class GameClient {
         kind: 'factory',
         label: `Usine, niveau ${level + 1}`,
         cost: BUILD_COST.factory * (level + 1),
-        reason: full || (level >= MAX_FACTORY_LEVEL ? `Niveau maximal (${MAX_FACTORY_LEVEL}).` : ''),
+        reason: level >= MAX_FACTORY_LEVEL ? `Niveau maximal (${MAX_FACTORY_LEVEL}).` : '',
       });
-    }
-    const roads = economy.infrastructure[province] + queued('infrastructure');
-    options.push({
-      kind: 'infrastructure',
-      label: `Infrastructure, niveau ${roads + 1}`,
-      cost: BUILD_COST.infrastructure * (roads + 1),
-      reason: full || (roads >= MAX_INFRASTRUCTURE_LEVEL ? `Niveau maximal (${MAX_INFRASTRUCTURE_LEVEL}).` : ''),
-    });
-    if (!national) {
+      // Bâtiments du sol national : raffinerie et aciérie sur un gisement, chantier naval sur la côte.
+      const data = this.world.data.provinces[province - 1];
+      const allowed: Record<ProvinceBuilding, boolean> = {
+        refinery: (data.oil ?? 0) > 0,
+        steelworks: (data.steel ?? 0) > 0,
+        recruitment: true,
+        services: true,
+        shipyard: this.isCoastal(province),
+      };
+      const names: Record<ProvinceBuilding, string> = {
+        refinery: 'Raffinerie',
+        steelworks: 'Aciérie',
+        recruitment: 'Centre de recrutement',
+        services: 'Services publics',
+        shipyard: 'Chantier naval',
+      };
+      for (const kind of Object.keys(PROVINCE_BUILDINGS) as ProvinceBuilding[]) {
+        if (!allowed[kind]) continue;
+        const { max, cost } = PROVINCE_BUILDINGS[kind];
+        const built = economy.buildings[kind][province] + queued(kind);
+        options.push({
+          kind,
+          label: `${names[kind]}, niveau ${Math.min(built + 1, max)}`,
+          cost: cost * Math.min(built + 1, max),
+          reason: built >= max ? `Niveau maximal (${max}).` : '',
+        });
+      }
+    } else {
+      // Le ravitaillement ne manque qu'en territoire conquis : routes et dépôts ne servent que là.
+      const roads = economy.infrastructure[province] + queued('infrastructure');
+      options.push({
+        kind: 'infrastructure',
+        label: `Infrastructure, niveau ${roads + 1}`,
+        cost: BUILD_COST.infrastructure * (roads + 1),
+        reason: roads >= MAX_INFRASTRUCTURE_LEVEL ? `Niveau maximal (${MAX_INFRASTRUCTURE_LEVEL}).` : '',
+      });
       const consolidated = economy.consolidation[province] >= DEPOT_MIN_CONSOLIDATION;
       options.push({
         kind: 'depot',
         label: 'Dépôt',
         cost: BUILD_COST.depot,
         reason:
-          full ||
           (economy.depots[province] || queued('depot') ? 'Un dépôt est déjà là ou en chantier.' : '') ||
           (!consolidated ? `Province consolidée à ${Math.round(DEPOT_MIN_CONSOLIDATION * 100)} % au moins.` : ''),
       });
     }
     return options;
+  }
+
+  /** Une province qui touche l'eau (calculé une fois : l'eau ne change jamais). */
+  isCoastal(province: number): boolean {
+    if (!this.coastal) {
+      const { provinceGrid, ownerGrid, data } = this.world;
+      const W = data.width;
+      this.coastal = new Uint8Array(data.provinces.length + 1);
+      for (let cell = W; cell < ownerGrid.length - W; cell++) {
+        if (ownerGrid[cell] === 0) continue;
+        const x = cell % W;
+        const left = x > 0 ? cell - 1 : cell + W - 1;
+        const right = x < W - 1 ? cell + 1 : cell - W + 1;
+        if (ownerGrid[left] === 0 || ownerGrid[right] === 0 || ownerGrid[cell - W] === 0 || ownerGrid[cell + W] === 0) {
+          this.coastal[provinceGrid[cell]] = 1;
+        }
+      }
+    }
+    return this.coastal[province] === 1;
   }
 
   /** Pays d'origine actuel d'une province (il change après une annexion). */
@@ -468,20 +648,12 @@ export class GameClient {
       this.notify('Une ligne fortifiée part de ton territoire.');
       return;
     }
-    if ((this.playerStats?.builds.length ?? 0) >= MAX_BUILD_QUEUE) {
-      this.notify(`File de chantiers pleine (${MAX_BUILD_QUEUE}).`);
-      return;
-    }
     this.command({ type: 'fortifyLine', nation: this.player, fromX, fromY, toX, toY });
     this.notify('Ligne fortifiée mise en chantier.');
   }
 
   fortifyFront(enemy: number): void {
     if (!this.canCommand) return;
-    if ((this.playerStats?.builds.length ?? 0) >= MAX_BUILD_QUEUE) {
-      this.notify(`File de chantiers pleine (${MAX_BUILD_QUEUE}).`);
-      return;
-    }
     this.command({ type: 'fortifyFront', nation: this.player, enemy });
     this.notify(`Front avec ${this.world.data.nations[enemy - 1].name} mis en chantier de fortification.`);
   }
@@ -530,8 +702,11 @@ export class GameClient {
     const { ownerGrid, data } = this.world;
     const stats = this.playerStats;
     const target = ownerGrid[toY * data.width + toX];
-    const route = traceRoute(ownerGrid, data.width, data.height, fromX, fromY, toX, toY);
+    // L'eau ne change jamais : la carte des mers se calcule une fois.
+    this.seas ??= findSeas(ownerGrid, data.width, data.height).sea;
+    const route = traceRoute(ownerGrid, data.width, data.height, fromX, fromY, toX, toY, this.seas);
     const landing = route.amphibious ? ownerGrid[route.landingY * data.width + route.landingX] : 0;
+    const problem = route.amphibious ? landingProblem(route, ownerGrid, this.player) : '';
     if (!this.canCommand) {
       this.notify('Ton pays a capitulé : tu ne donnes plus d\'ordres.');
     } else if (ownerGrid[fromY * data.width + fromX] !== this.player) {
@@ -542,6 +717,10 @@ export class GameClient {
       this.notify('Tu n\'es pas en guerre contre ce pays.');
     } else if (route.amphibious && (stats?.navy ?? 0) <= 0) {
       this.notify('Sans accès à la mer, tu ne peux pas débarquer.');
+    } else if (problem === 'shore') {
+      this.notify('Un débarquement embarque sur ta propre côte : trace depuis ton littoral, sans traverser un autre pays.');
+    } else if (problem === 'sea') {
+      this.notify("Tes navires n'atteignent pas cette côte : elle donne sur une autre mer (mer intérieure ou lac).");
     } else if (route.amphibious && landing !== this.player && !this.isAtWarWith(landing)) {
       this.notify('Ce trajet débarque chez un pays neutre : trace plus près de la côte ennemie.');
     } else if (route.amphibious && landing === this.player) {

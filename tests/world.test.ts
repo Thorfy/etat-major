@@ -534,12 +534,14 @@ describe('sauvegarde', () => {
         'constructionRate',
       ],
       5: ['counterShare', 'counterAttempts', 'priorityZones'],
+      6: ['alliances', 'truces', 'aggression', 'coalitionAgainst', 'peaceOffers'],
     };
     const gzip = async (parts: BlobPart[]) =>
       new Blob([await new Response(new Blob(parts).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()]);
-    for (const version of [1, 2, 3, 4]) {
+    for (const version of [1, 2, 3, 4, 5]) {
       const state = JSON.parse(JSON.stringify(current.state));
-      for (let later = version + 1; later <= 5; later++) for (const key of added[later] ?? []) delete state[key];
+      for (let later = version + 1; later <= 6; later++) for (const key of added[later] ?? []) delete state[key];
+      for (const front of state.fronts) delete front.startTick;
       if (version < 5) {
         for (const front of state.fronts) for (const side of front.sides) delete side.priority;
         for (const offensive of state.offensives) delete offensive.counter;
@@ -560,10 +562,13 @@ describe('sauvegarde', () => {
       const json = new TextEncoder().encode(JSON.stringify({ meta, state }));
       const rle = encodeRle(current.owners) as Uint16Array<ArrayBuffer>;
       const supplyRle = encodeRle(Uint16Array.from(current.supply)) as Uint16Array<ArrayBuffer>;
+      const fortRle = encodeRle(Uint16Array.from(current.forts)) as Uint16Array<ArrayBuffer>;
       const blob = await gzip(
-        version >= 3
-          ? [new Uint32Array([json.length, rle.length, supplyRle.length]), json, rle, supplyRle]
-          : [new Uint32Array([json.length, rle.length]), json, rle],
+        version >= 5
+          ? [new Uint32Array([json.length, rle.length, supplyRle.length, fortRle.length]), json, rle, supplyRle, fortRle]
+          : version >= 3
+            ? [new Uint32Array([json.length, rle.length, supplyRle.length]), json, rle, supplyRle]
+            : [new Uint32Array([json.length, rle.length]), json, rle],
       );
 
       const decoded = await decodeSave(blob, sim.owners.length, version);
@@ -600,5 +605,42 @@ describe('noms de pays', () => {
     expect(labels.find((label) => label.id === B)?.r).toBe(-1);
     expect(labels.find((label) => label.id === A)?.r).toBeGreaterThan(0);
     expect(sim.updateLabels()).toEqual([]);
+  });
+});
+
+describe('mers et éloignement', () => {
+  it("refuse un débarquement sur une mer intérieure qu'on ne borde pas", () => {
+    // Océan x ∈ [60, 80) entre A et B ; une mer intérieure x ∈ [130, 155), y ∈ [10, 30) chez B ;
+    // l'océan encore à l'est de B, pour que la carte qui boucle ne relie pas A à B par la terre.
+    const inland = (x: number, y: number) =>
+      x < 60 ? A : x < 80 || x >= 200 ? 0 : x >= 130 && x < 155 && y >= 10 && y < 30 ? 0 : B;
+    const sim = new Simulation(makeWorld({ width: 300, height: 40, owner: inland }));
+    sim.declareWars([[A, B]]);
+    // Par l'océan, puis par-dessus B, pour toucher terre depuis la mer intérieure : refusé.
+    expect(sim.launchOffensive(A, 55, 20, 160, 20, 0.3)).toBe(0);
+    // La côte de B sur l'océan reste à portée.
+    expect(sim.launchOffensive(A, 55, 20, 90, 20, 0.3)).toBeGreaterThan(0);
+  });
+
+  it('ravitaille mal une tête de pont loin de ses ports', () => {
+    // Deux cartes : B à 40 cellules d'eau de A, ou à 900.
+    const beachhead = (W: number, sea: number, fromX: number, toX: number, landing: number) => {
+      const owner = (x: number) => (x < 20 ? A : x < 20 + sea ? 0 : x < 100 + sea ? B : 0);
+      const sim = new Simulation(makeWorld({ width: W, height: 20, owner, gdp: (n) => (n === A ? 20e6 : 2e6) }));
+      sim.declareWars([[A, B]]);
+      expect(sim.launchOffensive(A, fromX, 10, toX, 10, 1)).toBeGreaterThan(0);
+      for (let t = 0; t < 2400 && sim.owners[10 * W + landing] !== A; t++) {
+        sim.setFront(A, B, 0, 'hold');
+        sim.setFront(B, A, 0, 'hold');
+        sim.step();
+      }
+      expect(sim.owners[10 * W + landing]).toBe(A);
+      for (let t = 0; t < 60; t++) sim.step();
+      return sim.supplyAt(10 * W + landing);
+    };
+    const near = beachhead(200, 40, 17, 70, 60);
+    const distant = beachhead(2000, 900, 17, 930, 920);
+    expect(near).toBe(1);
+    expect(distant).toBeLessThan(0.7);
   });
 });

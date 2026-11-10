@@ -38,10 +38,11 @@ Choix par défaut, à confirmer :
 | 5 | Logistique et ravitaillement détaillés | Une percée trop profonde s'essouffle |
 | 6 | L'arrière : chantiers, main-d'œuvre, lassitude de guerre, ressources stratégiques | Attaquer en boucle épuise le pays ; bâtir à l'arrière pèse sur la guerre |
 | 7 | Défense planifiée : lignes fortifiées, réserve de contre-attaque, priorités par secteur | Une défense préparée arrête une attaque qui aurait percé sans elle |
-| 8 | Diplomatie : trêves et paix, alliances, tension mondiale, séparatismes | Une coalition se forme contre un pays trop expansionniste ; une région à bout fait sécession |
+| 8 | Diplomatie : trêves et paix, pactes de non-agression, séparatismes et soulèvements | Une région à bout fait sécession ; ses voisines annexées se soulèvent avec elle |
 | 9 | Commerce : échanges entre pays et entre régions, axes commerciaux | Un axe tracé enrichit les régions qu'il traverse ; couper une route commerciale affaiblit l'ennemi |
 | 10 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
-| 11 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
+| 11 | Illustrations, générées avec ComfyUI (Qwen Image) | Chaque écran, événement, bâtiment et doctrine a son illustration, et le premier chargement reste léger |
+| 12 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
 
 Les jalons 6 et 7 ont été ajoutés après le jalon 5, à la demande du joueur : il manquait des
 décisions à l'intérieur du pays et pour préparer la défense, au-delà d'attaquer en boucle.
@@ -57,10 +58,224 @@ jalon 6 :
   remplace le marché mondial abstrait des ressources. Il suit la diplomatie, dont dépendent
   les accords commerciaux et les embargos.
 
+Le jalon 11 (illustrations) a été demandé pendant le jalon 8. Il vient après les technologies et
+doctrines, pour illustrer aussi leurs cartes :
+
+- **Outil :** le ComfyUI du joueur et son pipeline Qwen Image, appelés par un script
+  (`tools/illustrate.ts`) à travers l'API HTTP de ComfyUI (`/prompt`, `/history`, `/view`), à
+  partir du flux de travail exporté au format API. Un catalogue (`data/illustrations.json`) donne
+  pour chaque image son identifiant, sa consigne, son format et sa graine : on régénère une image
+  ou toute la série à l'identique.
+- **Style unique** pour toute la série : une consigne de style commune, partagée par chaque image.
+- **Quoi :** écran d'accueil et choix du pays, chaque type d'événement (guerre, capitulation,
+  paix, pacte, soulèvement, indépendance, demande d'une région), chaque bâtiment et chantier,
+  chaque doctrine, la défaite et les fenêtres de fin de partie.
+- **Poids :** WebP de 100 à 250 Ko, chargés à la demande ; le premier chargement du site reste
+  d'environ 1 Mo. GitHub bloque les fichiers de plus de 100 Mio, recommande un dépôt de moins de
+  1 Go, et limite le site publié à 1 Go : quelques centaines d'images (50 à 100 Mo) y tiennent
+  largement, sans Git LFS (que GitHub Pages ne sert pas tel quel).
+
 Corrections ajoutées au jalon 6, à la demande du joueur : une IA qui n'attaque plus seulement
 les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauvegardes mises à
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
+
+## État du jalon 8
+
+Terminé : une région à bout fait sécession, et les régions annexées qui la touchent se soulèvent
+avec elle, en coalition. Dans le test du critère, un pays qui a annexé trois voisins s'effondre :
+les deux qui se touchent renaissent ensemble et s'allient, le troisième, séparé d'eux par une
+terre du vainqueur, reste à part. **Le test de plaisir reste ouvert** au-delà des parties du
+joueur décrites plus bas.
+
+**Paix et trêves.**
+
+- **Proposer la paix** (carte du front, ou fiche du pays) : l'IA décide aussitôt. Elle accepte si
+  elle est lasse (stabilité sous 45 %), saignée (réservoir sous 25 %) ou si elle perd (elle tient
+  une moindre part de son territoire que toi). Une IA qui gagne refuse, sauf à bout de forces. Pas
+  de paix avant 4 semaines de guerre.
+- **Traité :** chaque province disputée entre les deux revient à qui en tient la majorité, cellules
+  minoritaires comprises, et la frontière se redessine. Les provinces cédées sont annexées (35 % de
+  leur valeur, comme après une capitulation). Puis une trêve d'un an interdit la guerre entre eux.
+- **L'IA propose la paix** au joueur quand elle la veut, après 4 semaines : l'offre s'affiche dans
+  la section Diplomatie (Accepter, Refuser) et expire après 8 semaines.
+- **Entre IA :** deux pays qui veulent tous deux la paix la signent. Dans une impasse où les deux
+  réservoirs sont vides, c'est ce qui finit la guerre.
+
+**Pactes de non-agression.** Proposés depuis la fiche d'un pays en paix, 4 au plus. Deux
+signataires ne peuvent plus se déclarer la guerre (ni l'IA ni le joueur), mais **aucun n'entre en
+guerre pour défendre l'autre** : il n'y a d'appel aux armes nulle part. L'IA signe avec un pays
+agressif à moins de 45 % qu'elle ne pourrait pas attaquer de toute façon, ou face à une menace
+commune (un ennemi en commun, ou un voisin 1,2 fois plus fort qu'elle et agressif). Un pacte
+protège donc un flanc quand on est occupé ailleurs. Le rompre coûte un peu d'agressivité.
+
+**Agressivité.** Déclarer une guerre ajoute 12 points d'agressivité ; annexer un pays ajoute
+50 points × son poids rapporté au sien (5 au moins) ; obtenir des provinces par traité, un peu.
+Elle retombe d'un point par semaine. Les guerres des soulèvements ne coûtent rien. Au-delà de 45 %,
+plus personne ne signe de pacte avec ce pays. Elle ne fait plus naître de coalition (voir les
+corrections plus bas).
+
+**Séparatismes et soulèvements.** Un pays dont la stabilité tombe sous 25 % peut voir renaître le
+pays qu'il avait annexé (une chance sur quatre toutes les 10 s de jeu) : celui-ci reprend ses
+provinces d'origine encore tenues, avec leur valeur de départ, une armée mobilisée à 60 % et une
+stabilité de 70 %, et lui déclare la guerre. Les autres pays annexés dont les terres touchent les
+siennes, de proche en proche (4 au plus, 1 % du pays au moins chacun), renaissent avec lui et
+forment une **coalition** : ils ne peuvent pas se faire la guerre entre eux, et chacun combat
+l'ancien maître. C'est la seule coalition du jeu. Un membre qui fait la paix la quitte. Il ne
+s'agit que de pays disparus : un pays qui n'a rien annexé ne se fragmente pas.
+
+**Interface.** Onglet Diplomatie du panneau (agressivité, pactes, trêves, rebelles coalisés, offres
+de paix), bouton « Proposer la paix » dans chaque carte de front, bloc Diplomatie dans la fiche
+d'un pays (relation, rapport de force, agressivité, pactes, soulèvement, boutons), messages et
+journal pour chaque événement. Voir aussi la refonte de l'interface plus bas.
+
+**Performances.** Un traité ou une sécession parcourt toute la terre. Plusieurs traités sur la même
+passe ont fait monter un tick à 113 ms : un seul traité entre IA et une seule sécession par passe
+de 10 s, désormais.
+
+| Mesure | Résultat |
+|---|---|
+| Monde sans joueur, 120 semaines, deux graines | 99 nations sur 193 à la graine 1 ; 57 paix ; 2 sécessions par graine, aucun soulèvement à plusieurs |
+| Exemples | Le Kirghizistan quitte l'Ouzbékistan, Singapour la Malaisie, le Guatemala le Mexique, l'Islande le Danemark |
+| Tick de ces parties | Max 39 et 42 ms |
+| Pire cas, guerre mondiale, 10 semaines | Médiane 5,2 ms, p99 37 ms, **max 71 ms** |
+| Navigateur | Alliance refusée, paix refusée trop tôt, puis acceptée dans une impasse, trêve affichée |
+| Tests | 137 réussis, dont 12 sur la diplomatie ; sauvegardes des versions 1 à 5 mises à jour |
+
+**Corrections après les parties du joueur.**
+
+Première partie (« je me suis fait rouler dessus en attaquant l'Allemagne ») :
+
+- **Les coalitions ne défendaient pas que contre leur cible.** Une alliance de coalition appelait
+  ses membres contre n'importe quel agresseur : attaquer un membre, pour une tout autre raison,
+  faisait entrer toute la coalition en guerre. Désormais, seuls les alliés par traité défendent
+  contre tout le monde ; un partenaire de coalition ne défend que contre la cible de la coalition.
+- **Voir avant d'attaquer.** La fiche d'un pays montre ses alliés, sa coalition et ses partenaires,
+  et le rapport de force entre toi et lui, ses défenseurs compris. Si des alliés entreraient en
+  guerre, le bouton les compte (« Déclarer la guerre : X et 2 alliés »), la fiche les nomme, et une
+  confirmation est demandée. Sur la carte, les alliés du pays sélectionné sont éclaircis et rayés.
+- Dans la partie vérifiée au navigateur, la fiche de l'Allemagne affichait 1 321 contre 1 546 :
+  elle était déjà plus forte que la France avant toute alliance.
+
+Deuxième partie (« les alliances sont beaucoup trop fortes […] impossible à gérer pour un joueur
+lambda ») : les alliances deviennent des pactes de non-agression, sans aucun soutien militaire.
+L'appel aux armes disparaît, coalitions comprises ; la fiche ne garde que le rapport de force face
+au seul pays visé. La confirmation avant une guerre qui entraînait des alliés n'a plus lieu d'être.
+
+Troisième partie (« les coalitions c'est pas gérable […] seulement par des états à l'intérieur
+d'une nation qui se rebelle ») : les voisins ne se coalisent plus jamais contre un pays agressif.
+Une coalition ne naît que d'un soulèvement, entre régions annexées qui se touchent (voir
+Séparatismes). Dans les parties sans joueur, aucune IA n'a annexé assez de voisins contigus pour
+en voir une : elle menace surtout un grand empire, celui du joueur le plus souvent.
+
+**Refonte de l'interface** (« trop d'info à gauche […] l'UI saute tout le temps ») :
+
+- **Barre du haut**, fixe : pays, date, vitesse, puis les indicateurs clés (armée, main-d'œuvre,
+  stabilité, PIB, pétrole, acier, territoire), le choix de la carte, Sauvegarder et Menu. Sous
+  1 500 px de large, les indicateurs passent sur une seconde ligne, toujours la même.
+- **Panneau de gauche à onglets** : Fronts (offensives, cartes de front), Économie (production,
+  effort de guerre, chantiers), Défense (situation, lignes fortifiées, secteurs, contre-attaque),
+  Diplomatie (relations, offres de paix). Hauteur fixe ; chaque onglet défile seul. Une pastille
+  compte les fronts, les chantiers et les offres de paix, et passe au rouge sur une alerte
+  (offensive ennemie, encerclement, offre de paix, soulèvement).
+- **Lignes stables :** les lignes ne naissent plus ni ne disparaissent ; une valeur absente
+  s'écrit « — ». Les notes d'aide ont une hauteur réservée. Les indicateurs ont une largeur fixe.
+- **Fiche de droite :** le pays, puis sa diplomatie (relation, rapport de force, agressivité,
+  pactes, soulèvement) et deux boutons à place fixe (paix, pacte ou rupture ; déclarer la guerre),
+  ou « Bâtir ici » pour ses propres provinces, puis la province. Elle descend jusqu'au bas de
+  l'écran et défile si besoin.
+- **Journal** en bas au centre, sur une hauteur fixe ; sur téléphone, la fiche ouverte remplace
+  le panneau de gauche.
+- Vérifié au navigateur, à ×4 : aucun panneau n'a bougé d'un pixel en 8 s de jeu, à 1 600 × 900 ;
+  captures à 1 366 × 768 et 390 × 844.
+
+Quatrième retour (« pour les bâtiments au survol il faut indiquer ce qu'ils font, pas de limite
+dans la liste d'attente ») : au survol d'un chantier dans la fiche, une note à hauteur réservée dit
+ce qu'il apporte (et pourquoi il est impossible, s'il l'est) ; la file de chantiers du joueur n'a
+plus de limite (elle en avait 6 ; l'IA garde sa limite de 2). En l'écrivant, un défaut est apparu :
+**l'infrastructure ne servait qu'en territoire conquis**, où elle allège le transport, mais elle
+était proposée sur le sol national, toujours ravitaillé, et l'IA y en bâtissait. Elle ne se bâtit
+plus qu'en territoire conquis, comme le dépôt ; l'IA aussi n'en bâtit plus que là. Les niveaux déjà
+bâtis sur un sol national restent, sans effet.
+
+Cinquième retour (« les pays qui débarquent peuvent débarquer dans les mers intérieures […] plus
+on est éloigné plus il doit y avoir un malus d'attaque ») :
+
+- **Mers.** La carte compte désormais ses mers : chaque étendue d'eau d'un seul tenant (connexité 8,
+  un détroit en diagonale suffit) d'au moins 400 cellules ; en dessous, c'est un lac. Sur la vraie
+  carte, 12 mers : l'océan mondial (Méditerranée et Baltique comprises), la mer Noire (le Bosphore
+  est fermé à cette résolution), la Caspienne, les Grands Lacs, le lac Victoria et des mers
+  arctiques du Canada et de la Russie (`node tools/seas.ts` les liste).
+- **Débarquements.** Un débarquement embarque sur sa propre côte, sans traverser de pays avant la
+  mer, et touche terre depuis cette même mer. Avant, une flèche qui passait par n'importe quelle eau
+  débarquait sur la dernière côte rencontrée, Caspienne comprise. L'IA suit la même règle. Le joueur
+  reçoit un message qui dit pourquoi.
+- **Éloignement.** Le ravitaillement par la mer coûtait le même prix près de chez soi qu'à l'autre
+  bout du monde. Il coûte désormais, en plus, 0,04 par cellule entre la côte ravitaillée et le port
+  national le plus proche sur la même mer : 90 % de ravitaillement à 300 cellules, 50 % à 1 000, le
+  minimum au-delà de 1 600 (l'Australie ou la Chine en Europe). Un camp mal ravitaillé attaque mal
+  (rapport de force divisé jusqu'à 3,6) et s'use plus vite. Seuls les ports du sol national
+  comptent, et seulement sur leur mer : la mer Noire ne ravitaille que ses riverains.
+- Coût : la carte des mers se calcule une fois (0,2 s au lancement) ; les ports, à chaque
+  changement de sol national. Partie mondiale de 120 min : tick max 56 ms ; pire cas : 71 ms.
+- Vérifié au navigateur : la France en guerre contre le Kazakhstan ne peut pas débarquer sur la
+  Caspienne ; elle débarque en Tunisie. Tests : 140 réussis.
+
+Sixième retour (« pour les factions qui se rebellent il faut qu'elles envoient une demande avant
+de se rebeller […] que ce soit progressif et pas tout d'un coup ») : les sécessions tirées au sort
+deviennent des **mouvements régionaux**.
+
+- **Agitation.** Chaque région annexée (un pays disparu, pesant au moins 1 % de celui qui la
+  tient) a une agitation de 0 à 100 %. Elle monte chaque semaine de 0,15 × (45 % − stabilité du
+  pays), plus 1 point en guerre, et retombe d'autant quand le pays va bien. À 10 % de stabilité,
+  il faut une quinzaine de semaines pour aller au bout ; un pays stable reste calme.
+- **Demandes.** À 35 %, la région demande des **investissements** : accepter met en tête de file
+  un chantier de 6 semaines de chantiers du pays ; elle se calme aussitôt (−15 points), ne s'agite
+  plus pendant le chantier, puis se calme encore à l'achèvement (−30 points), et sa valeur et son
+  PIB remontent de 30 % de leur niveau d'origine. À 65 %, elle demande l'**indépendance sans
+  combat** : accepter la fait renaître en paix, avec une trêve d'un an. Chaque refus, ou une
+  demande laissée 8 semaines sans réponse, ou un chantier abandonné, ajoute 15 points.
+- **Soulèvement.** À 100 % seulement, la région se soulève et déclare la guerre, avec les régions
+  qui la touchent et dont l'agitation dépasse 50 % (la coalition rebelle). Une région calmée
+  (sous 15 %) pourra de nouveau demander.
+- **L'IA** investit quand elle n'est pas en guerre, et laisse partir une région qui pèse moins de
+  5 % de son pays.
+- **Interface :** section « Régions annexées » de l'onglet Diplomatie (une jauge par région, avec
+  des repères aux deux seuils, ses demandes et leurs boutons), pastille de l'onglet, message à
+  chaque demande, ligne « Agitation » dans la fiche d'une province annexée, chantier
+  « Investissements » dans la file.
+- Partie mondiale de 120 min : 112 régions annexées, 20 agitées (56 % au plus), 2 indépendances
+  accordées par l'IA, aucun soulèvement ; tick max 51 ms. Tests : 144 réussis.
+
+Septième retour : une fois ses trois niveaux d'usine bâtis, une province n'offrait plus rien. Cinq
+**bâtiments du sol national** s'ajoutent, chacun branché sur un système existant :
+
+| Bâtiment | Où | Niveaux, coût par niveau | Effet par niveau |
+|---|---|---|---|
+| Raffinerie | Gisement de pétrole | 2, 160 pts | +50 % du pétrole du gisement |
+| Aciérie | Gisement d'acier | 2, 160 pts | +50 % de l'acier du gisement |
+| Centre de recrutement | Partout | 3, 100 pts | +20 % d'hommes mobilisables dans la province |
+| Services publics | Partout | 3, 120 pts | Par niveau moyen du pays : stabilité 50 % plus rapide à remonter, guerre 10 % moins usante ; dans une région annexée, −1,2 point d'agitation par semaine |
+| Chantier naval | Province côtière | 3, 180 pts | +15 % de la marine de départ du pays, à l'achèvement |
+
+Les combats abattent un niveau de chacun, comme pour l'usine. L'IA bâtit ce dont elle manque
+(chantier naval sous blocus, raffinerie ou aciérie quand la couverture baisse, services publics
+quand la stabilité baisse, recrutement quand le réservoir se vide) : en 120 min, 32 niveaux de
+recrutement, 15 de services publics, 5 d'aciérie, 2 de raffinerie. Au navigateur, le premier essai
+a montré que le Worker n'envoyait plus le relevé économique (les tableaux des bâtiments, rangés
+dans un objet, n'étaient pas dans la liste des transferts) : corrigé. Tests : 150 réussis.
+
+Points à reprendre :
+
+- **Équilibre à éprouver par un joueur :** seuils d'agressivité et de lassitude, fréquence des
+  sécessions et des soulèvements.
+- **Pas de négociation :** une paix est toujours le statu quo des provinces tenues. Pas de
+  restitution, de réparations ni d'échange de provinces.
+- **Les IA ne s'allient entre elles que dans un soulèvement**, jamais par traité.
+- **Séparatismes limités aux pays disparus.** Découper un grand pays selon ses régions demanderait
+  de créer des nations en cours de partie.
+- **Pas d'opinion entre pays :** les décisions ne regardent que la force, la lassitude et
+  l'agressivité du moment.
 
 ## État du jalon 7
 

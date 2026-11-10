@@ -1,4 +1,5 @@
 // Messages échangés entre le jeu et le Worker de simulation.
+import type { ProvinceBuilding } from './balance.ts';
 // Partout, un identifiant de nation est son propriétaire de grille : indice + 1.
 
 export type Stance = 'attack' | 'hold' | 'retreat';
@@ -7,13 +8,37 @@ export type Stance = 'attack' | 'hold' | 'retreat';
  * Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement),
  * fortifications (une bande de cellules, sans province).
  */
-export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort';
+export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | ProvinceBuilding;
 
 export interface BuildOrder {
   province: number;
   kind: BuildKind;
   /** Cellules à fortifier, pour un chantier de fortifications. */
   cells?: number[];
+  /** Investissements : la région (pays d'origine annexé) qui les a demandés, et leur coût. */
+  region?: number;
+  cost?: number;
+}
+
+/** Ce qu'une région agitée demande : des investissements, ou l'indépendance sans combat. */
+export type DemandKind = 'investment' | 'independence';
+
+/** Une région annexée qui s'agite dans le pays qui la tient. */
+export interface MovementState {
+  parent: number;
+  /** Pays d'origine, disparu, qui renaîtrait. */
+  origin: number;
+  /** Agitation, de 0 à 1 : à 1, la région se soulève. */
+  unrest: number;
+  /** Part de la valeur du pays qu'elle pèse. */
+  share: number;
+  /** Demandes déjà faites depuis le dernier calme : 1 investissements, 2 indépendance. */
+  asked: number;
+  /** Demande en attente de réponse ('' : aucune), et son échéance. */
+  demand: '' | DemandKind;
+  until: number;
+  /** Investissements acceptés, en chantier. */
+  investing: boolean;
 }
 
 /** Secteur prioritaire : un disque de la carte où les forces d'un front se concentrent. */
@@ -35,7 +60,15 @@ export type SimCommand =
   | { type: 'fortifyFront'; nation: number; enemy: number }
   | { type: 'setCounterShare'; nation: number; share: number }
   | { type: 'addPriority'; nation: number; x: number; y: number }
-  | { type: 'removePriority'; nation: number; index: number };
+  | { type: 'removePriority'; nation: number; index: number }
+  /** Proposer la paix : l'ennemi l'accepte ou non, aussitôt. */
+  | { type: 'proposePeace'; nation: number; enemy: number }
+  /** Répondre à une offre de paix reçue. */
+  | { type: 'answerPeace'; nation: number; enemy: number; accept: boolean }
+  /** Répondre à la demande d'une région agitée. */
+  | { type: 'answerDemand'; nation: number; origin: number; accept: boolean }
+  | { type: 'proposeAlliance'; nation: number; other: number }
+  | { type: 'breakAlliance'; nation: number; other: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -86,11 +119,21 @@ export interface NationSnapshot {
   /** Points de construction par minute. */
   construction: number;
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
-  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number }[];
+  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number }[];
+  /** Régions annexées qui s'agitent dans ce pays. */
+  movements: { origin: number; unrest: number; share: number; demand: '' | DemandKind; until: number; investing: boolean }[];
   /** Part de l'armée gardée pour les contre-attaques. */
   counterShare: number;
   /** Secteurs prioritaires (joueur seulement). */
   priorityZones: PriorityZone[];
+  /** Agressivité : au-delà d'un seuil, les voisins se coalisent. */
+  aggression: number;
+  /** Diplomatie du joueur (vide pour les autres nations). */
+  allies: number[];
+  truces: { nation: number; until: number }[];
+  peaceOffers: { nation: number; until: number }[];
+  /** Régions rebelles soulevées ensemble contre cette nation. */
+  coalition: number[];
 }
 
 /** Économie du monde entier, envoyée moins souvent que le reste. */
@@ -109,8 +152,15 @@ export interface EconomySnapshot {
   factories: Uint8Array;
   infrastructure: Uint8Array;
   depots: Uint8Array;
+  /** Par province : niveaux des bâtiments du sol national (raffinerie, aciérie…). */
+  buildings: Record<ProvinceBuilding, Uint8Array>;
   /** Par nation. */
   stability: Float32Array;
+  aggression: Float32Array;
+  /** Nation contre laquelle chaque nation s'est soulevée en coalition (0 : aucune). */
+  coalitionAgainst: Uint16Array;
+  /** Alliances, à plat : a, b, sorte (1 traité, 2 coalition), a, b, sorte… */
+  alliances: Uint16Array;
 }
 
 export interface OffensiveSnapshot {
@@ -150,7 +200,17 @@ export interface SimSnapshot {
 
 export type SimEvent =
   | { type: 'war'; tick: number; a: number; b: number }
-  | { type: 'capitulation'; tick: number; loser: number; winner: number };
+  | { type: 'capitulation'; tick: number; loser: number; winner: number }
+  | { type: 'peace'; tick: number; a: number; b: number }
+  | { type: 'peaceRefused'; tick: number; from: number; to: number }
+  | { type: 'peaceOffer'; tick: number; from: number; to: number }
+  | { type: 'alliance'; tick: number; a: number; b: number }
+  | { type: 'allianceRefused'; tick: number; from: number; to: number }
+  | { type: 'allianceBroken'; tick: number; a: number; b: number }
+  | { type: 'coalition'; tick: number; target: number; members: number[] }
+  | { type: 'secession'; tick: number; parent: number; rebel: number }
+  | { type: 'demand'; tick: number; parent: number; origin: number; kind: DemandKind }
+  | { type: 'independence'; tick: number; parent: number; rebel: number };
 
 export interface NationLabel {
   id: number;
@@ -235,6 +295,7 @@ export interface SimSaveState {
     length: number;
     logRatio: number;
     flipBudget: number;
+    startTick: number;
     sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number; supply: number; priority: number }[];
   }[];
   offensives: {
@@ -300,6 +361,7 @@ export interface SimSaveState {
   factories: number[];
   infrastructure: number[];
   depots: number[];
+  buildings: Record<ProvinceBuilding, number[]>;
   queues: BuildOrder[][];
   buildProgress: number[];
   constructionRate: number[];
@@ -307,4 +369,11 @@ export interface SimSaveState {
   /** Tentatives de contre-attaque déjà faites : [nation, offensive ennemie, tentatives]. */
   counterAttempts: [number, number, number][];
   priorityZones: PriorityZone[][];
+  /** Alliances : [a, b, 1 traité ou 2 coalition]. */
+  alliances: [number, number, number][];
+  truces: [number, number, number][];
+  aggression: number[];
+  coalitionAgainst: number[];
+  peaceOffers: { from: number; to: number; until: number }[];
+  movements: MovementState[];
 }

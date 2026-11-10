@@ -3,8 +3,11 @@ import { decodeRle, encodeRle } from '../map/codec.ts';
 import { SUPPLY_GROUPS } from '../sim/balance.ts';
 import type { NationLabel, SimEvent, SimSave, SimSaveState } from '../sim/protocol.ts';
 
-/** 2 : économie (jalon 4). 3 : logistique (jalon 5). 4 : l'arrière (jalon 6). 5 : défense planifiée (jalon 7). */
-export const SAVE_VERSION = 5;
+/**
+ * 2 : économie (jalon 4). 3 : logistique (jalon 5). 4 : l'arrière (jalon 6). 5 : défense
+ * planifiée (jalon 7). 6 : diplomatie (jalon 8).
+ */
+export const SAVE_VERSION = 6;
 
 /** Ce que le jeu garde en plus de la simulation. */
 export interface SaveMeta {
@@ -106,6 +109,8 @@ export function migrateSave(file: SaveFile, cellCount: number): SaveFile {
   if (!sim.forts) sim.forts = new Uint8Array(cellCount);
   for (const front of state.fronts) {
     for (const side of front.sides) side.priority ??= 0;
+    // Version 6 : date de déclaration ; une guerre ancienne compte comme commencée au chargement.
+    front.startTick ??= state.tick;
   }
   return { meta: { ...meta, version: SAVE_VERSION }, sim };
 }

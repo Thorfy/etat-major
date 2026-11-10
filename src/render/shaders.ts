@@ -31,6 +31,7 @@ uniform float uZoom;        // pixels physiques par cellule
 uniform uint uHoverProvince;
 uniform uint uSelectedProvince;
 uniform uint uSelectedOwner;
+uniform sampler2D uAllies;
 
 out vec4 outColor;
 
@@ -195,6 +196,11 @@ vec3 shade(vec2 p, float gratAlpha) {
     }
     color = mix(color, NATION_LINE, 0.07 * gratAlpha);
     if (owner == uSelectedOwner) color = mix(color, vec3(1.0), 0.20);
+    // Alliés du pays sélectionné : éclaircis et rayés, pour les voir avant d'attaquer.
+    if (texelFetch(uAllies, ivec2(int(owner), 0), 0).r > 0.5) {
+      float ray = step(0.55, fract((gl_FragCoord.x - gl_FragCoord.y) / 10.0));
+      color = mix(color, vec3(1.0), 0.10 + 0.16 * ray);
+    }
     if (province == uHoverProvince) color = mix(color, vec3(1.0), 0.16);
     if (province == uSelectedProvince) color = mix(color, HIGHLIGHT, 0.42);
 

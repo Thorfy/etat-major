@@ -93,6 +93,8 @@ export const AMPHIBIOUS_MAX_LOSS = 0.8;
 export const BEACHHEAD_RADIUS = 2;
 /** Une zone côtière est ravitaillée si sa marine vaut au moins cette part de celle de l'ennemi. */
 export const NAVAL_SUPPLY_RATIO = 0.5;
+/** Une étendue d'eau d'au moins ce nombre de cellules est une mer ; en dessous, un lac. */
+export const MIN_SEA_CELLS = 400;
 /** Part de la marine d'une nation annexée que récupère le vainqueur. */
 export const ANNEXED_NAVY = 0.25;
 
@@ -166,6 +168,14 @@ export const CONSOLIDATION_SECONDS = 180;
 export const CONSOLIDATED_COST = 0.3;
 /** Coût de transport jusqu'à une côte conquise, si la marine tient la mer. */
 export const SEA_SUPPLY_COST = 15;
+/**
+ * Plus le coût de transport par cellule de mer qui sépare cette côte du port national le plus
+ * proche sur la même mer : loin de chez soi, les troupes débarquées sont mal ravitaillées, donc
+ * attaquent mal (SUPPLY_ATTACK_PENALTY). À 300 cellules, 90 % ; à 1 000, 50 % ; au-delà de 1 600, le minimum.
+ */
+export const SEA_SUPPLY_PER_CELL = 0.04;
+/** Ports nationaux retenus par nation et par mer pour mesurer cette distance. */
+export const MAX_SAMPLED_PORTS = 64;
 /** Distance ravitaillée sans perte, puis distance sur laquelle le ravitaillement s'éteint. */
 export const SUPPLY_FREE_RANGE = 20;
 export const SUPPLY_FADE_RANGE = 60;
@@ -294,7 +304,6 @@ export const STEEL_SHORTAGE_FLOOR = 0.4;
 // Chantiers : la part civile de l'économie bâtit, province par province.
 /** Points de construction par minute : ce réglage × racine du PIB en Md$ × (1 − effort). */
 export const CONSTRUCTION_PER_MINUTE = 2;
-export const MAX_BUILD_QUEUE = 6;
 export const MAX_FACTORY_LEVEL = 3;
 export const MAX_INFRASTRUCTURE_LEVEL = 3;
 /** Coût d'un chantier, multiplié par le niveau visé pour les usines et l'infrastructure. */
@@ -305,6 +314,36 @@ export const FACTORY_BONUS = 0.15;
 export const INFRASTRUCTURE_BONUS = 0.2;
 /** Un dépôt se bâtit dans une province occupée, consolidée au moins à ce point. */
 export const DEPOT_MIN_CONSOLIDATION = 0.5;
+
+/**
+ * Bâtiments du sol national, au-delà des usines : niveau maximal et coût par niveau (le coût est
+ * multiplié par le niveau visé). Raffinerie et aciérie demandent un gisement, le chantier naval
+ * une côte.
+ */
+export const PROVINCE_BUILDINGS = {
+  refinery: { max: 2, cost: 160 },
+  steelworks: { max: 2, cost: 160 },
+  recruitment: { max: 3, cost: 100 },
+  services: { max: 3, cost: 120 },
+  shipyard: { max: 3, cost: 180 },
+} as const;
+export type ProvinceBuilding = keyof typeof PROVINCE_BUILDINGS;
+export const isProvinceBuilding = (kind: string): kind is ProvinceBuilding => kind in PROVINCE_BUILDINGS;
+/** Chaque niveau de raffinerie (d'aciérie) ajoute cette part au pétrole (à l'acier) du gisement. */
+export const REFINERY_BONUS = 0.5;
+export const STEELWORKS_BONUS = 0.5;
+/** Chaque niveau de centre de recrutement ajoute cette part aux hommes mobilisables de la province. */
+export const RECRUITMENT_BONUS = 0.2;
+/**
+ * Services publics, par niveau moyen sur le sol national (pondéré par la valeur des provinces) :
+ * la stabilité remonte plus vite en paix, et la guerre l'use moins.
+ */
+export const SERVICES_RECOVERY_BONUS = 0.5;
+export const SERVICES_WEARINESS_CUT = 0.1;
+/** Dans une région annexée, chaque niveau moyen de services publics retire ça à son agitation par semaine. */
+export const SERVICES_UNREST_PER_WEEK = 0.012;
+/** Chaque niveau de chantier naval achevé ajoute cette part de sa marine de départ au pays. */
+export const SHIPYARD_NAVY = 0.15;
 /** Chance qu'une IA lance un chantier à chacune de ses décisions, si sa file est courte. */
 export const AI_BUILD_CHANCE = 0.3;
 export const AI_MAX_QUEUE = 2;
@@ -347,3 +386,87 @@ export const PRIORITY_RADIUS = 25;
 export const PRIORITY_BOOST = 0.6;
 /** Au-delà de cette part du front en secteurs prioritaires, la concentration n'a plus de sens. */
 export const MAX_PRIORITY_SHARE = 0.5;
+
+// ---------------------------------------------------------------------------
+// Diplomatie (jalon 8). Une semaine de jeu vaut 600 ticks.
+// ---------------------------------------------------------------------------
+
+const WEEK = 600;
+export const TICKS_PER_WEEK = WEEK;
+export const DIPLOMACY_INTERVAL_TICKS = 100;
+
+// Paix et trêves.
+/** Après une paix, les deux pays ne peuvent plus se faire la guerre pendant un an. */
+export const TRUCE_TICKS = 52 * WEEK;
+/** Pas de paix avant quelques semaines de guerre. */
+export const MIN_WAR_TICKS_FOR_PEACE = 4 * WEEK;
+/** L'IA veut la paix sous cette stabilité, ou sous cette part de réservoir d'hommes. */
+export const AI_PEACE_STABILITY = 0.45;
+export const AI_PEACE_MANPOWER = 0.25;
+/** Une IA qui tient encore presque tout son territoire et a pris plus qu'elle n'a perdu refuse. */
+export const AI_WINNING_HOME_SHARE = 0.9;
+/** L'IA propose la paix au joueur au bout de ce temps, si elle la veut. */
+export const AI_PEACE_OFFER_MIN_TICKS = 4 * WEEK;
+export const AI_PEACE_OFFER_CHANCE = 0.3;
+export const PEACE_OFFER_TICKS = 8 * WEEK;
+
+// Agressivité : un pays trop agressif voit ses pactes refusés.
+/** Agressivité gagnée en déclarant une guerre. */
+export const AGGRESSION_WAR = 0.12;
+/** En annexant : ce réglage × la valeur annexée rapportée à la sienne (avec un minimum). */
+export const AGGRESSION_ANNEX = 0.5;
+export const MIN_AGGRESSION_ANNEX = 0.05;
+/** En obtenant des provinces par un traité de paix. */
+export const AGGRESSION_CESSION = 0.2;
+/** En rompant une alliance. */
+export const AGGRESSION_BETRAYAL = 0.05;
+export const AGGRESSION_DECAY_PER_WEEK = 0.01;
+
+// Pactes de non-agression : deux pays qui en signent un ne peuvent plus se faire la guerre.
+// Aucun n'entre en guerre pour défendre l'autre.
+export const MAX_ALLIES = 4;
+/** L'IA signe aussi face à un voisin au moins aussi menaçant que ça, ou à un ennemi commun. */
+export const ALLIANCE_THREAT_RATIO = 1.2;
+export const ALLIANCE_THREAT_AGGRESSION = 0.3;
+/** L'IA refuse le pacte d'un pays plus agressif que ça. */
+export const ALLIANCE_MAX_AGGRESSION = 0.45;
+
+// Mouvements régionaux : dans un pays instable, une région annexée s'agite peu à peu. Elle demande
+// d'abord des investissements, puis l'indépendance sans combat ; refusée, elle finit par se soulever.
+/** Part minimale de la valeur du pays qu'une région annexée doit peser pour s'agiter. */
+export const SECESSION_MIN_SHARE = 0.01;
+/** L'agitation monte sous cette stabilité du pays, et retombe au-dessus. */
+export const UNREST_STABILITY = 0.45;
+/** Agitation gagnée par semaine, par point de stabilité sous ce seuil (perdue au-dessus). */
+export const UNREST_PER_WEEK = 0.15;
+/** Un pays en guerre voit ses régions s'agiter en plus de ça par semaine. */
+export const UNREST_WAR_PER_WEEK = 0.01;
+export const DEMAND_INVESTMENT_AT = 0.35;
+export const DEMAND_INDEPENDENCE_AT = 0.65;
+/** Au maximum, la région se soulève. */
+export const REVOLT_AT = 1;
+/** Sous ce niveau, la région est de nouveau calme : elle pourra redemander. */
+export const UNREST_CALM = 0.15;
+/** Une demande sans réponse est refusée au bout de ce délai. */
+export const DEMAND_TICKS = 8 * WEEK;
+/** Un refus fait monter l'agitation d'autant. */
+export const REFUSAL_UNREST = 0.15;
+/** Accepter les investissements calme aussitôt, puis encore à leur achèvement. */
+export const INVESTMENT_CALM = 0.15;
+export const INVESTMENT_DONE_CALM = 0.3;
+/** Les investissements coûtent ce nombre de semaines de chantiers du pays. */
+export const INVESTMENT_WEEKS = 6;
+/** À l'achèvement, valeur et PIB de la région remontent de cette part de leur niveau d'origine. */
+export const INVESTMENT_BOOST = 0.3;
+/** L'IA accorde l'indépendance à une région qui pèse moins que ça. */
+export const AI_INDEPENDENCE_MAX_SHARE = 0.05;
+/**
+ * Coalition rebelle : les régions dont les terres touchent celles de la première, de proche en
+ * proche, se soulèvent avec elle si leur agitation atteint ce niveau. Ce sont les seules
+ * coalitions du jeu.
+ */
+export const REBEL_JOIN_UNREST = 0.5;
+export const MAX_REBEL_COALITION = 4;
+export const REBEL_STABILITY = 0.7;
+export const REBEL_EFFORT = 0.65;
+export const REBEL_MOBILIZATION = 0.6;

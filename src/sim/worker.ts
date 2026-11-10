@@ -55,7 +55,13 @@ function send(tickMs: number, withSnapshot: boolean, withEconomy = false): void 
     changes.fortCells.buffer,
     changes.fortValues.buffer,
   ];
-  if (economy) transfer.push(...Object.values(economy).map((array: Float32Array) => array.buffer));
+  if (economy) {
+    // Tous les tableaux du relevé, y compris ceux des bâtiments, rangés par genre.
+    const { buildings, ...arrays } = economy;
+    for (const array of [...Object.values(arrays), ...Object.values(buildings)] as ArrayBufferView[]) {
+      transfer.push(array.buffer as ArrayBuffer);
+    }
+  }
   scope.postMessage(update, transfer);
 }
 

@@ -186,11 +186,21 @@ describe('chantiers', () => {
     const sim = new Simulation(config());
     sim.build(A, 4, 'factory'); // province de B
     sim.build(A, 1, 'depot'); // pas de dépôt sur le sol national
+    sim.build(A, 1, 'infrastructure'); // ni d'infrastructure
     for (let i = 0; i < MAX_FACTORY_LEVEL + 1; i++) sim.build(A, 2, 'factory');
     expect(sim.buildQueueOf(A).map((order) => order.province)).toEqual([2, 2, 2]);
     expect(sim.buildCost(2, 'factory')).toBe(BUILD_COST.factory);
     sim.cancelBuild(A, 1);
     expect(sim.buildQueueOf(A)).toHaveLength(2);
+  });
+
+  it("accepte une file de chantiers sans limite", () => {
+    const sim = new Simulation(config());
+    // Trois provinces, trois niveaux d'usine chacune : 9 chantiers, au-delà de l'ancienne limite de 6.
+    for (const province of [1, 2, 3]) {
+      for (let level = 0; level < 3; level++) sim.build(A, province, 'factory');
+    }
+    expect(sim.buildQueueOf(A)).toHaveLength(9);
   });
 
   it('perd un niveau d\'usine quand la province tombe', () => {
@@ -205,6 +215,9 @@ describe('chantiers', () => {
     }
     expect(sim.controllerOf(4)).toBe(A);
     expect(sim.factories[4]).toBe(0);
+    // Conquise, la province accepte de l'infrastructure, refusée sur le sol national.
+    sim.build(A, 4, 'infrastructure');
+    expect(sim.buildQueueOf(A).map((order) => [order.province, order.kind])).toEqual([[4, 'infrastructure']]);
   });
 
   it('fait bâtir l\'IA', () => {
@@ -228,5 +241,94 @@ describe('IA opportuniste', () => {
     sim.setFront(A, B, 0, 'hold');
     // Las et à court d'hommes, il pèse encore moins que sa capacité.
     expect(sim.availableStrength(A)).toBeLessThan(sim.capacityOf(A) * 0.9);
+  });
+});
+
+describe('bâtiments du sol national', () => {
+  /** Bâtit `kind` dans `province` pour `nation`, puis laisse le chantier aboutir. */
+  const built = (sim: Simulation, nation: number, province: number, kind: Parameters<Simulation['build']>[2]) => {
+    sim.build(nation, province, kind);
+    for (let t = 0; t < 600 * 20 && sim.buildQueueOf(nation).length > 0; t++) sim.step();
+    return sim.buildQueueOf(nation).length === 0;
+  };
+
+  it("ne se bâtissent que là où ils servent", () => {
+    const sim = new Simulation(config());
+    // Raffinerie : sur un gisement de pétrole (la province 4 de B), pas ailleurs.
+    expect(sim.canBuild(B, 4, 'refinery', 0)).toBe(true);
+    expect(sim.canBuild(B, 5, 'refinery', 0)).toBe(false);
+    expect(sim.canBuild(A, 1, 'refinery', 0)).toBe(false);
+    // Aciérie : aucun gisement d'acier sur cette carte.
+    expect(sim.canBuild(B, 4, 'steelworks', 0)).toBe(false);
+    // Chantier naval : sur la côte (la province 6 de B touche la mer), pas à l'intérieur.
+    expect(sim.canBuild(B, 6, 'shipyard', 0)).toBe(true);
+    expect(sim.canBuild(B, 5, 'shipyard', 0)).toBe(false);
+    // Jamais chez un autre.
+    expect(sim.canBuild(A, 4, 'services', 0)).toBe(false);
+    expect(sim.canBuild(A, 1, 'services', 0)).toBe(true);
+    // Niveau maximal.
+    for (let i = 0; i < 3; i++) sim.build(A, 2, 'recruitment');
+    sim.build(A, 2, 'recruitment');
+    expect(sim.buildQueueOf(A).filter((order) => order.kind === 'recruitment')).toHaveLength(3);
+  });
+
+  it('un centre de recrutement grossit le réservoir', () => {
+    const sim = new Simulation(config());
+    const control = new Simulation(config());
+    expect(built(sim, A, 1, 'recruitment')).toBe(true);
+    while (control.tick < sim.tick) control.step();
+    for (let t = 0; t < 60; t++) {
+      sim.step();
+      control.step();
+    }
+    // Trois provinces égales : +20 % sur l'une, soit un quinzième de plus.
+    expect(sim.manpowerMaxOf(A) / control.manpowerMaxOf(A)).toBeCloseTo(1 + 0.2 / 3, 3);
+  });
+
+  it('un chantier naval lance des navires', () => {
+    const sim = new Simulation(config());
+    const navy = () => (sim as unknown as { navy: Float64Array }).navy[B];
+    const before = navy();
+    expect(before).toBeGreaterThan(0);
+    expect(built(sim, B, 6, 'shipyard')).toBe(true);
+    expect(navy()).toBeCloseTo(before * 1.15, 6);
+  });
+
+  it('une raffinerie accroît le pétrole du gisement', () => {
+    // Des besoins dix fois plus grands : le gisement de B ne suffit plus.
+    const coverage = (refinery: boolean) => {
+      const sim = new Simulation(config());
+      if (refinery) expect(built(sim, B, 4, 'refinery')).toBe(true);
+      (sim as unknown as { oilPerCapacity: number }).oilPerCapacity *= 10;
+      for (let t = 0; t < 600; t++) sim.step();
+      return sim.oilCoverageOf(B);
+    };
+    const without = coverage(false);
+    expect(without).toBeLessThan(1);
+    expect(coverage(true)).toBeGreaterThan(without);
+  });
+
+  it('des services publics font remonter la stabilité plus vite', () => {
+    const recovered = (levels: number) => {
+      const sim = new Simulation(config());
+      for (let level = 0; level < levels; level++) for (const province of [1, 2, 3]) expect(built(sim, A, province, 'services')).toBe(true);
+      (sim as unknown as { stability: Float64Array }).stability[A] = 0.3;
+      for (let t = 0; t < 600 * 4; t++) sim.step();
+      return sim.stabilityOf(A);
+    };
+    expect(recovered(2)).toBeGreaterThan(recovered(0) + 0.02);
+  });
+
+  it('perdent un niveau quand la province tombe', () => {
+    const sim = new Simulation(config({ gdpB: 5e5 }));
+    expect(built(sim, B, 4, 'services')).toBe(true);
+    expect(sim.buildings.services[4]).toBe(1);
+    sim.declareWars([[A, B]]);
+    for (let t = 0; t < 600 * 20 && sim.controllerOf(4) !== A; t++) {
+      both(sim, 'attack', 'hold')();
+      sim.step();
+    }
+    expect(sim.controllerOf(4)).toBe(A);
+    expect(sim.buildings.services[4]).toBe(0);
   });
 });

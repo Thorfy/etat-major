@@ -31,3 +31,6 @@ export function formatRatio(ratio: number): string {
     value >= MAX_SHOWN_RATIO ? `> ${MAX_SHOWN_RATIO}` : value.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
   return ratio >= 1 ? `${number(ratio)} : 1` : `1 : ${number(1 / ratio)}`;
 }
+
+/** Grand nombre en abrégé, pour les indicateurs : « 412,3 k ». */
+export const compact = new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 });

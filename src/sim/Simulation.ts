@@ -4,6 +4,46 @@ import { findLandNeighbors } from '../map/adjacency.ts';
 import { distanceToBoundary } from '../map/distance.ts';
 import {
   ADJACENCY_INTERVAL_TICKS,
+  AGGRESSION_ANNEX,
+  AGGRESSION_BETRAYAL,
+  AGGRESSION_CESSION,
+  AGGRESSION_DECAY_PER_WEEK,
+  AGGRESSION_WAR,
+  AI_PEACE_MANPOWER,
+  AI_PEACE_OFFER_CHANCE,
+  AI_PEACE_OFFER_MIN_TICKS,
+  AI_PEACE_STABILITY,
+  AI_WINNING_HOME_SHARE,
+  ALLIANCE_MAX_AGGRESSION,
+  ALLIANCE_THREAT_AGGRESSION,
+  ALLIANCE_THREAT_RATIO,
+  DIPLOMACY_INTERVAL_TICKS,
+  MAX_ALLIES,
+  MAX_REBEL_COALITION,
+  MIN_AGGRESSION_ANNEX,
+  MIN_WAR_TICKS_FOR_PEACE,
+  PEACE_OFFER_TICKS,
+  REBEL_EFFORT,
+  REBEL_MOBILIZATION,
+  REBEL_STABILITY,
+  SECESSION_MIN_SHARE,
+  UNREST_STABILITY,
+  UNREST_PER_WEEK,
+  UNREST_WAR_PER_WEEK,
+  DEMAND_INVESTMENT_AT,
+  DEMAND_INDEPENDENCE_AT,
+  REVOLT_AT,
+  UNREST_CALM,
+  DEMAND_TICKS,
+  REFUSAL_UNREST,
+  INVESTMENT_CALM,
+  INVESTMENT_DONE_CALM,
+  INVESTMENT_WEEKS,
+  INVESTMENT_BOOST,
+  AI_INDEPENDENCE_MAX_SHARE,
+  REBEL_JOIN_UNREST,
+  TICKS_PER_WEEK,
+  TRUCE_TICKS,
   AI_COUNTER_SHARE,
   AI_FORT_MIN_CELLS,
   COUNTER_DEPTH,
@@ -26,6 +66,16 @@ import {
   AI_MAX_QUEUE,
   BLOCKADE_RATIO,
   BUILD_COST,
+  PROVINCE_BUILDINGS,
+  isProvinceBuilding,
+  type ProvinceBuilding,
+  REFINERY_BONUS,
+  STEELWORKS_BONUS,
+  RECRUITMENT_BONUS,
+  SERVICES_RECOVERY_BONUS,
+  SERVICES_WEARINESS_CUT,
+  SERVICES_UNREST_PER_WEEK,
+  SHIPYARD_NAVY,
   CASUALTY_WEARINESS,
   CONSTRUCTION_PER_MINUTE,
   DEPOT_MIN_CONSOLIDATION,
@@ -35,7 +85,6 @@ import {
   LAND_IMPORT_SHARE,
   MANPOWER_RATIO,
   MANPOWER_REGEN_PER_MINUTE,
-  MAX_BUILD_QUEUE,
   MAX_FACTORY_LEVEL,
   MAX_INFRASTRUCTURE_LEVEL,
   MIN_EFFORT_CAP,
@@ -65,6 +114,8 @@ import {
   MIN_SUPPLY,
   OFFENSIVE_SUPPLY_ATTRITION,
   SEA_SUPPLY_COST,
+  SEA_SUPPLY_PER_CELL,
+  MAX_SAMPLED_PORTS,
   SUPPLY_ATTACK_PENALTY,
   SUPPLY_ATTRITION,
   SUPPLY_COST_SCALE,
@@ -164,6 +215,8 @@ import {
 } from './balance.ts';
 import type {
   BuildKind,
+  DemandKind,
+  MovementState,
   BuildOrder,
   EconomySnapshot,
   PriorityZone,
@@ -177,7 +230,8 @@ import type {
   SimSnapshot,
   Stance,
 } from './protocol.ts';
-import { traceRoute } from './route.ts';
+import { landingProblem, traceRoute } from './route.ts';
+import { findSeas } from './seas.ts';
 
 export interface SimConfig {
   width: number;
@@ -236,6 +290,8 @@ interface Front {
   logRatio: number;
   /** Bascules encore permises à ce front. */
   flipBudget: number;
+  /** Tick de la déclaration de guerre. */
+  startTick: number;
 }
 
 interface Offensive {
@@ -324,6 +380,13 @@ export class Simulation {
   private readonly provinceCounts: (Map<number, number> | null)[];
   private capacityDirty = false;
   private hasCoast: Uint8Array = new Uint8Array(0);
+  /** Numéro de mer navigable de chaque cellule d'eau (0 : terre ou lac). L'eau ne change jamais. */
+  readonly seas: Uint16Array;
+  private readonly seaCount: number;
+  /** Ports nationaux, échantillonnés, par nation et par mer : clé nation × (seaCount + 1) + mer. */
+  private homePorts = new Map<number, Int32Array>();
+  /** Les ports se recalculent quand le sol national d'un pays change (annexion, paix, sécession). */
+  private homePortsStale = true;
   /** Vrai pendant une annexion : les provinces changent de mains sans destructions. */
   private peacefulTransfer = false;
   private readonly demobilized: Float64Array;
@@ -366,6 +429,10 @@ export class Simulation {
   /** Bâtiments de chaque province. */
   readonly factories: Uint8Array;
   readonly infrastructure: Uint8Array;
+  /** Bâtiments du sol national, par province. */
+  readonly buildings: Record<ProvinceBuilding, Uint8Array>;
+  /** Provinces qui touchent l'eau : un chantier naval s'y bâtit. */
+  private readonly provinceCoastal: Uint8Array;
   readonly depots: Uint8Array;
   /** Chantiers en file, par nation ; le premier avance. */
   private queues: BuildOrder[][];
@@ -385,6 +452,23 @@ export class Simulation {
   private priorityZones: PriorityZone[][];
   /** Cellules de front en secteur prioritaire, par paire (attaquant, défenseur). */
   private readonly priorityCounts: Float64Array;
+
+  // Diplomatie.
+  /** Alliance par paire : 0 aucune, 1 traité, 2 coalition. */
+  private readonly allied: Uint8Array;
+  /** Fin de la trêve par paire, en tick. */
+  private readonly truceUntil: Int32Array;
+  private readonly aggression: Float64Array;
+  private readonly coalitionAgainst: Uint16Array;
+  private peaceOffers: { from: number; to: number; until: number }[] = [];
+  /** Régions annexées qui s'agitent, par pays qui les tient. */
+  private movements: MovementState[] = [];
+  /** Carte de départ : de quoi faire renaître un pays annexé. */
+  private readonly startHome: Uint16Array;
+  private readonly startValue: Float64Array;
+  private readonly startGdp: Float64Array;
+  private readonly startManpower: Float64Array;
+  private readonly nationGdp: number[];
 
   // Ravitaillement.
   private readonly landCells: Int32Array;
@@ -451,6 +535,8 @@ export class Simulation {
     this.lengthCounts = new Int32Array(pairs);
     this.supplySums = new Float64Array(pairs);
     this.priorityCounts = new Float64Array(pairs);
+    this.allied = new Uint8Array(pairs);
+    this.truceUntil = new Int32Array(pairs);
     this.frontierPosition = new Int32Array(this.owners.length).fill(-1);
     this.offensivesByNation = Array.from({ length: this.stride }, () => []);
     this.landNeighbors = Array.from({ length: this.stride }, () => []);
@@ -501,11 +587,22 @@ export class Simulation {
     this.blockaded = new Uint8Array(this.stride);
     this.factories = new Uint8Array(provinceCount);
     this.infrastructure = new Uint8Array(provinceCount);
+    this.buildings = {
+      refinery: new Uint8Array(provinceCount),
+      steelworks: new Uint8Array(provinceCount),
+      recruitment: new Uint8Array(provinceCount),
+      services: new Uint8Array(provinceCount),
+      shipyard: new Uint8Array(provinceCount),
+    };
+    this.provinceCoastal = new Uint8Array(provinceCount);
     this.depots = new Uint8Array(provinceCount);
     this.queues = Array.from({ length: this.stride }, () => []);
     this.buildProgress = new Float64Array(this.stride);
     this.constructionRate = new Float64Array(this.stride);
     this.counterShare = new Float64Array(this.stride);
+    this.aggression = new Float64Array(this.stride);
+    this.coalitionAgainst = new Uint16Array(this.stride);
+    this.nationGdp = config.nations.map((nation) => nation.gdpMusd);
     this.priorityZones = Array.from({ length: this.stride }, () => []);
     this.demobilized = new Float64Array(this.stride);
 
@@ -523,6 +620,10 @@ export class Simulation {
       if (this.touchesWater(i)) coast.push(i);
     }
     this.coastCells = Int32Array.from(coast);
+    for (const cell of coast) this.provinceCoastal[this.provinceGrid[cell]] = 1;
+    const seas = findSeas(this.owners, this.width, this.height);
+    this.seas = seas.sea;
+    this.seaCount = seas.sizes.length - 1;
     this.labelCells.set(this.cellCounts);
     this.visited = new Uint8Array(this.owners.length);
     this.visitOrder = new Int32Array(land);
@@ -581,6 +682,10 @@ export class Simulation {
     this.steelPerOutput = worldOutput > 0 ? (RESOURCE_NEED_RATIO * worldSteel) / worldOutput : 0;
     this.recomputeManpower();
     this.manpower.set(this.manpowerMax);
+    this.startHome = this.provinceHome.slice();
+    this.startValue = this.provinceValue.slice();
+    this.startGdp = this.provinceGdp.slice();
+    this.startManpower = this.provinceManpower.slice();
 
     const hasCoast = new Uint8Array(this.stride);
     for (let k = 0; k < this.coastCells.length; k++) hasCoast[this.owners[this.coastCells[k]]] = 1;
@@ -594,7 +699,7 @@ export class Simulation {
     for (let n = 1; n < this.stride; n++) {
       this.reserve[n] = this.capacity[n] * INITIAL_MOBILIZATION;
     }
-    if (this.aiEnabled) this.refreshNeighbors();
+    this.refreshNeighbors();
     if (config.saved) this.restore(config.saved);
   }
 
@@ -687,6 +792,31 @@ export class Simulation {
     return this.queues[nation];
   }
 
+  /** Paires (a < b) dont la valeur n'est pas nulle : [a, b, valeur]. */
+  private pairsOf(value: (a: number, b: number) => number): [number, number, number][] {
+    const pairs: [number, number, number][] = [];
+    for (let a = 1; a < this.stride; a++) {
+      for (let b = a + 1; b < this.stride; b++) {
+        const v = value(a, b);
+        if (v !== 0) pairs.push([a, b, v]);
+      }
+    }
+    return pairs;
+  }
+
+  coalitionAgainstOf(nation: number): number {
+    return this.coalitionAgainst[nation];
+  }
+
+  /** Régions agitées d'un pays (pour les tests et l'affichage). */
+  movementsOf(parent: number): readonly MovementState[] {
+    return this.movements.filter((movement) => movement.parent === parent);
+  }
+
+  peaceOffersTo(nation: number): readonly { from: number; to: number; until: number }[] {
+    return this.peaceOffers.filter((offer) => offer.to === nation);
+  }
+
   counterShareOf(nation: number): number {
     return this.counterShare[nation];
   }
@@ -765,6 +895,21 @@ export class Simulation {
       case 'removePriority':
         this.removePriority(command.nation, command.index);
         break;
+      case 'proposePeace':
+        this.proposePeace(command.nation, command.enemy);
+        break;
+      case 'answerPeace':
+        this.answerPeace(command.nation, command.enemy, command.accept);
+        break;
+      case 'answerDemand':
+        this.answerDemand(command.nation, command.origin, command.accept);
+        break;
+      case 'proposeAlliance':
+        this.proposeAlliance(command.nation, command.other);
+        break;
+      case 'breakAlliance':
+        this.breakAlliance(command.nation, command.other);
+        break;
     }
   }
 
@@ -774,15 +919,27 @@ export class Simulation {
     this.effortTarget[nation] = Math.max(0, Math.min(1, effort));
   }
 
-  declareWars(pairs: [number, number][]): void {
-    const added: Front[] = [];
+  /**
+   * Chaque paire est [agresseur, cible]. Une guerre agressive fait monter l'agressivité ; une
+   * trêve ou un pacte de non-agression l'interdit. Personne n'entre en guerre pour défendre un
+   * autre pays. Les guerres des coalitions et des sécessions ne coûtent rien.
+   */
+  declareWars(pairs: [number, number][], aggressive = true): void {
+    const expanded: [number, number, boolean][] = [];
     for (const [x, y] of pairs) {
+      if (x === y || x <= 0 || y <= 0 || x >= this.stride || y >= this.stride) continue;
+      if (this.isAllied(x, y) || this.hasTruce(x, y)) continue;
+      expanded.push([x, y, aggressive]);
+    }
+    const added: Front[] = [];
+    for (const [x, y, costly] of expanded) {
       if (x === y || x <= 0 || y <= 0 || this.frontOf(x, y)) continue;
       if (!this.alive[x] || !this.alive[y]) continue;
+      if (costly) this.aggression[x] += AGGRESSION_WAR;
       const a = Math.min(x, y);
       const b = Math.max(x, y);
       const side = (): FrontSide => ({ allocation: 0, stance: 'hold', force: 0, captured: 0, rawDensity: 0, density: 0, supply: 1, priority: 0 });
-      const front: Front = { a, b, sides: [side(), side()], length: 0, logRatio: 0, flipBudget: 0 };
+      const front: Front = { a, b, sides: [side(), side()], length: 0, logRatio: 0, flipBudget: 0, startTick: this.tick };
       const index = this.fronts.push(front) - 1;
       this.frontIndex[a * this.stride + b] = index;
       this.frontIndex[b * this.stride + a] = index;
@@ -877,11 +1034,13 @@ export class Simulation {
     const length = Math.hypot(dx, dy);
     if (length === 0) return 0;
 
-    const route = traceRoute(this.owners, W, H, fromX, fromY, toX, toY);
+    const route = traceRoute(this.owners, W, H, fromX, fromY, toX, toY, this.seas);
     let transitUntil = 0;
     let seaLoss = 0;
     if (route.amphibious) {
       if (length > AMPHIBIOUS_MAX_LENGTH || this.navy[nation] <= 0) return 0;
+      // Depuis sa propre côte, et vers une côte de la même mer.
+      if (landingProblem(route, this.owners, nation) !== '') return 0;
       const landingOwner = this.owners[route.landingY * W + route.landingX];
       if (landingOwner === nation || !this.frontOf(nation, landingOwner)) return 0;
       transitUntil = this.tick + Math.max(1, Math.ceil(route.seaCells / AMPHIBIOUS_SPEED));
@@ -952,10 +1111,11 @@ export class Simulation {
   step(): void {
     this.tick++;
     this.evolveSectors();
+    // Les voisinages servent aux décisions de l'IA et à la diplomatie (alliances, coalitions).
+    const phase = this.tick % ADJACENCY_INTERVAL_TICKS;
+    if (phase === LAND_NEIGHBORS_TICK) this.refreshLandNeighbors();
+    else if (phase === SEA_NEIGHBORS_TICK) this.seaNeighbors = this.findSeaNeighbors();
     if (this.aiEnabled) {
-      const phase = this.tick % ADJACENCY_INTERVAL_TICKS;
-      if (phase === LAND_NEIGHBORS_TICK) this.refreshLandNeighbors();
-      else if (phase === SEA_NEIGHBORS_TICK) this.seaNeighbors = this.findSeaNeighbors();
       if (this.tick % WAR_INTERVAL_TICKS === 0) this.decideWars();
       if (this.tick % AI_INTERVAL_TICKS === 0) {
         this.decideAllocations();
@@ -966,6 +1126,7 @@ export class Simulation {
     }
     // La réserve de contre-attaque joue aussi pour le joueur : elle est automatique.
     if (this.tick % AI_INTERVAL_TICKS === 0) this.decideCounters();
+    if (this.tick % DIPLOMACY_INTERVAL_TICKS === 0) this.decideDiplomacy();
     if (this.tick % ECONOMY_INTERVAL_TICKS === 0) this.updateEconomy();
     this.computeArmies();
     this.updateFronts();
@@ -1090,6 +1251,72 @@ export class Simulation {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Mers et ports
+  // -------------------------------------------------------------------------
+
+  /** Ports nationaux d'une nation sur une mer, échantillonnés ; absent si elle ne la borde pas. */
+  private portsOf(nation: number, sea: number): Int32Array | undefined {
+    if (this.homePortsStale) this.refreshHomePorts();
+    return this.homePorts.get(nation * (this.seaCount + 1) + sea);
+  }
+
+  /**
+   * Les côtes du sol national de chaque pays, mer par mer. Seul le sol national compte, qu'il soit
+   * occupé ou non : le résultat ne dépend que de provinceHome, sauvegardé avec la partie.
+   */
+  private refreshHomePorts(): void {
+    const { coastCells, provinceGrid, provinceHome, seas, width: W, height: H } = this;
+    const lists = new Map<number, number[]>();
+    for (let k = 0; k < coastCells.length; k++) {
+      const cell = coastCells[k];
+      const nation = provinceHome[provinceGrid[cell]];
+      if (nation === 0) continue;
+      const x = cell % W;
+      const y = (cell - x) / W;
+      for (let j = 0; j < 4; j++) {
+        if ((j === 2 && y === 0) || (j === 3 && y === H - 1)) continue;
+        const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+        const sea = seas[next];
+        if (sea === 0) continue;
+        const key = nation * (this.seaCount + 1) + sea;
+        let list = lists.get(key);
+        if (!list) lists.set(key, (list = []));
+        if (list[list.length - 1] !== cell) list.push(cell);
+      }
+    }
+    this.homePorts.clear();
+    for (const [key, list] of lists) {
+      const step = Math.max(1, Math.ceil(list.length / MAX_SAMPLED_PORTS));
+      const sample: number[] = [];
+      for (let i = 0; i < list.length; i += step) sample.push(list[i]);
+      this.homePorts.set(key, Int32Array.from(sample));
+    }
+    this.homePortsStale = false;
+  }
+
+  /**
+   * Coût de transport d'un ravitaillement par mer jusqu'à `cell`, au-delà du coût fixe : la
+   * distance au port national le plus proche sur cette mer. Infini sans port sur cette mer.
+   */
+  private seaSupplyCost(nation: number, sea: number, cell: number): number {
+    const ports = this.portsOf(nation, sea);
+    if (!ports) return Infinity;
+    const W = this.width;
+    const x = cell % W;
+    const y = (cell - x) / W;
+    let best = Infinity;
+    for (let i = 0; i < ports.length; i++) {
+      const port = ports[i];
+      const px = port % W;
+      const dx = this.wrapDelta(x, px);
+      const dy = (port - px) / W - y;
+      const d = dx * dx + dy * dy;
+      if (d < best) best = d;
+    }
+    return Math.round(SEA_SUPPLY_PER_CELL * Math.sqrt(best) * SUPPLY_COST_SCALE);
+  }
+
   /** Cherche sur sa côte le départ le plus proche d'une province ennemie, puis débarque. */
   private launchAiAmphibious(nation: number, enemy: number): void {
     if (this.navy[nation] <= 0) return;
@@ -1114,8 +1341,9 @@ export class Simulation {
       const cell = own[Math.floor(this.random() * own.length)];
       const x = cell % this.width;
       const y = (cell - x) / this.width;
-      const route = traceRoute(this.owners, this.width, this.height, x, y, toX, toY);
+      const route = traceRoute(this.owners, this.width, this.height, x, y, toX, toY, this.seas);
       if (!route.amphibious || route.seaCells >= bestSea) continue;
+      if (landingProblem(route, this.owners, nation) !== '') continue;
       if (this.owners[route.landingY * this.width + route.landingX] !== enemy) continue;
       bestSea = route.seaCells;
       bestCell = cell;
@@ -1221,6 +1449,7 @@ export class Simulation {
       const weak = candidates.filter((other) => {
         if (!this.alive[other]) return false;
         if (other === this.player && this.tick < PLAYER_GRACE_TICKS) return false;
+        if (this.isAllied(nation, other) || this.hasTruce(nation, other)) return false;
         return this.capacity[nation] >= this.availableStrength(other) * WAR_CAPACITY_RATIO;
       });
       return weak.length > 0 ? weak[Math.floor(this.random() * weak.length)] : 0;
@@ -1246,6 +1475,497 @@ export class Simulation {
     const men = this.manpowerMax[nation] > 0 ? this.manpower[nation] / this.manpowerMax[nation] : 1;
     const reserves = 1 - DRAINED_STRENGTH * (1 - men);
     return this.capacity[nation] * free * morale * reserves;
+  }
+
+  // -------------------------------------------------------------------------
+  // Diplomatie
+  // -------------------------------------------------------------------------
+
+  isAllied(a: number, b: number): boolean {
+    return this.allied[a * this.stride + b] !== 0;
+  }
+
+  hasTruce(a: number, b: number): boolean {
+    return this.truceUntil[a * this.stride + b] > this.tick;
+  }
+
+  aggressionOf(nation: number): number {
+    return this.aggression[nation];
+  }
+
+  alliesOf(nation: number): number[] {
+    const allies: number[] = [];
+    for (let n = 1; n < this.stride; n++) if (n !== nation && this.isAllied(nation, n)) allies.push(n);
+    return allies;
+  }
+
+  private setAlliance(a: number, b: number, kind: number): void {
+    this.allied[a * this.stride + b] = kind;
+    this.allied[b * this.stride + a] = kind;
+  }
+
+  /** Un pays disparu n'a plus ni alliances, ni trêves, ni offres en cours. */
+  private endDiplomacyOf(nation: number): void {
+    for (let n = 1; n < this.stride; n++) {
+      this.setAlliance(nation, n, 0);
+      this.truceUntil[nation * this.stride + n] = 0;
+      this.truceUntil[n * this.stride + nation] = 0;
+    }
+    this.coalitionAgainst[nation] = 0;
+    this.aggression[nation] = 0;
+    this.peaceOffers = this.peaceOffers.filter((offer) => offer.from !== nation && offer.to !== nation);
+  }
+
+  /** L'IA veut-elle la paix avec cet ennemi ? Lasse, saignée, ou en train de perdre. */
+  private aiWantsPeace(ai: number, enemy: number): boolean {
+    const front = this.frontOf(ai, enemy);
+    if (!front || this.tick - front.startTick < MIN_WAR_TICKS_FOR_PEACE) return false;
+    const held = this.totalHome[ai] > 0 ? this.heldHome[ai] / this.totalHome[ai] : 1;
+    const theirs = this.totalHome[enemy] > 0 ? this.heldHome[enemy] / this.totalHome[enemy] : 1;
+    const tired = this.stability[ai] < AI_PEACE_STABILITY;
+    const drained = this.manpowerMax[ai] > 0 && this.manpower[ai] / this.manpowerMax[ai] < AI_PEACE_MANPOWER;
+    const winning = held >= AI_WINNING_HOME_SHARE && theirs < held;
+    // Qui gagne refuse, sauf à bout de forces.
+    if (winning && !(tired && drained) && this.stability[ai] >= AI_PEACE_STABILITY * 0.6) return false;
+    return tired || drained || held < theirs;
+  }
+
+  proposePeace(nation: number, enemy: number): boolean {
+    if (!this.frontOf(nation, enemy)) return false;
+    // Une IA décide ; une offre au joueur passe par answerPeace.
+    if (enemy !== this.player && this.aiWantsPeace(enemy, nation)) {
+      this.makePeace(nation, enemy);
+      return true;
+    }
+    this.pendingEvents.push({ type: 'peaceRefused', tick: this.tick, from: nation, to: enemy });
+    return false;
+  }
+
+  answerPeace(nation: number, enemy: number, accept: boolean): void {
+    const offer = this.peaceOffers.find((entry) => entry.from === enemy && entry.to === nation);
+    if (!offer) return;
+    this.peaceOffers = this.peaceOffers.filter((entry) => entry !== offer);
+    if (accept) this.makePeace(nation, enemy);
+  }
+
+  /**
+   * Paix au statu quo : chaque province disputée entre les deux revient à qui en tient la
+   * majorité (les cellules minoritaires suivent), puis une trêve d'un an. Un traité qui
+   * cède des provinces rend le bénéficiaire plus agressif.
+   */
+  makePeace(a: number, b: number): void {
+    const front = this.frontOf(a, b);
+    if (!front) return;
+    const { owners, provinceGrid, landCells } = this;
+    const moved: number[] = [];
+    this.peacefulTransfer = true;
+    for (let k = 0; k < landCells.length; k++) {
+      const cell = landCells[k];
+      const owner = owners[cell];
+      if (owner !== a && owner !== b) continue;
+      const province = provinceGrid[cell];
+      const home = this.provinceHome[province];
+      const holder = this.controller[province];
+      if ((home !== a && home !== b) || (holder !== a && holder !== b) || owner === holder) continue;
+      owners[cell] = holder;
+      this.pocket[cell] = 0;
+      this.cellCounts[owner]--;
+      this.cellCounts[holder]++;
+      this.pendingCells.push(cell);
+      this.pendingOwners.push(holder);
+      this.transferProvinceCell(province, owner, holder);
+      moved.push(cell);
+    }
+    this.peacefulTransfer = false;
+    for (let p = 1; p < this.controller.length; p++) {
+      const home = this.provinceHome[p];
+      const holder = this.controller[p];
+      if ((home !== a && home !== b) || (holder !== a && holder !== b) || home === holder) continue;
+      this.aggression[holder] += (AGGRESSION_CESSION * this.provinceValue[p]) / Math.max(1e-6, this.totalHome[holder]);
+      this.provinceHome[p] = holder;
+      this.homePortsStale = true;
+      this.consolidation[p] = 0;
+      this.provinceValue[p] *= ANNEXED_VALUE;
+      this.provinceGdp[p] *= ANNEXED_VALUE;
+      this.provinceManpower[p] *= ANNEXED_VALUE;
+      this.pendingHomes.push(p, holder);
+    }
+    // Les forces du front rentrent ; les offensives de l'un chez l'autre s'arrêtent.
+    for (const offensive of [...this.offensives]) {
+      if (offensive.nation !== a && offensive.nation !== b) continue;
+      const other = offensive.nation === a ? b : a;
+      const y = Math.max(0, Math.min(this.height - 1, offensive.targetY));
+      const target = this.owners[y * this.width + offensive.targetX];
+      if (target === other || this.provinceHome[provinceGrid[y * this.width + offensive.targetX]] === other) this.endOffensive(offensive);
+    }
+    this.removeFront(front);
+    this.truceUntil[a * this.stride + b] = this.tick + TRUCE_TICKS;
+    this.truceUntil[b * this.stride + a] = this.tick + TRUCE_TICKS;
+    this.peaceOffers = this.peaceOffers.filter((offer) => !((offer.from === a && offer.to === b) || (offer.from === b && offer.to === a)));
+    this.recomputeCapacity();
+    this.recomputeManpower();
+    const involved = new Uint8Array(this.stride);
+    involved[a] = 1;
+    involved[b] = 1;
+    for (let k = 0; k < landCells.length; k++) {
+      if (involved[owners[landCells[k]]]) this.refreshFrontier(landCells[k]);
+    }
+    for (const cell of moved) this.refreshAround(cell);
+    this.measureFronts();
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
+    this.pendingEvents.push({ type: 'peace', tick: this.tick, a: Math.min(a, b), b: Math.max(a, b) });
+  }
+
+  /** Retire un front : ses forces rentrent en réserve. */
+  private removeFront(front: Front): void {
+    const { a, b } = front;
+    this.reserve[a] += front.sides[0].force;
+    this.reserve[b] += front.sides[1].force;
+    this.frontIndex[a * this.stride + b] = -1;
+    this.frontIndex[b * this.stride + a] = -1;
+    this.advantage[a * this.stride + b] = -Infinity;
+    this.advantage[b * this.stride + a] = -Infinity;
+    this.fronts.splice(this.fronts.indexOf(front), 1);
+    this.reindexFronts();
+  }
+
+  /**
+   * L'IA signe un pacte de non-agression avec un pays peu agressif, s'il n'est pas pour elle
+   * une proie (elle ne pourrait pas l'attaquer de toute façon), ou face à une menace commune :
+   * un ennemi en commun, ou un voisin bien plus fort et agressif.
+   */
+  private aiAcceptsAlliance(ai: number, proposer: number): boolean {
+    if (!this.alive[ai] || !this.alive[proposer] || this.isAllied(ai, proposer) || this.frontOf(ai, proposer)) return false;
+    if (this.alliesOf(ai).length >= MAX_ALLIES) return false;
+    if (this.aggression[proposer] >= ALLIANCE_MAX_AGGRESSION) return false;
+    if (this.capacity[ai] < this.capacity[proposer] * WAR_CAPACITY_RATIO) return true;
+    for (const front of this.fronts) {
+      const enemy = front.a === ai ? front.b : front.b === ai ? front.a : 0;
+      if (enemy !== 0 && this.frontOf(proposer, enemy)) return true;
+    }
+    const neighbors = new Set([...this.landNeighbors[ai], ...this.seaNeighbors[ai]]);
+    for (const other of neighbors) {
+      if (other === proposer || !this.alive[other]) continue;
+      const threatening = this.capacity[other] >= this.capacity[ai] * ALLIANCE_THREAT_RATIO;
+      const hostile = this.aggression[other] >= ALLIANCE_THREAT_AGGRESSION || this.frontOf(ai, other) !== null;
+      if (threatening && hostile) return true;
+    }
+    return false;
+  }
+
+  proposeAlliance(nation: number, other: number): boolean {
+    if (nation === other || nation <= 0 || other <= 0 || nation >= this.stride || other >= this.stride) return false;
+    if (this.alliesOf(nation).length < MAX_ALLIES && this.aiAcceptsAlliance(other, nation)) {
+      this.setAlliance(nation, other, 1);
+      this.pendingEvents.push({ type: 'alliance', tick: this.tick, a: Math.min(nation, other), b: Math.max(nation, other) });
+      return true;
+    }
+    this.pendingEvents.push({ type: 'allianceRefused', tick: this.tick, from: nation, to: other });
+    return false;
+  }
+
+  breakAlliance(nation: number, other: number): void {
+    if (!this.isAllied(nation, other)) return;
+    this.setAlliance(nation, other, 0);
+    this.aggression[nation] += AGGRESSION_BETRAYAL;
+    this.pendingEvents.push({ type: 'allianceBroken', tick: this.tick, a: nation, b: other });
+  }
+
+  /**
+   * Toutes les 10 s de jeu : paix entre IA épuisées, offres de paix au joueur, coalitions
+   * contre les pays trop agressifs, sécessions des pays à bout.
+   */
+  private decideDiplomacy(): void {
+    // Offres expirées.
+    this.peaceOffers = this.peaceOffers.filter((offer) => offer.until > this.tick && this.frontOf(offer.from, offer.to));
+    // Un traité parcourt toute la terre : un seul entre IA par passe, les autres attendent.
+    let treaties = 0;
+    for (const front of [...this.fronts]) {
+      const { a, b } = front;
+      if (a === this.player || b === this.player) {
+        // L'IA propose la paix au joueur ; c'est lui qui répond.
+        const ai = a === this.player ? b : a;
+        if (this.tick - front.startTick < AI_PEACE_OFFER_MIN_TICKS) continue;
+        if (this.peaceOffers.some((offer) => offer.from === ai)) continue;
+        if (this.aiWantsPeace(ai, this.player) && this.random() < AI_PEACE_OFFER_CHANCE) {
+          this.peaceOffers.push({ from: ai, to: this.player, until: this.tick + PEACE_OFFER_TICKS });
+          this.pendingEvents.push({ type: 'peaceOffer', tick: this.tick, from: ai, to: this.player });
+        }
+      } else if (treaties === 0 && this.aiEnabled && this.aiWantsPeace(a, b) && this.aiWantsPeace(b, a)) {
+        this.makePeace(a, b);
+        treaties++;
+      }
+    }
+    this.decideCoalitions();
+    this.updateMovements();
+  }
+
+  /**
+   * Une coalition ne vit que le temps de son soulèvement : un membre qui fait la paix avec son
+   * ancien maître, ou dont l'ancien maître a disparu, la quitte.
+   */
+  private decideCoalitions(): void {
+    for (let member = 1; member < this.stride; member++) {
+      const target = this.coalitionAgainst[member];
+      if (target === 0) continue;
+      if (this.alive[member] && this.alive[target] && this.frontOf(member, target)) continue;
+      this.coalitionAgainst[member] = 0;
+      for (let other = 1; other < this.stride; other++) {
+        if (this.allied[member * this.stride + other] === 2) this.setAlliance(member, other, 0);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Mouvements régionaux : agitation, demandes, indépendance, soulèvement
+  // -------------------------------------------------------------------------
+
+  /**
+   * Chaque région annexée (un pays disparu dont le vainqueur tient les terres) s'agite quand le
+   * pays qui la tient est instable, et se calme quand il va bien. Elle demande d'abord des
+   * investissements, puis l'indépendance sans combat ; chaque refus l'agite davantage. À
+   * l'agitation maximale, elle se soulève, avec les régions agitées qui la touchent.
+   */
+  private updateMovements(): void {
+    // Revendications : valeur d'origine, par (pays qui tient, pays d'origine disparu).
+    const claims = new Map<number, number>();
+    const served = new Map<number, number>();
+    for (let p = 1; p < this.controller.length; p++) {
+      const origin = this.startHome[p];
+      const parent = this.controller[p];
+      if (parent === 0 || origin === parent || this.alive[origin]) continue;
+      const key = parent * this.stride + origin;
+      claims.set(key, (claims.get(key) ?? 0) + this.startValue[p]);
+      served.set(key, (served.get(key) ?? 0) + this.startValue[p] * this.buildings.services[p]);
+    }
+    const claimed = new Map(claims);
+    const shareOf = (key: number, parent: number) => (claims.get(key) ?? 0) / Math.max(1e-9, this.totalHome[parent]);
+    // Les mouvements dont le pays a disparu, ou la région renaît, ou dont il reste trop peu, s'éteignent.
+    const kept: MovementState[] = [];
+    for (const movement of this.movements) {
+      const key = movement.parent * this.stride + movement.origin;
+      const share = shareOf(key, movement.parent);
+      if (this.alive[movement.parent] && !this.alive[movement.origin] && share >= SECESSION_MIN_SHARE) {
+        movement.share = share;
+        kept.push(movement);
+      }
+      claims.delete(key);
+    }
+    for (const [key, claim] of claims) {
+      const parent = Math.floor(key / this.stride);
+      const origin = key % this.stride;
+      const share = claim / Math.max(1e-9, this.totalHome[parent]);
+      if (!this.alive[parent] || share < SECESSION_MIN_SHARE) continue;
+      kept.push({ parent, origin, unrest: 0, share, asked: 0, demand: '', until: 0, investing: false });
+    }
+    this.movements = kept;
+    if (kept.length === 0) return;
+
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+    }
+    const weeks = DIPLOMACY_INTERVAL_TICKS / TICKS_PER_WEEK;
+    for (const movement of kept) {
+      const parent = movement.parent;
+      const key = parent * this.stride + movement.origin;
+      const services = (served.get(key) ?? 0) / Math.max(1e-9, claimed.get(key) ?? 0);
+      let rate =
+        UNREST_PER_WEEK * (UNREST_STABILITY - this.stability[parent]) + (atWar[parent] ? UNREST_WAR_PER_WEEK : 0) - SERVICES_UNREST_PER_WEEK * services;
+      // Des investissements en chantier la tiennent tranquille.
+      if (movement.investing) rate = Math.min(0, rate);
+      movement.unrest = Math.max(0, Math.min(1, movement.unrest + rate * weeks));
+      if (movement.demand !== '' && this.tick >= movement.until) this.resolveDemand(movement, movement.demand, false);
+      if (movement.demand !== '') continue;
+      if (movement.unrest < UNREST_CALM) movement.asked = 0;
+      if (movement.asked < 1 && !movement.investing && movement.unrest >= DEMAND_INVESTMENT_AT) this.makeDemand(movement, 'investment');
+      else if (movement.asked < 2 && movement.unrest >= DEMAND_INDEPENDENCE_AT) this.makeDemand(movement, 'independence');
+    }
+    // Un soulèvement par passe : il parcourt toute la terre.
+    const rebel = this.movements.find((movement) => movement.demand === '' && movement.unrest >= REVOLT_AT);
+    if (rebel) this.revolt(rebel);
+  }
+
+  /** La région demande ; l'IA répond aussitôt, le joueur a DEMAND_TICKS pour le faire. */
+  private makeDemand(movement: MovementState, kind: DemandKind): void {
+    movement.asked = kind === 'investment' ? 1 : 2;
+    if (movement.parent === this.player) {
+      movement.demand = kind;
+      movement.until = this.tick + DEMAND_TICKS;
+      this.pendingEvents.push({ type: 'demand', tick: this.tick, parent: movement.parent, origin: movement.origin, kind });
+      return;
+    }
+    const parent = movement.parent;
+    const atWar = this.fronts.some((front) => front.a === parent || front.b === parent);
+    // L'IA investit si elle n'est pas en guerre ; elle laisse partir une petite région.
+    const accept = kind === 'investment' ? !atWar : movement.share < AI_INDEPENDENCE_MAX_SHARE;
+    this.resolveDemand(movement, kind, accept);
+  }
+
+  answerDemand(nation: number, origin: number, accept: boolean): void {
+    const movement = this.movements.find((entry) => entry.parent === nation && entry.origin === origin && entry.demand !== '');
+    if (!movement) return;
+    this.resolveDemand(movement, movement.demand as DemandKind, accept);
+  }
+
+  private resolveDemand(movement: MovementState, kind: DemandKind, accept: boolean): void {
+    movement.demand = '';
+    movement.until = 0;
+    if (!accept) {
+      movement.unrest = Math.min(1, movement.unrest + REFUSAL_UNREST);
+      return;
+    }
+    const parent = movement.parent;
+    if (kind === 'investment') {
+      // Le chantier passe en tête de file ; ce qui était commencé y reste acquis.
+      const cost = Math.max(50, Math.round(this.constructionRate[parent] * INVESTMENT_WEEKS));
+      this.queues[parent].unshift({ province: 0, kind: 'investment', region: movement.origin, cost });
+      movement.investing = true;
+      movement.unrest = Math.max(0, movement.unrest - INVESTMENT_CALM);
+      return;
+    }
+    this.movements = this.movements.filter((entry) => entry !== movement);
+    this.revive(movement.origin, parent, true);
+  }
+
+  /** Investissements achevés : la région se calme, et sa valeur et son PIB remontent. */
+  private completeInvestment(parent: number, region: number): void {
+    const movement = this.movements.find((entry) => entry.parent === parent && entry.origin === region);
+    if (movement) {
+      movement.investing = false;
+      movement.unrest = Math.max(0, movement.unrest - INVESTMENT_DONE_CALM);
+    }
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.startHome[p] !== region || this.controller[p] !== parent) continue;
+      this.provinceValue[p] = Math.min(this.startValue[p], this.provinceValue[p] + INVESTMENT_BOOST * this.startValue[p]);
+      this.provinceGdp[p] = Math.min(this.startGdp[p], this.provinceGdp[p] + INVESTMENT_BOOST * this.startGdp[p]);
+    }
+  }
+
+  /** Les investissements ne valent que tant que la région s'agite encore dans ce pays. */
+  private investmentValid(parent: number, region: number): boolean {
+    return this.movements.some((entry) => entry.parent === parent && entry.origin === region && entry.investing);
+  }
+
+  /** La région se soulève, avec les régions agitées qui la touchent de proche en proche. */
+  private revolt(first: MovementState): void {
+    const parent = first.parent;
+    const candidates = new Map<number, number>();
+    for (const movement of this.movements) {
+      if (movement.parent === parent && movement !== first && movement.demand === '' && movement.unrest >= REBEL_JOIN_UNREST) {
+        candidates.set(movement.origin, movement.share);
+      }
+    }
+    this.revive(first.origin, parent);
+    const members = [first.origin];
+    while (members.length < MAX_REBEL_COALITION) {
+      const next = this.touchingClaimant(parent, members, candidates);
+      if (next === 0) break;
+      this.revive(next, parent);
+      members.push(next);
+    }
+    this.movements = this.movements.filter((movement) => !(movement.parent === parent && members.includes(movement.origin)));
+    if (members.length > 1) {
+      for (const member of members) {
+        this.coalitionAgainst[member] = parent;
+        for (const other of members) if (other !== member && !this.isAllied(member, other)) this.setAlliance(member, other, 2);
+      }
+      this.pendingEvents.push({ type: 'coalition', tick: this.tick, target: parent, members: [...members] });
+    }
+  }
+
+  /**
+   * La région candidate la plus lourde parmi celles dont une cellule encore tenue par `parent`
+   * touche une cellule d'un des `members` : la coalition rebelle reste d'un seul tenant.
+   */
+  private touchingClaimant(parent: number, members: number[], candidates: Map<number, number>): number {
+    const { owners, provinceGrid, landCells, width, height } = this;
+    const touching = new Uint8Array(this.stride);
+    const inGroup = new Uint8Array(this.stride);
+    for (const member of members) inGroup[member] = 1;
+    for (let k = 0; k < landCells.length; k++) {
+      const cell = landCells[k];
+      if (owners[cell] !== parent) continue;
+      const origin = this.startHome[provinceGrid[cell]];
+      if (origin === parent || this.alive[origin] || touching[origin] || origin === this.player) continue;
+      const x = cell % width;
+      const y = (cell - x) / width;
+      if (
+        (x > 0 && inGroup[owners[cell - 1]]) ||
+        (x < width - 1 && inGroup[owners[cell + 1]]) ||
+        (y > 0 && inGroup[owners[cell - width]]) ||
+        (y < height - 1 && inGroup[owners[cell + width]])
+      ) {
+        touching[origin] = 1;
+      }
+    }
+    let best = 0;
+    for (let n = 1; n < this.stride; n++) {
+      const share = candidates.get(n);
+      if (!touching[n] || share === undefined) continue;
+      if (share > (best ? candidates.get(best)! : 0)) best = n;
+    }
+    return best;
+  }
+
+  /**
+   * Le pays renaît sur ses provinces d'origine tenues par l'ancien vainqueur. Soulevé, il lui
+   * déclare la guerre ; indépendant par accord (`peaceful`), il signe une trêve.
+   */
+  private revive(rebel: number, parent: number, peaceful = false): void {
+    const { owners, provinceGrid, landCells } = this;
+    const moved: number[] = [];
+    this.peacefulTransfer = true;
+    for (let k = 0; k < landCells.length; k++) {
+      const cell = landCells[k];
+      if (owners[cell] !== parent || this.startHome[provinceGrid[cell]] !== rebel) continue;
+      owners[cell] = rebel;
+      this.pocket[cell] = 0;
+      if (this.forts[cell] !== 0) this.setFort(cell, 0);
+      this.cellCounts[parent]--;
+      this.cellCounts[rebel]++;
+      this.pendingCells.push(cell);
+      this.pendingOwners.push(rebel);
+      this.transferProvinceCell(provinceGrid[cell], parent, rebel);
+      moved.push(cell);
+    }
+    this.peacefulTransfer = false;
+    if (moved.length === 0) return;
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.startHome[p] !== rebel || this.controller[p] !== rebel) continue;
+      this.provinceHome[p] = rebel;
+      this.homePortsStale = true;
+      this.provinceValue[p] = this.startValue[p];
+      this.provinceGdp[p] = this.startGdp[p];
+      this.provinceManpower[p] = this.startManpower[p];
+      this.consolidation[p] = 0;
+      this.pendingHomes.push(p, rebel);
+    }
+    this.alive[rebel] = 1;
+    this.stability[rebel] = REBEL_STABILITY;
+    this.effort[rebel] = REBEL_EFFORT;
+    this.effortTarget[rebel] = REBEL_EFFORT;
+    this.queues[rebel] = [];
+    this.navy[rebel] = this.hasCoast[rebel] ? baseNavy(this.nationGdp[rebel - 1]) * 0.5 : 0;
+    this.labelCells[rebel] = 0;
+    this.recomputeCapacity();
+    this.recomputeManpower();
+    this.reserve[rebel] = this.capacity[rebel] * REBEL_MOBILIZATION;
+    this.manpower[rebel] = this.manpowerMax[rebel] * 0.5;
+    this.armyAfterReinforce[rebel] = -1;
+    // La sécession soulage un peu le pays qui la subit.
+    this.stability[parent] = Math.min(1, this.stability[parent] + 0.05);
+    for (const cell of moved) this.refreshAround(cell);
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
+    if (peaceful) {
+      this.truceUntil[rebel * this.stride + parent] = this.tick + TRUCE_TICKS;
+      this.truceUntil[parent * this.stride + rebel] = this.tick + TRUCE_TICKS;
+      this.pendingEvents.push({ type: 'independence', tick: this.tick, parent, rebel });
+      return;
+    }
+    this.pendingEvents.push({ type: 'secession', tick: this.tick, parent, rebel });
+    this.declareWars([[rebel, parent]], false);
   }
 
   // -------------------------------------------------------------------------
@@ -1281,6 +2001,9 @@ export class Simulation {
       if (tally[n] > (winner ? tally[winner] : 0)) winner = n;
     }
     if (winner === 0) return;
+    // Annexer rend agressif, d'autant plus que le vaincu pèse lourd face au vainqueur.
+    const annexedShare = this.totalHome[loser] / Math.max(1e-6, this.totalHome[winner]);
+    this.aggression[winner] += Math.max(MIN_AGGRESSION_ANNEX, AGGRESSION_ANNEX * Math.min(1, annexedShare));
 
     // Tout ce qu'il reste au vaincu, îles comprises, revient au vainqueur.
     const transferred: number[] = [];
@@ -1306,6 +2029,7 @@ export class Simulation {
         this.pendingProvinces.push(p, winner);
       }
       this.provinceHome[p] = this.controller[p];
+      this.homePortsStale = true;
       this.consolidation[p] = 0;
       this.provinceValue[p] *= ANNEXED_VALUE;
       this.provinceGdp[p] *= ANNEXED_VALUE;
@@ -1319,6 +2043,7 @@ export class Simulation {
     this.queues[loser] = [];
     this.manpower[loser] = 0;
     this.alive[loser] = 0;
+    this.endDiplomacyOf(loser);
     for (const offensive of [...this.offensivesByNation[loser]]) this.endOffensive(offensive);
     this.reserve[loser] = 0;
     this.removeFrontsOf(loser);
@@ -1405,7 +2130,8 @@ export class Simulation {
     manpowerMax.fill(0);
     for (let p = 1; p < this.controller.length; p++) {
       const holder = this.controller[p];
-      manpowerMax[holder] += this.provinceManpower[p] * (holder === this.provinceHome[p] ? 1 : OCCUPIED_MANPOWER);
+      const recruited = 1 + RECRUITMENT_BONUS * this.buildings.recruitment[p];
+      manpowerMax[holder] += this.provinceManpower[p] * recruited * (holder === this.provinceHome[p] ? 1 : OCCUPIED_MANPOWER);
     }
   }
 
@@ -1421,8 +2147,8 @@ export class Simulation {
       if (this.provinceOil[p] === 0 && this.provinceSteel[p] === 0) continue;
       const holder = this.controller[p];
       const share = holder === this.provinceHome[p] ? 1 : OCCUPIED_RESOURCES;
-      oil[holder] += this.provinceOil[p] * share;
-      steel[holder] += this.provinceSteel[p] * share;
+      oil[holder] += this.provinceOil[p] * share * (1 + REFINERY_BONUS * this.buildings.refinery[p]);
+      steel[holder] += this.provinceSteel[p] * share * (1 + STEELWORKS_BONUS * this.buildings.steelworks[p]);
     }
     const strongestEnemyNavy = new Float64Array(this.stride);
     for (const front of this.fronts) {
@@ -1491,11 +2217,22 @@ export class Simulation {
     this.updateResources();
     this.recomputeCapacity();
     this.recomputeManpower();
+    // Niveau moyen des services publics sur le sol national tenu, pondéré par la valeur.
+    const services = new Float64Array(this.stride);
+    const weight = new Float64Array(this.stride);
+    for (let p = 1; p < this.controller.length; p++) {
+      const home = this.provinceHome[p];
+      if (this.controller[p] !== home) continue;
+      services[home] += this.buildings.services[p] * this.provinceValue[p];
+      weight[home] += this.provinceValue[p];
+    }
+    for (let n = 1; n < this.stride; n++) services[n] = weight[n] > 0 ? services[n] / weight[n] : 0;
     for (let n = 1; n < this.stride; n++) {
+      this.aggression[n] = Math.max(0, this.aggression[n] - AGGRESSION_DECAY_PER_WEEK * minutes);
       if (!this.alive[n]) continue;
       // Le réservoir se reconstitue lentement.
       this.manpower[n] = Math.min(this.manpowerMax[n], this.manpower[n] + this.manpowerMax[n] * MANPOWER_REGEN_PER_MINUTE * minutes);
-      this.updateStability(n, atWar[n] === 1, minutes);
+      this.updateStability(n, atWar[n] === 1, minutes, services[n]);
       this.advanceConstruction(n, minutes);
     }
   }
@@ -1510,13 +2247,14 @@ export class Simulation {
   }
 
   /** La guerre, les pertes et l'occupation usent la stabilité ; la paix la rétablit. */
-  private updateStability(n: number, atWar: boolean, minutes: number): void {
+  private updateStability(n: number, atWar: boolean, minutes: number, services = 0): void {
     let stability = this.stability[n];
     if (atWar) {
-      stability -= WAR_WEARINESS_PER_MINUTE * (0.5 + this.effort[n]) * minutes;
+      stability -= WAR_WEARINESS_PER_MINUTE * (0.5 + this.effort[n]) * (1 - SERVICES_WEARINESS_CUT * services) * minutes;
     } else {
       const gap = PEACE_STABILITY - stability;
-      stability += Math.sign(gap) * Math.min(Math.abs(gap), STABILITY_RECOVERY_PER_MINUTE * minutes);
+      const recovery = STABILITY_RECOVERY_PER_MINUTE * (1 + SERVICES_RECOVERY_BONUS * services);
+      stability += Math.sign(gap) * Math.min(Math.abs(gap), recovery * minutes);
     }
     stability -= (CASUALTY_WEARINESS * this.losses[n]) / Math.max(1, this.manpowerMax[n]);
     this.losses[n] = 0;
@@ -1549,6 +2287,12 @@ export class Simulation {
       if (order.kind === 'factory') this.factories[order.province]++;
       else if (order.kind === 'infrastructure') this.infrastructure[order.province]++;
       else if (order.kind === 'depot') this.depots[order.province] = 1;
+      else if (order.kind === 'investment') this.completeInvestment(n, order.region ?? 0);
+      else if (isProvinceBuilding(order.kind)) {
+        this.buildings[order.kind][order.province]++;
+        // Le chantier naval lance ses navires à l'achèvement.
+        if (order.kind === 'shipyard') this.navy[n] += SHIPYARD_NAVY * baseNavy(this.nationGdp[n - 1]);
+      }
       // Seules les cellules encore tenues à l'achèvement sont fortifiées.
       else for (const cell of order.cells ?? []) if (this.owners[cell] === n) this.setFort(cell, 255);
       this.capacityDirty = true;
@@ -1560,11 +2304,13 @@ export class Simulation {
 
   private orderValid(nation: number, order: BuildOrder): boolean {
     if (order.kind === 'fort') return (order.cells?.length ?? 0) > 0;
+    if (order.kind === 'investment') return this.investmentValid(nation, order.region ?? 0);
     return this.canBuild(nation, order.province, order.kind, 0);
   }
 
   orderCost(order: BuildOrder): number {
     if (order.kind === 'fort') return Math.ceil((order.cells?.length ?? 0) * FORT_COST_PER_CELL);
+    if (order.kind === 'investment') return order.cost ?? 0;
     return this.buildCost(order.province, order.kind);
   }
 
@@ -1582,12 +2328,10 @@ export class Simulation {
     const order: BuildOrder = { province: 0, kind: 'fort', cells: cells.slice(0, MAX_FORT_CELLS) };
     const queue = this.queues[nation];
     if (urgent) {
-      // Une urgence passe en tête ; dans une file pleine, elle prend la place du dernier chantier.
-      if (queue.length >= MAX_BUILD_QUEUE) queue.pop();
+      // Une urgence passe en tête de la file, qui n'a pas de limite.
       queue.unshift(order);
       this.buildProgress[nation] = 0;
     } else {
-      if (queue.length >= MAX_BUILD_QUEUE) return 0;
       queue.push(order);
     }
     return order.cells!.length;
@@ -1763,6 +2507,7 @@ export class Simulation {
   buildCost(province: number, kind: BuildKind): number {
     if (kind === 'factory') return BUILD_COST.factory * (this.factories[province] + 1);
     if (kind === 'infrastructure') return BUILD_COST.infrastructure * (this.infrastructure[province] + 1);
+    if (isProvinceBuilding(kind)) return PROVINCE_BUILDINGS[kind].cost * (this.buildings[kind][province] + 1);
     return BUILD_COST.depot;
   }
 
@@ -1773,19 +2518,25 @@ export class Simulation {
   canBuild(nation: number, province: number, kind: BuildKind, queued: number): boolean {
     if (province <= 0 || province >= this.controller.length || this.controller[province] !== nation) return false;
     const home = this.provinceHome[province] === nation;
-    if (kind === 'fort') return false;
+    if (kind === 'fort' || kind === 'investment') return false;
     if (kind === 'factory') return home && this.factories[province] + queued < MAX_FACTORY_LEVEL;
-    if (kind === 'infrastructure') return this.infrastructure[province] + queued < MAX_INFRASTRUCTURE_LEVEL;
-    // Un dépôt avance le ravitaillement en territoire conquis, une fois la province tenue.
+    if (isProvinceBuilding(kind)) {
+      if (!home || this.buildings[kind][province] + queued >= PROVINCE_BUILDINGS[kind].max) return false;
+      if (kind === 'refinery') return this.provinceOil[province] > 0;
+      if (kind === 'steelworks') return this.provinceSteel[province] > 0;
+      if (kind === 'shipyard') return this.provinceCoastal[province] === 1;
+      return true;
+    }
+    // L'infrastructure et le dépôt servent au ravitaillement, qui ne manque qu'en territoire conquis.
+    if (kind === 'infrastructure') return !home && this.infrastructure[province] + queued < MAX_INFRASTRUCTURE_LEVEL;
     return !home && this.depots[province] === 0 && queued === 0 && this.consolidation[province] >= DEPOT_MIN_CONSOLIDATION;
   }
 
   build(nation: number, province: number, kind: BuildKind): void {
     if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return;
     // Les fortifications passent par fortifyLine et fortifyFront.
-    if (kind !== 'factory' && kind !== 'infrastructure' && kind !== 'depot') return;
+    if (kind !== 'factory' && kind !== 'infrastructure' && kind !== 'depot' && !isProvinceBuilding(kind)) return;
     const queue = this.queues[nation];
-    if (queue.length >= MAX_BUILD_QUEUE) return;
     const queued = queue.filter((order) => order.province === province && order.kind === kind).length;
     if (!this.canBuild(nation, province, kind, queued)) return;
     queue.push({ province, kind });
@@ -1794,7 +2545,15 @@ export class Simulation {
   cancelBuild(nation: number, index: number): void {
     const queue = this.queues[nation];
     if (!queue || !Number.isInteger(index) || index < 0 || index >= queue.length) return;
-    queue.splice(index, 1);
+    const [order] = queue.splice(index, 1);
+    // Abandonner des investissements promis vaut un refus.
+    if (order.kind === 'investment') {
+      const movement = this.movements.find((entry) => entry.parent === nation && entry.origin === order.region);
+      if (movement) {
+        movement.investing = false;
+        movement.unrest = Math.min(1, movement.unrest + REFUSAL_UNREST);
+      }
+    }
     if (index === 0) this.buildProgress[nation] = 0;
   }
 
@@ -1830,7 +2589,7 @@ export class Simulation {
           continue;
         }
       }
-      // Une usine dans l'une des provinces les plus riches, sinon de l'infrastructure.
+      // Une usine dans l'une des provinces les plus riches, sinon de l'infrastructure en territoire conquis.
       const rich = provinces
         .filter((p) => this.canBuild(n, p, 'factory', 0))
         .sort((a, b) => this.provinceGdp[b] - this.provinceGdp[a] || a - b)
@@ -1838,8 +2597,21 @@ export class Simulation {
       if (rich.length > 0 && this.random() < 0.75) {
         this.build(n, rich[Math.floor(this.random() * rich.length)], 'factory');
       } else {
-        const p = provinces[Math.floor(this.random() * provinces.length)];
-        if (this.canBuild(n, p, 'infrastructure', 0)) this.build(n, p, 'infrastructure');
+        // Sinon, ce dont le pays manque le plus : navires, pétrole, acier, calme, hommes, routes.
+        const men = this.manpowerMax[n] > 0 ? this.manpower[n] / this.manpowerMax[n] : 1;
+        const needs: BuildKind[] = [];
+        if (this.blockaded[n]) needs.push('shipyard');
+        if (this.oilCoverage[n] < 0.9) needs.push('refinery');
+        if (this.steelCoverage[n] < 0.9) needs.push('steelworks');
+        if (this.stability[n] < 0.6) needs.push('services');
+        if (men < 0.5) needs.push('recruitment');
+        needs.push('infrastructure');
+        for (const kind of needs) {
+          const options = provinces.filter((p) => this.canBuild(n, p, kind, 0));
+          if (options.length === 0) continue;
+          this.build(n, options[Math.floor(this.random() * options.length)], kind);
+          break;
+        }
       }
     }
   }
@@ -2306,6 +3078,7 @@ export class Simulation {
         // Les combats abattent un niveau d'usine et d'infrastructure ; le dépôt est perdu.
         if (this.factories[province] > 0) this.factories[province]--;
         if (this.infrastructure[province] > 0) this.infrastructure[province]--;
+        for (const levels of Object.values(this.buildings)) if (levels[province] > 0) levels[province]--;
       }
       this.depots[province] = 0;
       this.capacityDirty = true;
@@ -2374,7 +3147,10 @@ export class Simulation {
             visitOrder[tail++] = next;
           }
         } else if (flags) {
-          if (other === 0) flags.coastal = true;
+          if (other === 0) {
+            const sea = this.seas[next];
+            if (sea !== 0 && this.portsOf(owner, sea)) flags.coastal = true;
+          }
           else if (frontIndex[other * stride + owner] >= 0) flags.touchesEnemy = true;
         }
       }
@@ -2516,7 +3292,10 @@ export class Simulation {
         if ((j === 2 && cell < W) || (j === 3 && cell >= last)) continue;
         const other = owners[next];
         if (other === owner && provinceHome[provinceGrid[next]] === owner) start = 0;
-        else if (other === 0 && navalSupply && seaStart < start) start = seaStart;
+        else if (other === 0 && navalSupply && this.seas[next] !== 0) {
+          const bySea = seaStart + this.seaSupplyCost(owner, this.seas[next], cell);
+          if (bySea < start) start = bySea;
+        }
       }
       if (start === Infinity) continue;
       const d = start + cost[cell];
@@ -2720,8 +3499,18 @@ export class Simulation {
       consolidation: Float32Array.from(this.consolidation),
       factories: this.factories.slice(),
       infrastructure: this.infrastructure.slice(),
+      buildings: {
+        refinery: this.buildings.refinery.slice(),
+        steelworks: this.buildings.steelworks.slice(),
+        recruitment: this.buildings.recruitment.slice(),
+        services: this.buildings.services.slice(),
+        shipyard: this.buildings.shipyard.slice(),
+      },
       depots: this.depots.slice(),
       stability: Float32Array.from(this.stability),
+      aggression: Float32Array.from(this.aggression),
+      coalitionAgainst: this.coalitionAgainst.slice(),
+      alliances: Uint16Array.from(this.pairsOf((a, b) => this.allied[a * this.stride + b]).flat()),
     };
   }
 
@@ -2776,10 +3565,24 @@ export class Simulation {
                 cellCount: order.cells?.length ?? 0,
                 cost: this.orderCost(order),
                 progress: index === 0 ? this.buildProgress[id] : 0,
+                region: order.region ?? 0,
               }))
             : [],
+        movements: this.movements
+          .filter((movement) => movement.parent === id)
+          .map(({ origin, unrest, share, demand, until, investing }) => ({ origin, unrest, share, demand, until, investing })),
         counterShare: this.counterShare[id],
         priorityZones: id === this.player ? this.priorityZones[id].map((zone) => ({ ...zone })) : [],
+        aggression: this.aggression[id],
+        allies: id === this.player ? this.alliesOf(id).filter((other) => this.allied[id * this.stride + other] === 1) : [],
+        truces:
+          id === this.player
+            ? [...Array(this.stride).keys()]
+                .filter((other) => other > 0 && this.hasTruce(id, other))
+                .map((other) => ({ nation: other, until: this.truceUntil[id * this.stride + other] }))
+            : [],
+        peaceOffers: this.peaceOffers.filter((offer) => offer.to === id).map((offer) => ({ nation: offer.from, until: offer.until })),
+        coalition: [...Array(this.stride).keys()].filter((n) => n > 0 && this.alive[n] && this.coalitionAgainst[n] === id),
       })),
       offensives: this.offensives.map(({ id, nation, fromX, fromY, toX, toY, force, startForce, captured, transitUntil, targetX, targetY, supply, counter }) => ({
         id,
@@ -2853,6 +3656,13 @@ export class Simulation {
         blockaded: Array.from(this.blockaded),
         factories: Array.from(this.factories),
         infrastructure: Array.from(this.infrastructure),
+        buildings: {
+          refinery: Array.from(this.buildings.refinery),
+          steelworks: Array.from(this.buildings.steelworks),
+          recruitment: Array.from(this.buildings.recruitment),
+          services: Array.from(this.buildings.services),
+          shipyard: Array.from(this.buildings.shipyard),
+        },
         depots: Array.from(this.depots),
         queues: this.queues.map((queue) => queue.map((order) => ({ ...order }))),
         buildProgress: Array.from(this.buildProgress),
@@ -2863,6 +3673,12 @@ export class Simulation {
           return [nation, id, attempts] as [number, number, number];
         }),
         priorityZones: this.priorityZones.map((zones) => zones.map((zone) => ({ ...zone }))),
+        alliances: this.pairsOf((a, b) => this.allied[a * this.stride + b]),
+        truces: this.pairsOf((a, b) => (this.hasTruce(a, b) ? this.truceUntil[a * this.stride + b] : 0)),
+        aggression: Array.from(this.aggression),
+        coalitionAgainst: Array.from(this.coalitionAgainst),
+        peaceOffers: this.peaceOffers.map((offer) => ({ ...offer })),
+        movements: this.movements.map((movement) => ({ ...movement })),
       },
     };
   }
@@ -2887,6 +3703,7 @@ export class Simulation {
     this.heldHome.set(state.heldHome);
     this.totalHome.set(state.totalHome);
     this.provinceHome.set(state.provinceHome);
+    this.homePortsStale = true;
     this.provinceValue.set(state.provinceValue);
     this.controller.set(state.controller);
     state.provinceCounts.forEach((counts, province) => {
@@ -2926,6 +3743,7 @@ export class Simulation {
     restoreArray(this.blockaded, legacy.blockaded);
     restoreArray(this.factories, legacy.factories);
     restoreArray(this.infrastructure, legacy.infrastructure);
+    for (const kind of Object.keys(this.buildings) as ProvinceBuilding[]) restoreArray(this.buildings[kind], legacy.buildings?.[kind]);
     restoreArray(this.depots, legacy.depots);
     if (legacy.queues) this.queues = legacy.queues.map((queue) => queue.map((order) => ({ ...order })));
     restoreArray(this.buildProgress, legacy.buildProgress);
@@ -2933,6 +3751,15 @@ export class Simulation {
     restoreArray(this.counterShare, legacy.counterShare);
     if (legacy.counterAttempts) this.counterAttempts = new Map(legacy.counterAttempts.map(([nation, id, attempts]) => [`${nation}:${id}`, attempts]));
     if (legacy.priorityZones) this.priorityZones = legacy.priorityZones.map((zones) => zones.map((zone) => ({ ...zone })));
+    for (const [a, b, kind] of legacy.alliances ?? []) this.setAlliance(a, b, kind);
+    for (const [a, b, until] of legacy.truces ?? []) {
+      this.truceUntil[a * this.stride + b] = until;
+      this.truceUntil[b * this.stride + a] = until;
+    }
+    restoreArray(this.aggression, legacy.aggression);
+    if (legacy.coalitionAgainst) this.coalitionAgainst.set(legacy.coalitionAgainst);
+    this.peaceOffers = (legacy.peaceOffers ?? []).map((offer) => ({ ...offer }));
+    this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement }));
     if (saved.forts) {
       this.forts.set(saved.forts);
       for (let k = 0; k < this.landCells.length; k++) {
@@ -2955,7 +3782,7 @@ export class Simulation {
       this.pendingSupplyValues.push(this.supply[cell]);
     }
 
-    this.fronts = state.fronts.map((front) => ({ ...front, sides: front.sides.map((side) => ({ ...side })) }));
+    this.fronts = state.fronts.map((front) => ({ ...front, startTick: front.startTick ?? state.tick, sides: front.sides.map((side) => ({ ...side })) }));
     this.reindexFronts();
     for (const offensive of state.offensives) {
       const copy = { ...offensive };
@@ -2993,6 +3820,16 @@ export class Simulation {
       mix(this.queues[n].length);
       mix(Math.round(this.counterShare[n] * 1000));
       mix(this.priorityZones[n].length);
+      mix(Math.round(this.aggression[n] * 1e6));
+      mix(this.coalitionAgainst[n]);
+      for (let m = n + 1; m < this.stride; m++) {
+        if (this.allied[n * this.stride + m]) mix(n * 65536 + m * 4 + this.allied[n * this.stride + m]);
+        if (this.hasTruce(n, m)) mix(this.truceUntil[n * this.stride + m]);
+      }
+    }
+    for (const movement of this.movements) {
+      mix(movement.parent * 65536 + movement.origin);
+      mix(Math.round(movement.unrest * 1e6) + movement.asked);
     }
     let fortSum = 0;
     for (let k = 0; k < this.landCells.length; k++) {
@@ -3001,6 +3838,7 @@ export class Simulation {
     }
     mix(fortSum);
     for (let p = 1; p < this.factories.length; p++) mix(this.factories[p] * 16 + this.infrastructure[p] * 2 + this.depots[p]);
+    for (const levels of Object.values(this.buildings)) for (let p = 1; p < levels.length; p++) if (levels[p]) mix(p * 8 + levels[p]);
     for (let p = 1; p < this.development.length; p++) {
       mix(Math.round(this.development[p] * 1e6));
       mix(Math.round(this.consolidation[p] * 1e6));
