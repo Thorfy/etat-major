@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import type { BuildOption, GameClient } from '../game/GameClient.ts';
+import type { BuildOption, GameClient, Popup } from '../game/GameClient.ts';
 import { BUILD_EFFECTS, BUILD_NAMES } from '../game/buildings.ts';
 import type { SaveSlot } from '../game/saves.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
@@ -11,7 +11,7 @@ import { MAP_MODES, TopBar } from './TopBar.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
 import { describeEvent, eventKey, eventNations } from '../game/events.ts';
 import { formatDuration, formatShortDate } from '../game/time.ts';
-import { ALLIANCE_MAX_AGGRESSION } from '../sim/balance.ts';
+import { ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
 import { formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
@@ -235,6 +235,99 @@ function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: Map
   );
 }
 
+/** « A », « A et B », « A, B et C ». */
+function names(ids: number[], nameOf: (id: number) => string): string {
+  const list = ids.map(nameOf);
+  return list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} et ${list[list.length - 1]}`;
+}
+
+/** Titre, texte et choix d'une fenêtre d'événement. */
+function popupContent(game: GameClient, popup: Popup, nameOf: (id: number) => string) {
+  const who = names(popup.nations, nameOf);
+  const plural = popup.nations.length > 1;
+  const capacity = (id: number) => game.nationEconomy(id).capacity;
+  switch (popup.kind) {
+    case 'war': {
+      const theirs = popup.nations.reduce((sum, id) => sum + capacity(id), 0);
+      return {
+        title: 'Guerre !',
+        text: `${who} ${plural ? 'te déclarent' : 'te déclare'} la guerre. Rapport de force : ${integer.format(capacity(game.player))} contre ${integer.format(theirs)}.`,
+        note: 'Règle tes fronts dans l\'onglet Fronts ; la paix ne se propose qu\'après 4 semaines de guerre.',
+        choices: false,
+      };
+    }
+    case 'uprising':
+      return {
+        title: 'Soulèvement !',
+        text: `${who} ${plural ? 'se soulèvent' : 'se soulève'} contre toi${popup.coalition ? ', ensemble' : ''}, et ${plural ? 'reprennent leurs' : 'reprend ses'} terres d'origine.`,
+        note: 'Pour éviter les suivants : équipe tes régions annexées (onglet Diplomatie).',
+        choices: false,
+      };
+    case 'demand': {
+      const cost = Math.max(50, Math.round((game.playerStats?.construction ?? 0) * INVESTMENT_WEEKS));
+      return popup.demand === 'investment'
+        ? {
+            title: `${who} demande des investissements`,
+            text: `La région s'agite. Accepter met en tête de tes chantiers ${integer.format(cost)} pts d'investissements chez elle : elle se calme, et s'équipe.`,
+            note: 'Refuser monte son plafond d\'agitation, jusqu\'à ce qu\'elle se calme.',
+            choices: true,
+          }
+        : {
+            title: `${who} demande son indépendance`,
+            text: 'Accepter la laisse partir sans combat, avec une trêve d\'un an.',
+            note: 'Refuser la rapproche du soulèvement.',
+            choices: true,
+          };
+    }
+    case 'peaceOffer':
+      return {
+        title: `${who} propose la paix`,
+        text: 'Chaque province disputée reviendrait à qui la tient, puis une trêve d\'un an.',
+        note: '',
+        choices: true,
+      };
+  }
+}
+
+/**
+ * La première fenêtre d'événement en attente : le jeu reste en pause tant qu'il en reste. La croix
+ * (ou Échap) ferme sans choisir : la demande ou l'offre attend dans l'onglet Diplomatie.
+ */
+function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): string }) {
+  const popup = game.popups[0];
+  const content = popupContent(game, popup, nameOf);
+  return (
+    <div class="dialog-backdrop">
+      <section class={`panel dialog event ${popup.kind}`} role="alertdialog" aria-labelledby="event-title">
+        <button class="close" aria-label="Fermer et décider plus tard" title="Décider plus tard" onClick={() => game.closePopup(popup.id)}>
+          ×
+        </button>
+        <p class="event-meta">
+          <time>{formatShortDate(popup.tick)}</time>
+          {game.popups.length > 1 ? ` · 1 / ${game.popups.length}` : ''}
+        </p>
+        <h2 id="event-title">{content.title}</h2>
+        <p>{content.text}</p>
+        {content.note && <p class="event-note">{content.note}</p>}
+        {content.choices ? (
+          <div class="card-actions">
+            <button class="action" onClick={() => game.answerPopup(popup.id, true)}>
+              Accepter
+            </button>
+            <button class="action quiet" onClick={() => game.answerPopup(popup.id, false)}>
+              Refuser
+            </button>
+          </div>
+        ) : (
+          <button class="action" onClick={() => game.closePopup(popup.id)}>
+            {popup.kind === 'war' ? 'Aux armes' : 'Compris'}
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): string }) {
   return (
     <div class="dialog-backdrop">
@@ -386,6 +479,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       )}
       {state.startError && <div class="panel toast" role="alert">{state.startError}</div>}
       {game && game.defeatedBy !== 0 && !game.defeatSeen && <DefeatDialog game={game} nameOf={nameOf} />}
+      {game && game.popups.length > 0 && (game.defeatedBy === 0 || game.defeatSeen) && <EventDialog game={game} nameOf={nameOf} />}
     </>
   );
 }

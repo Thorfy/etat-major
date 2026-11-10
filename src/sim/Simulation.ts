@@ -28,8 +28,13 @@ import {
   REBEL_STABILITY,
   SECESSION_MIN_SHARE,
   UNREST_STABILITY,
-  UNREST_PER_WEEK,
-  UNREST_WAR_PER_WEEK,
+  UNREST_BASE,
+  UNREST_INSTABILITY,
+  UNREST_WAR,
+  UNREST_SPEED_PER_WEEK,
+  CARE_FULL_LEVELS,
+  INVESTMENT_CARE,
+  REFUSAL_CEILING,
   DEMAND_INVESTMENT_AT,
   DEMAND_INDEPENDENCE_AT,
   REVOLT_AT,
@@ -74,7 +79,6 @@ import {
   RECRUITMENT_BONUS,
   SERVICES_RECOVERY_BONUS,
   SERVICES_WEARINESS_CUT,
-  SERVICES_UNREST_PER_WEEK,
   SHIPYARD_NAVY,
   CASUALTY_WEARINESS,
   CONSTRUCTION_PER_MINUTE,
@@ -1729,14 +1733,18 @@ export class Simulation {
   private updateMovements(): void {
     // Revendications : valeur d'origine, par (pays qui tient, pays d'origine disparu).
     const claims = new Map<number, number>();
-    const served = new Map<number, number>();
+    // Équipement, pondéré par la valeur d'origine de chaque province de la région.
+    const equipped = new Map<number, number>();
+    const { buildings } = this;
     for (let p = 1; p < this.controller.length; p++) {
       const origin = this.startHome[p];
       const parent = this.controller[p];
       if (parent === 0 || origin === parent || this.alive[origin]) continue;
       const key = parent * this.stride + origin;
       claims.set(key, (claims.get(key) ?? 0) + this.startValue[p]);
-      served.set(key, (served.get(key) ?? 0) + this.startValue[p] * this.buildings.services[p]);
+      const levels =
+        this.factories[p] + buildings.recruitment[p] + buildings.refinery[p] + buildings.steelworks[p] + buildings.shipyard[p] + 2 * buildings.services[p];
+      equipped.set(key, (equipped.get(key) ?? 0) + this.startValue[p] * Math.min(1, levels / CARE_FULL_LEVELS));
     }
     const claimed = new Map(claims);
     const shareOf = (key: number, parent: number) => (claims.get(key) ?? 0) / Math.max(1e-9, this.totalHome[parent]);
@@ -1756,7 +1764,7 @@ export class Simulation {
       const origin = key % this.stride;
       const share = claim / Math.max(1e-9, this.totalHome[parent]);
       if (!this.alive[parent] || share < SECESSION_MIN_SHARE) continue;
-      kept.push({ parent, origin, unrest: 0, share, asked: 0, demand: '', until: 0, investing: false });
+      kept.push({ parent, origin, unrest: 0, share, asked: 0, demand: '', until: 0, investing: false, invested: 0, refused: 0, care: 0, ceiling: 0 });
     }
     this.movements = kept;
     if (kept.length === 0) return;
@@ -1770,15 +1778,24 @@ export class Simulation {
     for (const movement of kept) {
       const parent = movement.parent;
       const key = parent * this.stride + movement.origin;
-      const services = (served.get(key) ?? 0) / Math.max(1e-9, claimed.get(key) ?? 0);
-      let rate =
-        UNREST_PER_WEEK * (UNREST_STABILITY - this.stability[parent]) + (atWar[parent] ? UNREST_WAR_PER_WEEK : 0) - SERVICES_UNREST_PER_WEEK * services;
-      // Des investissements en chantier la tiennent tranquille.
-      if (movement.investing) rate = Math.min(0, rate);
-      movement.unrest = Math.max(0, Math.min(1, movement.unrest + rate * weeks));
+      const buildingCare = (equipped.get(key) ?? 0) / Math.max(1e-9, claimed.get(key) ?? 0);
+      movement.care = Math.min(1, buildingCare + INVESTMENT_CARE * (movement.invested ?? 0));
+      const instability = Math.max(0, UNREST_STABILITY - this.stability[parent]);
+      movement.ceiling = Math.min(
+        1,
+        (1 - movement.care) * (UNREST_BASE + UNREST_INSTABILITY * instability + (atWar[parent] ? UNREST_WAR : 0) + REFUSAL_CEILING * (movement.refused ?? 0)),
+      );
+      // Vers le plafond, à vitesse fixe ; des investissements en chantier l'empêchent de monter.
+      const gap = movement.ceiling - movement.unrest;
+      let step = Math.sign(gap) * Math.min(Math.abs(gap), UNREST_SPEED_PER_WEEK * weeks);
+      if (movement.investing) step = Math.min(0, step);
+      movement.unrest = Math.max(0, Math.min(1, movement.unrest + step));
       if (movement.demand !== '' && this.tick >= movement.until) this.resolveDemand(movement, movement.demand, false);
       if (movement.demand !== '') continue;
-      if (movement.unrest < UNREST_CALM) movement.asked = 0;
+      if (movement.unrest < UNREST_CALM) {
+        movement.asked = 0;
+        movement.refused = 0;
+      }
       if (movement.asked < 1 && !movement.investing && movement.unrest >= DEMAND_INVESTMENT_AT) this.makeDemand(movement, 'investment');
       else if (movement.asked < 2 && movement.unrest >= DEMAND_INDEPENDENCE_AT) this.makeDemand(movement, 'independence');
     }
@@ -1814,6 +1831,7 @@ export class Simulation {
     movement.until = 0;
     if (!accept) {
       movement.unrest = Math.min(1, movement.unrest + REFUSAL_UNREST);
+      movement.refused = (movement.refused ?? 0) + 1;
       return;
     }
     const parent = movement.parent;
@@ -1834,6 +1852,7 @@ export class Simulation {
     const movement = this.movements.find((entry) => entry.parent === parent && entry.origin === region);
     if (movement) {
       movement.investing = false;
+      movement.invested = (movement.invested ?? 0) + 1;
       movement.unrest = Math.max(0, movement.unrest - INVESTMENT_DONE_CALM);
     }
     for (let p = 1; p < this.controller.length; p++) {
@@ -2552,6 +2571,7 @@ export class Simulation {
       if (movement) {
         movement.investing = false;
         movement.unrest = Math.min(1, movement.unrest + REFUSAL_UNREST);
+        movement.refused = (movement.refused ?? 0) + 1;
       }
     }
     if (index === 0) this.buildProgress[nation] = 0;
@@ -3570,7 +3590,16 @@ export class Simulation {
             : [],
         movements: this.movements
           .filter((movement) => movement.parent === id)
-          .map(({ origin, unrest, share, demand, until, investing }) => ({ origin, unrest, share, demand, until, investing })),
+          .map(({ origin, unrest, share, demand, until, investing, care, ceiling }) => ({
+            origin,
+            unrest,
+            share,
+            demand,
+            until,
+            investing,
+            care: care ?? 0,
+            ceiling: ceiling ?? 0,
+          })),
         counterShare: this.counterShare[id],
         priorityZones: id === this.player ? this.priorityZones[id].map((zone) => ({ ...zone })) : [],
         aggression: this.aggression[id],
@@ -3759,7 +3788,7 @@ export class Simulation {
     restoreArray(this.aggression, legacy.aggression);
     if (legacy.coalitionAgainst) this.coalitionAgainst.set(legacy.coalitionAgainst);
     this.peaceOffers = (legacy.peaceOffers ?? []).map((offer) => ({ ...offer }));
-    this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement }));
+    this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement, invested: movement.invested ?? 0, refused: movement.refused ?? 0, care: movement.care ?? 0, ceiling: movement.ceiling ?? 0 }));
     if (saved.forts) {
       this.forts.set(saved.forts);
       for (let k = 0; k < this.landCells.length; k++) {
@@ -3829,7 +3858,7 @@ export class Simulation {
     }
     for (const movement of this.movements) {
       mix(movement.parent * 65536 + movement.origin);
-      mix(Math.round(movement.unrest * 1e6) + movement.asked);
+      mix(Math.round(movement.unrest * 1e6) + movement.asked + 8 * (movement.invested ?? 0));
     }
     let fortSum = 0;
     for (let k = 0; k < this.landCells.length; k++) {

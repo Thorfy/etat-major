@@ -286,10 +286,32 @@ describe('régions annexées', () => {
     expect(sim.movementsOf(A)[0].unrest).toBeCloseTo(before + 0.15, 6);
   });
 
-  it('restent calmes dans un pays stable', () => {
+  it("négligées dans un pays stable, demandent des investissements sans jamais se soulever", () => {
     const sim = annexed();
-    for (let t = 0; t < 600 * 20; t++) sim.step();
-    expect(sim.movementsOf(A)[0].unrest).toBe(0);
+    const demands: string[] = [];
+    for (let t = 0; t < 600 * 40; t++) {
+      for (const movement of sim.movementsOf(A)) {
+        if (movement.demand !== '') {
+          demands.push(movement.demand);
+          sim.answerDemand(A, movement.origin, false);
+        }
+      }
+      sim.step();
+    }
+    expect(demands).toEqual(['investment']);
+    expect(sim.movementsOf(A)[0].unrest).toBeLessThan(DEMAND_INDEPENDENCE_AT);
+    expect(sim.isAlive(B)).toBe(false);
+  });
+
+  it('équipées, restent calmes même dans un pays à bout', () => {
+    const sim = annexed();
+    // Deux niveaux de services publics dans chaque province de l'ancien B (à l'est).
+    const provinces = new Set<number>();
+    for (let cell = 0; cell < sim.provinceGrid.length; cell++) if (cell % W >= 100 && sim.provinceGrid[cell]) provinces.add(sim.provinceGrid[cell]);
+    for (const province of provinces) sim.buildings.services[province] = 2;
+    collapse(sim, 600 * 40, () => sim.isAlive(B));
+    expect(sim.movementsOf(A)[0].care).toBe(1);
+    expect(sim.movementsOf(A)[0].unrest).toBeLessThan(0.05);
     expect(sim.isAlive(B)).toBe(false);
   });
 });

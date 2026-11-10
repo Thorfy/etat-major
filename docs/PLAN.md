@@ -265,6 +265,37 @@ recrutement, 15 de services publics, 5 d'aciérie, 2 de raffinerie. Au navigateu
 a montré que le Worker n'envoyait plus le relevé économique (les tableaux des bâtiments, rangés
 dans un objet, n'étaient pas dans la liste des transferts) : corrigé. Tests : 150 réussis.
 
+Huitième retour (« la vitesse de rébellion est plutôt bien, c'est le déclencheur […] quand on a
+tout installé chez eux ils finissent quand même par se rebeller ») : l'agitation ne dépend plus
+d'abord de la stabilité du pays, mais de l'**équipement** de la région.
+
+- **Équipement** (0 à 100 %) : dans chaque province de la région, ses niveaux d'usine, de centre
+  de recrutement, de raffinerie, d'aciérie et de chantier naval, et deux fois ceux de services
+  publics, rapportés à 4 ; moyenne pondérée par la valeur d'origine. Chaque programme
+  d'investissements achevé y ajoute 25 %.
+- **Plafond** = (1 − équipement) × (40 % + 2 × points de stabilité sous 45 % + 10 % en guerre +
+  15 % par demande refusée depuis le dernier calme). L'agitation y tend à 5 points par semaine, en
+  montant comme en descendant (la vitesse d'avant, que le joueur trouvait bonne).
+- Une région négligée d'un pays stable plafonne à 40 % : elle demande des investissements, jamais
+  l'indépendance. Négligée dans un pays à 10 % de stabilité, elle va jusqu'au soulèvement. Équipée
+  à 100 %, elle reste calme même dans un pays à bout. Les services publics ne retirent plus
+  d'agitation directement : ils comptent double dans l'équipement.
+- Interface : « équipée à X % » pour chaque région, un trait blanc pour le plafond sur sa jauge,
+  et la tendance (« s'agite, jusqu'à 48 % », « va vers le soulèvement : équipe-la »).
+- Partie mondiale de 120 min : 83 régions annexées, toutes un peu agitées (70 % au plus) ; l'IA
+  investit, accorde 5 indépendances, subit 1 soulèvement ; tick max 45 ms. Tests : 151 réussis.
+
+Neuvième retour (« à chaque nouvelle attaque, ou demande […] il faut une popup et le jeu qui se met
+en pause ») : **fenêtres d'événements**. Une guerre déclarée au joueur, un soulèvement contre lui,
+la demande d'une de ses régions et une offre de paix ouvrent une fenêtre et mettent le jeu en pause.
+Les choix y sont (Accepter, Refuser) ; la croix ou Échap ferme sans choisir, la demande attend
+alors dans l'onglet Diplomatie. Quand la dernière fenêtre se ferme, le jeu reprend la vitesse qu'il
+avait (rien, s'il était déjà en pause). Les attaques d'un même instant se regroupent (« Allemagne et
+Italie te déclarent la guerre »), avec le rapport de force ; la guerre que déclare une région
+soulevée n'ouvre pas de seconde fenêtre. Les fenêtres suivantes attendent leur tour (« 1 / 2 »).
+Vérifié au navigateur : deux déclarations de guerre réelles, puis une demande et une offre de paix
+simulées côté client. Pas de fenêtre pour une offensive ennemie ni pour un pacte rompu.
+
 Points à reprendre :
 
 - **Équilibre à éprouver par un joueur :** seuils d'agressivité et de lassitude, fréquence des

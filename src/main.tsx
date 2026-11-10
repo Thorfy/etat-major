@@ -130,6 +130,11 @@ async function start(): Promise<void> {
     }
     const game = state.game;
     if (!game) return;
+    // Échap ferme la fenêtre d'événement affichée, sans choisir.
+    if (event.key === 'Escape' && game.popups.length > 0) {
+      game.closePopup(game.popups[0].id);
+      return;
+    }
     // Sur un bouton, Espace reste réservé au bouton.
     if (event.code === 'Space' && !(target instanceof HTMLButtonElement)) {
       event.preventDefault();

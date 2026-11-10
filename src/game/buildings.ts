@@ -10,7 +10,6 @@ import {
   RECRUITMENT_BONUS,
   REFINERY_BONUS,
   SERVICES_RECOVERY_BONUS,
-  SERVICES_UNREST_PER_WEEK,
   SERVICES_WEARINESS_CUT,
   SHIPYARD_NAVY,
   STEELWORKS_BONUS,
@@ -64,7 +63,7 @@ export const BUILD_EFFECTS: Record<BuildKind, string> = {
   services:
     `Hôpitaux et écoles, ${PROVINCE_BUILDINGS.services.max} niveaux. Sur l'ensemble du pays, chaque niveau moyen fait remonter la stabilité ` +
     `${percent(SERVICES_RECOVERY_BONUS)} plus vite en paix, et la guerre l'use ${percent(SERVICES_WEARINESS_CUT)} moins. Dans une région annexée, ` +
-    `chaque niveau y retire ${(SERVICES_UNREST_PER_WEEK * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} point d'agitation par semaine.`,
+    `ils comptent double pour son équipement, qui la tient calme.`,
   shipyard:
     `Chaque niveau achevé lance des navires : +${percent(SHIPYARD_NAVY)} de ta marine de départ (${PROVINCE_BUILDINGS.shipyard.max} niveaux ` +
     `par province côtière). Plus de marine : débarquements moins coûteux, blocus plus faciles à imposer ou à briser.`,

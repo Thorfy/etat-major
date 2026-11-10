@@ -607,6 +607,14 @@ canvas {
   background: #c4503c;
 }
 
+/* Plafond vers lequel tend l'agitation. */
+.gauge.unrest i.ceiling {
+  top: -3px;
+  width: 2px;
+  height: 10px;
+  background: var(--ink);
+}
+
 /* Repères : seuils des demandes d'investissements et d'indépendance. */
 .gauge.unrest i {
   position: absolute;
@@ -841,6 +849,39 @@ canvas {
 .dialog p {
   margin: 0 0 8px;
   color: var(--ink-soft);
+}
+
+.dialog.event {
+  position: relative;
+  width: 420px;
+  border-color: var(--accent);
+}
+
+.dialog.event.war,
+.dialog.event.uprising {
+  border-color: #c4503c;
+}
+
+.dialog.event h2 {
+  margin-right: 28px;
+}
+
+.dialog.event > p:not(.event-meta):not(.event-note) {
+  color: var(--ink);
+}
+
+.event-meta {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+.dialog .event-note {
+  font-size: 13px;
+}
+
+.dialog.event .card-actions {
+  margin-top: 14px;
 }
 
 .fullscreen-message {

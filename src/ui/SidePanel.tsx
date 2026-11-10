@@ -14,7 +14,6 @@ import {
   INVESTMENT_WEEKS,
   MAX_COUNTER_SHARE,
   MAX_PRIORITY_ZONES,
-  UNREST_STABILITY,
 } from '../sim/balance.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
@@ -434,23 +433,25 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
     if (movement.demand === 'investment') return `demande des investissements, avant le ${formatShortDate(movement.until)}`;
     if (movement.demand === 'independence') return `demande l'indépendance, avant le ${formatShortDate(movement.until)}`;
     if (movement.investing) return 'investissements en chantier';
-    if (movement.unrest >= 0.85) return 'au bord du soulèvement';
-    if (movement.unrest >= DEMAND_INVESTMENT_AT) return 'agitée';
-    return movement.unrest > 0.05 ? 'tendue' : 'calme';
+    if (movement.ceiling >= 1) return movement.unrest >= 0.85 ? 'au bord du soulèvement : équipe-la' : 'va vers le soulèvement : équipe-la';
+    if (movement.ceiling > movement.unrest + 0.02) return `s'agite, jusqu'à ${formatPercent(movement.ceiling)}`;
+    if (movement.ceiling < movement.unrest - 0.02) return `se calme, jusqu'à ${formatPercent(movement.ceiling)}`;
+    return movement.unrest >= DEMAND_INVESTMENT_AT ? 'agitée' : movement.unrest > 0.05 ? 'tendue' : 'calme';
   };
   return (
     <section>
       <h3>Régions annexées</h3>
       <Note lines={3}>
-        {`Elles s'agitent quand ton pays passe sous ${formatPercent(UNREST_STABILITY)} de stabilité. Elles demandent ` +
-          `des investissements, puis l'indépendance ; chaque refus les agite davantage, et à 100 % elles se soulèvent.`}
+        {`Leur agitation tend vers un plafond (le trait blanc) : bas si tu les équipes (usines, services publics, ` +
+          `recrutement…), haut si elles sont négligées et ton pays instable ou en guerre. Elles demandent des ` +
+          `investissements, puis l'indépendance ; à 100 %, elles se soulèvent.`}
       </Note>
       {movements.length === 0 && <Note lines={1}>Aucune région annexée.</Note>}
       {movements.map((movement) => (
         <div class={`region ${movement.demand ? 'offer' : ''}`} key={movement.origin}>
           <div class="offensive-row">
             <span>
-              {nations[movement.origin - 1].name} <small>· {formatPercent(movement.share)} du pays</small>
+              {nations[movement.origin - 1].name} <small>· {formatPercent(movement.share)} du pays · équipée à {formatPercent(movement.care)}</small>
             </span>
             <b class={movement.unrest >= DEMAND_INDEPENDENCE_AT ? 'behind' : ''}>{formatPercent(movement.unrest)}</b>
           </div>
@@ -458,6 +459,7 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
             <div class={movement.unrest >= DEMAND_INDEPENDENCE_AT ? 'high' : ''} style={{ width: `${movement.unrest * 100}%` }} />
             <i style={{ left: `${DEMAND_INVESTMENT_AT * 100}%` }} />
             <i style={{ left: `${DEMAND_INDEPENDENCE_AT * 100}%` }} />
+            <i class="ceiling" style={{ left: `${Math.min(99.5, movement.ceiling * 100)}%` }} title={`Plafond : ${formatPercent(movement.ceiling)}`} />
           </div>
           <p class="region-status">{status(movement)}</p>
           {movement.demand !== '' && (

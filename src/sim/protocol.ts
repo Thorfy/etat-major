@@ -39,6 +39,13 @@ export interface MovementState {
   until: number;
   /** Investissements acceptés, en chantier. */
   investing: boolean;
+  /** Programmes d'investissements achevés. */
+  invested: number;
+  /** Demandes refusées depuis le dernier calme : chacune monte le plafond. */
+  refused: number;
+  /** Équipement de la région, de 0 à 1, et plafond vers lequel tend son agitation. */
+  care: number;
+  ceiling: number;
 }
 
 /** Secteur prioritaire : un disque de la carte où les forces d'un front se concentrent. */
@@ -121,7 +128,16 @@ export interface NationSnapshot {
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
   builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number }[];
   /** Régions annexées qui s'agitent dans ce pays. */
-  movements: { origin: number; unrest: number; share: number; demand: '' | DemandKind; until: number; investing: boolean }[];
+  movements: {
+    origin: number;
+    unrest: number;
+    share: number;
+    demand: '' | DemandKind;
+    until: number;
+    investing: boolean;
+    care: number;
+    ceiling: number;
+  }[];
   /** Part de l'armée gardée pour les contre-attaques. */
   counterShare: number;
   /** Secteurs prioritaires (joueur seulement). */

@@ -340,8 +340,6 @@ export const RECRUITMENT_BONUS = 0.2;
  */
 export const SERVICES_RECOVERY_BONUS = 0.5;
 export const SERVICES_WEARINESS_CUT = 0.1;
-/** Dans une région annexée, chaque niveau moyen de services publics retire ça à son agitation par semaine. */
-export const SERVICES_UNREST_PER_WEEK = 0.012;
 /** Chaque niveau de chantier naval achevé ajoute cette part de sa marine de départ au pays. */
 export const SHIPYARD_NAVY = 0.15;
 /** Chance qu'une IA lance un chantier à chacune de ses décisions, si sa file est courte. */
@@ -435,12 +433,29 @@ export const ALLIANCE_MAX_AGGRESSION = 0.45;
 // d'abord des investissements, puis l'indépendance sans combat ; refusée, elle finit par se soulever.
 /** Part minimale de la valeur du pays qu'une région annexée doit peser pour s'agiter. */
 export const SECESSION_MIN_SHARE = 0.01;
-/** L'agitation monte sous cette stabilité du pays, et retombe au-dessus. */
+/**
+ * L'agitation d'une région tend vers un plafond : (1 − équipement) × (base + instabilité + guerre
+ * + refus). Une région négligée d'un pays stable plafonne à la base : elle demande des
+ * investissements sans jamais se soulever. Une région entièrement équipée reste calme, même dans
+ * un pays à bout.
+ */
+export const UNREST_BASE = 0.4;
+/** Le plafond monte de ça par point de stabilité du pays sous UNREST_STABILITY. */
+export const UNREST_INSTABILITY = 2;
+/** Chaque demande refusée, tant que la région ne s'est pas calmée, monte le plafond d'autant. */
+export const REFUSAL_CEILING = 0.15;
 export const UNREST_STABILITY = 0.45;
-/** Agitation gagnée par semaine, par point de stabilité sous ce seuil (perdue au-dessus). */
-export const UNREST_PER_WEEK = 0.15;
-/** Un pays en guerre voit ses régions s'agiter en plus de ça par semaine. */
-export const UNREST_WAR_PER_WEEK = 0.01;
+/** Un pays en guerre voit ses régions mal équipées s'agiter d'autant en plus. */
+export const UNREST_WAR = 0.1;
+/** L'agitation va vers son plafond à cette vitesse, par semaine, en montant comme en descendant. */
+export const UNREST_SPEED_PER_WEEK = 0.05;
+/**
+ * Équipement d'une province : ses niveaux de bâtiments (usine, centre de recrutement, raffinerie,
+ * aciérie, chantier naval ; services publics comptés double), rapportés à ce nombre. Chaque
+ * programme d'investissements achevé y ajoute INVESTMENT_CARE pour toute la région.
+ */
+export const CARE_FULL_LEVELS = 4;
+export const INVESTMENT_CARE = 0.25;
 export const DEMAND_INVESTMENT_AT = 0.35;
 export const DEMAND_INDEPENDENCE_AT = 0.65;
 /** Au maximum, la région se soulève. */

@@ -25,6 +25,7 @@ import type {
   NationSnapshot,
   OffensiveSnapshot,
   SimCommand,
+  DemandKind,
   SimEvent,
   SimSave,
   SimSnapshot,
@@ -59,6 +60,21 @@ export interface BuildOption {
   cost: number;
   /** Vide si le chantier est possible, sinon la raison du refus. */
   reason: string;
+}
+
+/**
+ * Un événement qui demande l'attention du joueur : le jeu se met en pause tant qu'une fenêtre
+ * reste ouverte, puis reprend à sa vitesse.
+ */
+export interface Popup {
+  id: number;
+  tick: number;
+  kind: 'war' | 'uprising' | 'demand' | 'peaceOffer';
+  /** Attaquants, régions soulevées, région qui demande, ou pays qui propose la paix. */
+  nations: number[];
+  /** Soulèvement : les régions se sont coalisées. */
+  coalition?: boolean;
+  demand?: DemandKind;
 }
 
 export interface GameStart {
@@ -118,6 +134,11 @@ export class GameClient {
   private flipsWindow = 0;
   private windowStart = performance.now();
   private speedBeforePause: number = GAME_SPEEDS[0];
+  /** Fenêtres d'événements en attente, la première affichée. */
+  popups: Popup[] = [];
+  private nextPopupId = 1;
+  /** Vitesse à reprendre quand la dernière fenêtre se ferme (0 : le jeu était déjà en pause). */
+  private resumeSpeed = 0;
   private messageTimer = 0;
   private readonly mapHash: number;
 
@@ -261,7 +282,7 @@ export class GameClient {
         if (event.a !== me && event.b !== me) break;
         const enemy = event.a === me ? event.b : event.a;
         if (this.pendingWars.has(enemy)) this.notify(`Guerre déclarée : ${name(enemy)}.${this.effortReminder()}`);
-        else this.notify(`${name(enemy)} te déclare la guerre !${this.effortReminder()}`);
+        else this.openPopup({ tick: event.tick, kind: 'war', nations: [enemy] });
         break;
       }
       case 'capitulation':
@@ -285,7 +306,7 @@ export class GameClient {
         if (event.from === me) this.notify(`${name(event.to)} refuse la paix : elle se croit encore en mesure de gagner.`);
         break;
       case 'peaceOffer':
-        if (event.to === me) this.notify(`${name(event.from)} propose la paix : réponds dans la section Diplomatie.`);
+        if (event.to === me) this.openPopup({ tick: event.tick, kind: 'peaceOffer', nations: [event.from] });
         break;
       case 'alliance':
         if (event.a === me || event.b === me) this.notify(`Pacte de non-agression signé avec ${name(event.a === me ? event.b : event.a)}.`);
@@ -297,22 +318,16 @@ export class GameClient {
         if (event.b === me) this.notify(`${name(event.a)} rompt son pacte de non-agression avec toi.`);
         break;
       case 'coalition':
-        if (event.target === me) this.notify(`Soulèvement : ${event.members.map(name).join(', ')} se révoltent ensemble contre toi !`);
+        if (event.target === me) this.openPopup({ tick: event.tick, kind: 'uprising', nations: event.members, coalition: true });
         break;
       case 'secession':
-        if (event.parent === me) this.notify(`${name(event.rebel)} se soulève contre toi : ses demandes n'ont pas été entendues !`);
+        if (event.parent === me) this.openPopup({ tick: event.tick, kind: 'uprising', nations: [event.rebel] });
         break;
       case 'independence':
         if (event.parent === me) this.notify(`${name(event.rebel)} redevient indépendant, sans combat. Une trêve d'un an est signée.`);
         break;
       case 'demand':
-        if (event.parent === me) {
-          this.notify(
-            event.kind === 'investment'
-              ? `${name(event.origin)} s'agite et demande des investissements : réponds dans l'onglet Diplomatie.`
-              : `${name(event.origin)} demande son indépendance, sans combat : réponds dans l'onglet Diplomatie.`,
-          );
-        }
+        if (event.parent === me) this.openPopup({ tick: event.tick, kind: 'demand', nations: [event.origin], demand: event.kind });
         break;
     }
   }
@@ -367,12 +382,74 @@ export class GameClient {
   answerPeace(enemy: number, accept: boolean): void {
     if (!this.canCommand) return;
     this.command({ type: 'answerPeace', nation: this.player, enemy, accept });
+    this.dropPopups((popup) => popup.kind === 'peaceOffer' && popup.nations[0] === enemy);
   }
 
   /** Répondre à la demande d'une région agitée de son pays. */
   answerDemand(origin: number, accept: boolean): void {
     if (!this.canCommand) return;
     this.command({ type: 'answerDemand', nation: this.player, origin, accept });
+    this.dropPopups((popup) => popup.kind === 'demand' && popup.nations[0] === origin);
+  }
+
+  /**
+   * Ouvre une fenêtre et met le jeu en pause. Les attaques et les soulèvements d'un même instant
+   * se regroupent ; la guerre déclarée par une région soulevée n'ouvre pas de fenêtre de plus.
+   */
+  private openPopup(popup: Omit<Popup, 'id'>): void {
+    const sameMoment = this.popups.filter((entry) => entry.tick === popup.tick);
+    if (popup.kind === 'war') {
+      const enemy = popup.nations[0];
+      if (sameMoment.some((entry) => entry.kind === 'uprising' && entry.nations.includes(enemy))) return;
+      const war = sameMoment.find((entry) => entry.kind === 'war');
+      if (war) {
+        if (!war.nations.includes(enemy)) war.nations.push(enemy);
+        this.onChange();
+        return;
+      }
+    }
+    if (popup.kind === 'uprising') {
+      const uprising = sameMoment.find((entry) => entry.kind === 'uprising');
+      if (uprising) {
+        for (const nation of popup.nations) if (!uprising.nations.includes(nation)) uprising.nations.push(nation);
+        uprising.coalition ||= popup.coalition;
+        this.onChange();
+        return;
+      }
+    }
+    this.popups.push({ ...popup, nations: [...popup.nations], id: this.nextPopupId++ });
+    if (this.speed !== 0 && this.resumeSpeed === 0) {
+      this.resumeSpeed = this.speed;
+      this.setSpeed(0);
+    }
+    this.onChange();
+  }
+
+  /** Ferme une fenêtre sans choisir : la demande ou l'offre attend dans l'onglet Diplomatie. */
+  closePopup(id: number): void {
+    this.dropPopups((popup) => popup.id === id);
+  }
+
+  /** Répond au choix proposé par une fenêtre, puis la ferme. */
+  answerPopup(id: number, accept: boolean): void {
+    const popup = this.popups.find((entry) => entry.id === id);
+    if (!popup) return;
+    if (popup.kind === 'demand') this.answerDemand(popup.nations[0], accept);
+    else if (popup.kind === 'peaceOffer') this.answerPeace(popup.nations[0], accept);
+    this.closePopup(id);
+  }
+
+  /** Retire des fenêtres ; quand il n'en reste plus, le jeu reprend sa vitesse d'avant. */
+  private dropPopups(test: (popup: Popup) => boolean): void {
+    const before = this.popups.length;
+    this.popups = this.popups.filter((popup) => !test(popup));
+    if (this.popups.length === before) return;
+    if (this.popups.length === 0 && this.resumeSpeed !== 0) {
+      const speed = this.resumeSpeed;
+      this.resumeSpeed = 0;
+      this.setSpeed(speed);
+    }
+    this.onChange();
   }
 
   /** Agitation d'une région annexée (pays d'origine `origin`) dans le pays `parent` ; -1 si elle est calme. */
