@@ -107,7 +107,10 @@ function worldGame(durationMinutes: number, seed: number) {
         if (sim.isBlockaded(n)) blockaded++;
       }
       for (let p = 1; p < sim.factories.length; p++) factories += sim.factories[p];
-      console.log(`         Arrière : ${atWar} nations en guerre, stabilité moyenne ${atWar ? (stabilitySum / atWar).toFixed(2) : '-'}, réservoir moyen ${atWar ? ((manpowerSum / atWar) * 100).toFixed(0) : '-'} %, ${blockaded} sous blocus, ${factories} niveaux d'usine bâtis`);
+      let fortified = 0;
+      for (let i = 0; i < sim.forts.length; i++) if (sim.forts[i] > 0) fortified++;
+      const counters = sim.offensives.filter((offensive) => offensive.counter).length;
+      console.log(`         Arrière : ${atWar} nations en guerre, stabilité moyenne ${atWar ? (stabilitySum / atWar).toFixed(2) : '-'}, réservoir moyen ${atWar ? ((manpowerSum / atWar) * 100).toFixed(0) : '-'} %, ${blockaded} sous blocus, ${factories} niveaux d'usine bâtis, ${fortified} cellules fortifiées, ${counters} contre-attaques en cours`);
     }
   }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);

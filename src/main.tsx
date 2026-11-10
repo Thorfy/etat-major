@@ -20,7 +20,7 @@ async function start(): Promise<void> {
     hover: noCell,
     selected: noCell,
     debug: false,
-    aiming: false,
+    tool: null,
     game: null,
     startError: null,
     mapMode: 'political',
@@ -96,8 +96,14 @@ async function start(): Promise<void> {
       onOffensive(fromX, fromY, toX, toY) {
         state.game?.launchOffensive(fromX, fromY, toX, toY);
       },
-      onAimingChange(aiming) {
-        state.aiming = aiming;
+      onFort(fromX, fromY, toX, toY) {
+        state.game?.fortifyLine(fromX, fromY, toX, toY);
+      },
+      onPriority(x, y) {
+        state.game?.addPriority(x, y);
+      },
+      onToolChange(tool) {
+        state.tool = tool;
         refresh();
       },
     },

@@ -3,8 +3,8 @@ import { decodeRle, encodeRle } from '../map/codec.ts';
 import { SUPPLY_GROUPS } from '../sim/balance.ts';
 import type { NationLabel, SimEvent, SimSave, SimSaveState } from '../sim/protocol.ts';
 
-/** 2 : économie (jalon 4). 3 : logistique (jalon 5). 4 : l'arrière (jalon 6). */
-export const SAVE_VERSION = 4;
+/** 2 : économie (jalon 4). 3 : logistique (jalon 5). 4 : l'arrière (jalon 6). 5 : défense planifiée (jalon 7). */
+export const SAVE_VERSION = 5;
 
 /** Ce que le jeu garde en plus de la simulation. */
 export interface SaveMeta {
@@ -39,9 +39,10 @@ export async function encodeSave(file: SaveFile): Promise<Blob> {
   const json = new TextEncoder().encode(JSON.stringify({ meta: file.meta, state: file.sim.state }));
   const rle = encodeRle(file.sim.owners);
   const supplyRle = encodeRle(Uint16Array.from(file.sim.supply));
-  const header = new Uint32Array([json.length, rle.length, supplyRle.length]);
+  const fortRle = encodeRle(Uint16Array.from(file.sim.forts));
+  const header = new Uint32Array([json.length, rle.length, supplyRle.length, fortRle.length]);
   const compressed = await pipe(
-    new Blob([header, json, rle as Uint16Array<ArrayBuffer>, supplyRle as Uint16Array<ArrayBuffer>]),
+    new Blob([header, json, rle as Uint16Array<ArrayBuffer>, supplyRle as Uint16Array<ArrayBuffer>, fortRle as Uint16Array<ArrayBuffer>]),
     new CompressionStream('gzip'),
   );
   return new Blob([compressed], { type: 'application/gzip' });
@@ -54,8 +55,9 @@ export async function encodeSave(file: SaveFile): Promise<Blob> {
 export async function decodeSave(blob: Blob, cellCount: number, version: number): Promise<SaveFile> {
   if (version > SAVE_VERSION) throw new Error('elle vient d\'une version plus récente du jeu.');
   const buffer = await pipe(blob, new DecompressionStream('gzip'));
-  // Avant la version 3, l'en-tête ne comptait que le JSON et la grille des propriétaires.
-  const headerLength = version >= 3 ? 12 : 8;
+  // L'en-tête compte le JSON puis chaque grille : propriétaires, ravitaillement (version 3),
+  // fortifications (version 5).
+  const headerLength = version >= 5 ? 16 : version >= 3 ? 12 : 8;
   const header = new Uint32Array(buffer.slice(0, headerLength));
   const jsonEnd = headerLength + header[0];
   const { meta, state } = JSON.parse(new TextDecoder().decode(buffer.slice(headerLength, jsonEnd)));
@@ -63,11 +65,16 @@ export async function decodeSave(blob: Blob, cellCount: number, version: number)
   const rle = new Uint16Array(buffer.slice(jsonEnd, jsonEnd + header[1] * 2));
   const owners = decodeRle(rle, cellCount);
   let supply: Uint8Array | undefined;
+  let forts: Uint8Array | undefined;
+  const supplyStart = jsonEnd + header[1] * 2;
   if (version >= 3) {
-    const supplyStart = jsonEnd + header[1] * 2;
     supply = Uint8Array.from(decodeRle(new Uint16Array(buffer.slice(supplyStart, supplyStart + header[2] * 2)), cellCount));
   }
-  return migrateSave({ meta, sim: { owners, supply: supply as Uint8Array, state } }, cellCount);
+  if (version >= 5) {
+    const fortStart = supplyStart + header[2] * 2;
+    forts = Uint8Array.from(decodeRle(new Uint16Array(buffer.slice(fortStart, fortStart + header[3] * 2)), cellCount));
+  }
+  return migrateSave({ meta, sim: { owners, supply: supply as Uint8Array, forts: forts as Uint8Array, state } }, cellCount);
 }
 
 /**
@@ -93,6 +100,12 @@ export function migrateSave(file: SaveFile, cellCount: number): SaveFile {
     offensive.supply ??= 1;
     offensive.supplySum ??= 0;
     offensive.supplyCount ??= 0;
+    offensive.counter ??= false;
+  }
+  // Version 5 : fortifications et secteurs prioritaires.
+  if (!sim.forts) sim.forts = new Uint8Array(cellCount);
+  for (const front of state.fronts) {
+    for (const side of front.sides) side.priority ??= 0;
   }
   return { meta: { ...meta, version: SAVE_VERSION }, sim };
 }

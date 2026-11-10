@@ -8,6 +8,7 @@ import {
   GAME_SPEEDS,
   DEPOT_MIN_CONSOLIDATION,
   MAX_BUILD_QUEUE,
+  MAX_PRIORITY_ZONES,
   MAX_FACTORY_LEVEL,
   MAX_INFRASTRUCTURE_LEVEL,
   MAX_OFFENSIVES_PER_NATION,
@@ -87,6 +88,7 @@ export class GameClient {
   economy: EconomySnapshot | null = null;
   /** Effort de guerre demandé, à jour dès le geste. */
   private effortOrder: number | null = null;
+  private counterOrder: number | null = null;
 
   private readonly worker: Worker;
   private readonly world: LoadedWorld;
@@ -102,6 +104,7 @@ export class GameClient {
   private readonly labels = new Map<number, NationLabel>();
   private readonly saveRequests = new Map<number, (save: SimSave) => void>();
   private readonly warnedOffensives = new Set<number>();
+  private readonly announcedCounters = new Set<number>();
   private nextSaveRequest = 1;
   private frontCount = 0;
   private flipsWindow = 0;
@@ -198,6 +201,7 @@ export class GameClient {
   private receive(update: WorkerUpdate): void {
     this.view.applyOwnerChanges(update.cells, update.owners);
     this.view.applySupplyChanges(update.supplyCells, update.supplyValues);
+    this.view.applyFortChanges(update.fortCells, update.fortValues);
     for (let i = 0; i < update.provinces.length; i += 2) {
       this.controllers[update.provinces[i]] = update.provinces[i + 1];
     }
@@ -231,6 +235,8 @@ export class GameClient {
       }
       this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets);
       this.watchSupply(update.snapshot);
+      this.watchCounters(update.snapshot);
+      this.view.setPriorityZones(this.playerStats?.priorityZones ?? []);
       this.onChange();
     }
   }
@@ -247,11 +253,20 @@ export class GameClient {
     } else if (event.loser === this.player) {
       this.defeatedBy = event.winner;
       this.view.setCommandEnabled(false);
-      this.view.setAiming(false);
+      this.view.setTool(null);
     } else if (event.winner === this.player) {
       this.notify(`${name(event.loser)} capitule : tu annexes tout son territoire.`);
     } else if (this.isAtWarWith(event.loser)) {
       this.notify(`${name(event.loser)} capitule devant ${name(event.winner)}.`);
+    }
+  }
+
+  /** Annonce les contre-attaques lancées d'elles-mêmes par la réserve du joueur. */
+  private watchCounters(snapshot: SimSnapshot): void {
+    for (const offensive of snapshot.offensives) {
+      if (offensive.nation !== this.player || !offensive.counter || this.announcedCounters.has(offensive.id)) continue;
+      this.announcedCounters.add(offensive.id);
+      this.notify('Ta réserve contre-attaque : une tenaille frappe la percée ennemie à sa base.');
     }
   }
 
@@ -444,6 +459,61 @@ export class GameClient {
   build(province: number, kind: BuildKind): void {
     if (!this.canCommand) return;
     this.command({ type: 'build', nation: this.player, province, kind });
+  }
+
+  fortifyLine(fromX: number, fromY: number, toX: number, toY: number): void {
+    if (!this.canCommand) return;
+    const { ownerGrid, data } = this.world;
+    if (ownerGrid[fromY * data.width + fromX] !== this.player) {
+      this.notify('Une ligne fortifiée part de ton territoire.');
+      return;
+    }
+    if ((this.playerStats?.builds.length ?? 0) >= MAX_BUILD_QUEUE) {
+      this.notify(`File de chantiers pleine (${MAX_BUILD_QUEUE}).`);
+      return;
+    }
+    this.command({ type: 'fortifyLine', nation: this.player, fromX, fromY, toX, toY });
+    this.notify('Ligne fortifiée mise en chantier.');
+  }
+
+  fortifyFront(enemy: number): void {
+    if (!this.canCommand) return;
+    if ((this.playerStats?.builds.length ?? 0) >= MAX_BUILD_QUEUE) {
+      this.notify(`File de chantiers pleine (${MAX_BUILD_QUEUE}).`);
+      return;
+    }
+    this.command({ type: 'fortifyFront', nation: this.player, enemy });
+    this.notify(`Front avec ${this.world.data.nations[enemy - 1].name} mis en chantier de fortification.`);
+  }
+
+  setCounterShare(share: number): void {
+    if (!this.canCommand) return;
+    this.counterOrder = share;
+    this.command({ type: 'setCounterShare', nation: this.player, share });
+    this.onChange();
+  }
+
+  /** Réserve de contre-attaque voulue : celle qu'affiche le curseur. */
+  get counterShare(): number {
+    return this.counterOrder ?? this.playerStats?.counterShare ?? 0;
+  }
+
+  addPriority(x: number, y: number): void {
+    if (!this.canCommand) return;
+    const { ownerGrid, data } = this.world;
+    if (ownerGrid[y * data.width + x] !== this.player) {
+      this.notify('Un secteur prioritaire se place sur ton territoire.');
+      return;
+    }
+    if ((this.playerStats?.priorityZones.length ?? 0) >= MAX_PRIORITY_ZONES) {
+      this.notify(`${MAX_PRIORITY_ZONES} secteurs prioritaires au plus.`);
+      return;
+    }
+    this.command({ type: 'addPriority', nation: this.player, x, y });
+  }
+
+  removePriority(index: number): void {
+    this.command({ type: 'removePriority', nation: this.player, index });
   }
 
   cancelBuild(index: number): void {

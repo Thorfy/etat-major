@@ -3,7 +3,7 @@ import type { GameClient } from '../game/GameClient.ts';
 import type { SaveSlot } from '../game/saves.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { TERRAIN_NAMES } from '../map/terrain.ts';
-import type { CellInfo, MapMode, MapView } from '../render/MapView.ts';
+import type { CellInfo, MapMode, MapTool, MapView } from '../render/MapView.ts';
 import type { SimEvent } from '../sim/protocol.ts';
 import { FrontsPanel } from './FrontsPanel.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
@@ -14,7 +14,7 @@ export interface UiState {
   hover: CellInfo;
   selected: CellInfo;
   debug: boolean;
-  aiming: boolean;
+  tool: MapTool | null;
   game: GameClient | null;
   startError: string | null;
   mapMode: MapMode;
@@ -153,7 +153,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       <MapModeSwitch mode={state.mapMode} onMapMode={onMapMode} />
       {state.debug && <DebugOverlay view={view} game={game} />}
       {game ? (
-        <FrontsPanel game={game} nations={nations} view={view} aiming={state.aiming} />
+        <FrontsPanel game={game} nations={nations} view={view} tool={state.tool} />
       ) : (
         <SetupPanel nations={nations} picked={state.selected.owner} onStart={onStart} onResume={onResume} />
       )}

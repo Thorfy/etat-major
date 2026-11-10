@@ -308,3 +308,42 @@ export const DEPOT_MIN_CONSOLIDATION = 0.5;
 /** Chance qu'une IA lance un chantier à chacune de ses décisions, si sa file est courte. */
 export const AI_BUILD_CHANCE = 0.3;
 export const AI_MAX_QUEUE = 2;
+
+// ---------------------------------------------------------------------------
+// Défense planifiée (jalon 7).
+// ---------------------------------------------------------------------------
+
+// Fortifications : un chantier qui fortifie une bande de cellules de son territoire.
+/** Demi-largeur de la bande fortifiée le long d'une ligne tracée, en cellules. */
+export const FORT_HALF_WIDTH = 2;
+/** Profondeur fortifiée derrière un front, en cellules. */
+export const FORT_FRONT_DEPTH = 3;
+export const MAX_FORT_LINE_LENGTH = 150;
+export const MAX_FORT_CELLS = 2500;
+/** Points de construction par cellule fortifiée. */
+export const FORT_COST_PER_CELL = 0.6;
+/** Malus de l'assaillant sur une cellule fortifiée, en log du rapport de force. */
+export const FORT_DEFENSE = 1;
+/** Une cellule fortifiée tombe ce nombre de fois moins vite. */
+export const FORT_SPEED = 0.6;
+/** L'IA fortifie un front où elle est en sous-nombre, si la bande est assez grande. */
+export const AI_FORT_MIN_CELLS = 40;
+
+// Réserve de contre-attaque : une part de l'armée gardée pour couper les percées ennemies.
+export const MAX_COUNTER_SHARE = 0.5;
+export const AI_COUNTER_SHARE = 0.25;
+/** Une percée ennemie est contrée dès qu'elle a pris ce nombre de cellules sur le sol national. */
+export const COUNTER_MIN_CAPTURED = 25;
+/** La contre-attaque frappe la percée à cette part de sa profondeur, près de sa base. */
+export const COUNTER_DEPTH = 0.4;
+/** Écart entre le couloir ennemi et le départ de la contre-attaque, en plus de sa demi-largeur. */
+export const COUNTER_OFFSET = 8;
+export const COUNTER_MAX_ATTEMPTS = 3;
+
+// Secteurs prioritaires : les forces d'un front s'y concentrent, au détriment du reste.
+export const MAX_PRIORITY_ZONES = 3;
+export const PRIORITY_RADIUS = 25;
+/** Densité gagnée dans un secteur prioritaire ; le reste du front la paie. */
+export const PRIORITY_BOOST = 0.6;
+/** Au-delà de cette part du front en secteurs prioritaires, la concentration n'a plus de sens. */
+export const MAX_PRIORITY_SHARE = 0.5;

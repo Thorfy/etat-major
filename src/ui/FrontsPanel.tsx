@@ -1,9 +1,10 @@
 import { GAME_SPEEDS, type GameClient, SPEED_LABELS } from '../game/GameClient.ts';
 import { formatDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
-import type { MapView } from '../render/MapView.ts';
+import type { MapTool, MapView } from '../render/MapView.ts';
 import type { BuildKind, FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { LOW_SUPPLY } from '../game/GameClient.ts';
+import { MAX_COUNTER_SHARE, MAX_PRIORITY_ZONES } from '../sim/balance.ts';
 import { effortEffect } from '../game/economy.ts';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
@@ -106,6 +107,7 @@ const BUILD_NAMES: Record<BuildKind, string> = {
   factory: 'Usine',
   infrastructure: 'Infrastructure',
   depot: 'Dépôt',
+  fort: 'Fortifications',
 };
 
 /** Hommes, stabilité, ressources et chantiers. */
@@ -141,7 +143,8 @@ function HomeFront({ game }: { game: GameClient }) {
             <li key={`${order.province}-${order.kind}-${index}`}>
               <div class="offensive-row">
                 <span>
-                  {BUILD_NAMES[order.kind]} <small>· {provinces[order.province - 1].name}</small>
+                  {BUILD_NAMES[order.kind]}{' '}
+                  <small>· {order.kind === 'fort' ? `${integer.format(order.cellCount)} cellules` : provinces[order.province - 1].name}</small>
                 </span>
                 <button class="close-inline" aria-label="Annuler ce chantier" onClick={() => game.cancelBuild(index)}>
                   ×
@@ -158,7 +161,65 @@ function HomeFront({ game }: { game: GameClient }) {
   );
 }
 
-function OffensivesSection({ game, nations, view, aiming }: { game: GameClient; nations: NationData[]; view: MapView; aiming: boolean }) {
+/** Préparer la défense : lignes fortifiées, secteurs prioritaires, réserve de contre-attaque. */
+function DefenseSection({ game, view, tool }: { game: GameClient; view: MapView; tool: MapTool | null }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
+  const zones = stats.priorityZones;
+  const counter = game.counterShare;
+  const counterForce = stats.army * counter;
+  const toggle = (wanted: MapTool) => view.setTool(tool === wanted ? null : wanted);
+  return (
+    <section class="defense">
+      <h3>Défense</h3>
+      <button class={`action ${tool === 'fort' ? 'armed' : ''}`} aria-pressed={tool === 'fort'} onClick={() => toggle('fort')}>
+        {tool === 'fort' ? 'Glisse le long de la ligne à fortifier' : 'Tracer une ligne fortifiée'}
+      </button>
+      <button
+        class={`action ${tool === 'priority' ? 'armed' : ''}`}
+        aria-pressed={tool === 'priority'}
+        disabled={zones.length >= MAX_PRIORITY_ZONES && tool !== 'priority'}
+        onClick={() => toggle('priority')}
+      >
+        {tool === 'priority' ? 'Clique le secteur à tenir en priorité' : `Secteur prioritaire (${zones.length}/${MAX_PRIORITY_ZONES})`}
+      </button>
+      {zones.map((zone, index) => (
+        <div class="offensive-row" key={`${zone.x}-${zone.y}`}>
+          <span>
+            Secteur {index + 1} <small>· tes forces s'y concentrent</small>
+          </span>
+          <button class="close-inline" aria-label="Retirer ce secteur prioritaire" onClick={() => game.removePriority(index)}>
+            ×
+          </button>
+        </div>
+      ))}
+      <label class="allocation">
+        <span>
+          Réserve de contre-attaque <b>{formatPercent(counter)} · {integer.format(counterForce)}</b>
+        </span>
+        <input
+          type="range"
+          min="0"
+          max={Math.round(MAX_COUNTER_SHARE * 100)}
+          step="5"
+          value={Math.round(counter * 100)}
+          aria-label="Réserve de contre-attaque"
+          onInput={(event) => game.setCounterShare(Number(event.currentTarget.value) / 100)}
+        />
+      </label>
+      <p class="front-note">
+        {counter > 0
+          ? stats.reserve < counterForce * 0.5
+            ? 'Ta réserve est trop maigre : baisse les forces engagées sur les fronts.'
+            : 'Une percée ennemie sur ton sol sera prise en tenaille à sa base.'
+          : 'Garde une part de ton armée pour contrer d\'elle-même les percées ennemies.'}
+      </p>
+    </section>
+  );
+}
+
+function OffensivesSection({ game, nations, view, tool }: { game: GameClient; nations: NationData[]; view: MapView; tool: MapTool | null }) {
+  const aiming = tool === 'offensive';
   const offensives = game.playerOffensives();
   const committed = (game.playerStats?.reserve ?? 0) * game.offensiveShare;
   const enemyOffensives = (game.snapshot?.offensives ?? []).filter(
@@ -301,6 +362,11 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
           </>
         )}
       </dl>
+      {!noContact && (
+        <button class="action quiet fortify" onClick={() => game.fortifyFront(enemyId)}>
+          Fortifier ce front
+        </button>
+      )}
     </article>
   );
 }
@@ -309,10 +375,10 @@ interface FrontsPanelProps {
   game: GameClient;
   nations: NationData[];
   view: MapView;
-  aiming: boolean;
+  tool: MapTool | null;
 }
 
-export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
+export function FrontsPanel({ game, nations, view, tool }: FrontsPanelProps) {
   if (game.error) {
     return <div class="panel fronts"><p class="front-note">Simulation arrêtée : {game.error}</p></div>;
   }
@@ -362,7 +428,8 @@ export function FrontsPanel({ game, nations, view, aiming }: FrontsPanelProps) {
       {game.canCommand && fronts.length === 0 && (
         <p class="front-note peace">Tu es en paix. Clique sur un pays pour lui déclarer la guerre.</p>
       )}
-      {game.canCommand && <OffensivesSection game={game} nations={nations} view={view} aiming={aiming} />}
+      {game.canCommand && <DefenseSection game={game} view={view} tool={tool} />}
+      {game.canCommand && <OffensivesSection game={game} nations={nations} view={view} tool={tool} />}
       {game.canCommand && fronts.map((front) => (
         <FrontCard key={`${front.a}-${front.b}`} game={game} front={front} nations={nations} />
       ))}

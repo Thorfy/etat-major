@@ -4,6 +4,8 @@ import type { OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import type { Camera } from './Camera.ts';
 
 export interface ArrowDraft {
+  /** Flèche d'offensive, ou ligne fortifiée en projet. */
+  kind: 'arrow' | 'fort';
   fromX: number;
   fromY: number;
   toX: number;
@@ -96,6 +98,60 @@ export function drawResources(ctx: CanvasRenderingContext2D, camera: Camera, mar
   }
 }
 
+/** Ligne fortifiée en projet : un trait épais à dents, comme sur une carte d'état-major. */
+function drawFortLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, valid: boolean): void {
+  const length = Math.hypot(x1 - x0, y1 - y0);
+  if (length < 2) return;
+  const ux = (x1 - x0) / length;
+  const uy = (y1 - y0) / length;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = valid ? 'rgba(35, 38, 40, 0.9)' : `rgba(${ENEMY_COLOR}, 0.9)`;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  // Des dents tournées vers l'ennemi supposé : à gauche du sens du tracé.
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let d = 6; d < length; d += 12) {
+    const x = x0 + ux * d;
+    const y = y0 + uy * d;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + uy * 9, y - ux * 9);
+  }
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+}
+
+/** Secteurs prioritaires du joueur : cercles tiretés. */
+export function drawPriorityZones(ctx: CanvasRenderingContext2D, camera: Camera, zones: readonly { x: number; y: number }[], radius: number): void {
+  const { viewWidth, viewHeight, zoom } = camera;
+  for (const zone of zones) {
+    const x = wrapDeltaX(camera.x, zone.x) * zoom + viewWidth / 2;
+    const y = (zone.y - camera.y) * zoom + viewHeight / 2;
+    const r = radius * zoom;
+    if (x < -r || x > viewWidth + r || y < -r || y > viewHeight + r) continue;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.setLineDash([8, 6]);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = `rgba(${OWN_COLOR}, 0.95)`;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (r >= 26) {
+      ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(20, 22, 24, 0.85)';
+      ctx.fillStyle = `rgb(${OWN_COLOR})`;
+      ctx.strokeText('PRIORITÉ', x, y - r - 9);
+      ctx.fillText('PRIORITÉ', x, y - r - 9);
+    }
+  }
+}
+
 export function drawCampaign(
   ctx: CanvasRenderingContext2D,
   camera: Camera,
@@ -151,7 +207,13 @@ export function drawCampaign(
     drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, fill, own || enemy ? 0.8 : 0.35, offensive.inTransit);
   }
 
-  if (draft) {
+  if (draft && draft.kind === 'fort') {
+    const x0 = toScreenX(draft.fromX);
+    const y0 = toScreenY(draft.fromY);
+    const x1 = x0 + wrapDeltaX(draft.fromX, draft.toX) * zoom;
+    const y1 = y0 + (draft.toY - draft.fromY) * zoom;
+    drawFortLine(ctx, x0, y0, x1, y1, draft.valid);
+  } else if (draft) {
     const x0 = toScreenX(draft.fromX);
     const y0 = toScreenY(draft.fromY);
     const dx = wrapDeltaX(draft.fromX, draft.toX) * zoom;

@@ -439,13 +439,15 @@ canvas {
   font-weight: 600;
 }
 
-.offensives {
+.offensives,
+.defense {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--panel-line);
 }
 
-.offensives h3 {
+.offensives h3,
+.defense h3 {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 600;
@@ -453,6 +455,18 @@ canvas {
 
 .offensives .action {
   margin-top: 0;
+}
+
+.defense .action {
+  margin: 0 0 6px;
+}
+
+.defense .offensive-row {
+  margin-bottom: 4px;
+}
+
+.front .fortify {
+  margin-top: 8px;
 }
 
 .action.armed {

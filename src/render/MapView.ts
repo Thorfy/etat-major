@@ -7,11 +7,15 @@ import { traceRoute } from '../sim/route.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
-import { type ArrowDraft, type ResourceMarker, drawCampaign, drawResources } from './Overlay.ts';
+import { MAX_FORT_LINE_LENGTH, PRIORITY_RADIUS } from '../sim/balance.ts';
+import { type ArrowDraft, type ResourceMarker, drawCampaign, drawPriorityZones, drawResources } from './Overlay.ts';
 
 const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
+
+/** Outil armé sur la carte : tracer une offensive, une ligne fortifiée, placer un secteur. */
+export type MapTool = 'offensive' | 'fort' | 'priority';
 
 /** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
 export type MapMode = 'political' | 'economic' | 'supply';
@@ -31,7 +35,9 @@ export interface MapEvents {
   onSelect(cell: CellInfo): void;
   onToggleDebug(): void;
   onOffensive(fromX: number, fromY: number, toX: number, toY: number): void;
-  onAimingChange(aiming: boolean): void;
+  onFort(fromX: number, fromY: number, toX: number, toY: number): void;
+  onPriority(x: number, y: number): void;
+  onToolChange(tool: MapTool | null): void;
 }
 
 const NO_CELL: CellInfo = { province: 0, owner: 0, terrain: 0, supply: 1 };
@@ -72,7 +78,8 @@ export class MapView {
   private pockets: readonly PocketSnapshot[] = [];
   private draft: ArrowDraft | null = null;
   private draftPointer = -1;
-  private aimingMode = false;
+  private tool: MapTool | null = null;
+  private priorityZones: readonly { x: number; y: number }[] = [];
   private commandEnabled = false;
   private selectedProvince = 0;
   private selectedOwner = 0;
@@ -139,6 +146,12 @@ export class MapView {
     if (this.mode === 'economic') this.dirty = true;
   }
 
+  applyFortChanges(cells: Uint32Array, values: Uint8Array): void {
+    if (cells.length === 0) return;
+    this.renderer.updateForts(cells, values);
+    this.dirty = true;
+  }
+
   applySupplyChanges(cells: Uint32Array, values: Uint8Array): void {
     if (cells.length === 0) return;
     this.renderer.updateSupply(cells, values);
@@ -165,6 +178,20 @@ export class MapView {
     this.dirty = true;
   }
 
+  /** Ligne fortifiée en projet : droite, et bornée à sa longueur maximale. */
+  private planLine(fromX: number, fromY: number, endX: number, endY: number): { toX: number; toY: number; valid: boolean } {
+    const { width } = this.world.data;
+    const dx = wrapDeltaX(fromX, endX);
+    const dy = endY - fromY;
+    const length = Math.hypot(dx, dy);
+    const scale = length > MAX_FORT_LINE_LENGTH ? MAX_FORT_LINE_LENGTH / length : 1;
+    return {
+      toX: ((fromX + Math.round(dx * scale)) % width + width) % width,
+      toY: fromY + Math.round(dy * scale),
+      valid: this.isOwnCell(fromX, fromY),
+    };
+  }
+
   /** Trajet d'une flèche : portée réelle, et débarquement ou non. */
   private planArrow(fromX: number, fromY: number, endX: number, endY: number): { toX: number; toY: number; amphibious: boolean } {
     const { width, height } = this.world.data;
@@ -187,15 +214,27 @@ export class MapView {
     this.dirty = true;
   }
 
-  get aiming(): boolean {
-    return this.aimingMode;
+  get activeTool(): MapTool | null {
+    return this.tool;
   }
 
+  /** Arme un outil (ou le désarme avec null) ; un clic gauche l'utilise. */
+  setTool(tool: MapTool | null): void {
+    if (tool === this.tool) return;
+    this.tool = tool;
+    if (!tool) this.cancelDraft();
+    this.canvas.classList.toggle('aiming', tool !== null);
+    this.events.onToolChange(tool);
+  }
+
+  /** Compatibilité : l'outil d'offensive. */
   setAiming(aiming: boolean): void {
-    if (aiming === this.aimingMode) return;
-    this.aimingMode = aiming;
-    this.canvas.classList.toggle('aiming', aiming);
-    this.events.onAimingChange(aiming);
+    this.setTool(aiming ? 'offensive' : null);
+  }
+
+  setPriorityZones(zones: readonly { x: number; y: number }[]): void {
+    this.priorityZones = zones;
+    this.dirty = true;
   }
 
   private cancelDraft(): void {
@@ -270,11 +309,20 @@ export class MapView {
 
     canvas.addEventListener('pointerdown', (event) => {
       canvas.setPointerCapture(event.pointerId);
-      const wantsArrow = this.commandEnabled && (event.button === 2 || (this.aimingMode && event.button === 0));
-      if (wantsArrow) {
+      const wantsFort = this.commandEnabled && this.tool === 'fort' && event.button === 0;
+      const wantsArrow = this.commandEnabled && !wantsFort && (event.button === 2 || (this.tool === 'offensive' && event.button === 0));
+      if (wantsArrow || wantsFort) {
         const start = this.camera.screenToCell(event.clientX, event.clientY);
         if (start) {
-          this.draft = { fromX: start.x, fromY: start.y, toX: start.x, toY: start.y, valid: this.isOwnCell(start.x, start.y), amphibious: false };
+          this.draft = {
+            kind: wantsFort ? 'fort' : 'arrow',
+            fromX: start.x,
+            fromY: start.y,
+            toX: start.x,
+            toY: start.y,
+            valid: this.isOwnCell(start.x, start.y),
+            amphibious: false,
+          };
           this.draftPointer = event.pointerId;
           this.zoomTarget = null;
           this.dirty = true;
@@ -293,8 +341,11 @@ export class MapView {
       if (this.draft && event.pointerId === this.draftPointer) {
         const end = this.camera.screenToCell(event.clientX, event.clientY);
         if (end) {
-          // Le tracé montre la portée réelle : au-delà, la flèche s'arrête.
-          this.draft = { ...this.draft, ...this.planArrow(this.draft.fromX, this.draft.fromY, end.x, end.y) };
+          // Le tracé montre la portée réelle : au-delà, la flèche (ou la ligne) s'arrête.
+          this.draft =
+            this.draft.kind === 'fort'
+              ? { ...this.draft, ...this.planLine(this.draft.fromX, this.draft.fromY, end.x, end.y) }
+              : { ...this.draft, ...this.planArrow(this.draft.fromX, this.draft.fromY, end.x, end.y) };
           this.dirty = true;
         }
         return;
@@ -325,12 +376,13 @@ export class MapView {
 
     const release = (event: PointerEvent) => {
       if (this.draft && event.pointerId === this.draftPointer) {
-        const { fromX, fromY, toX, toY } = this.draft;
+        const { kind, fromX, fromY, toX, toY } = this.draft;
         this.cancelDraft();
         const length = Math.hypot(wrapDeltaX(fromX, toX), toY - fromY);
         if (event.type === 'pointerup' && length >= MIN_ARROW_CELLS) {
-          this.events.onOffensive(fromX, fromY, toX, toY);
-          this.setAiming(false);
+          if (kind === 'fort') this.events.onFort(fromX, fromY, toX, toY);
+          else this.events.onOffensive(fromX, fromY, toX, toY);
+          this.setTool(null);
         }
         return;
       }
@@ -338,7 +390,13 @@ export class MapView {
       this.pinchDistance = 0;
       if (this.pointers.size === 0) canvas.classList.remove('dragging');
       if (event.type === 'pointerup' && this.dragDistance < CLICK_TOLERANCE_PX) {
-        this.select(this.cellAt(event.clientX, event.clientY));
+        const cell = this.camera.screenToCell(event.clientX, event.clientY);
+        if (this.tool === 'priority' && cell) {
+          this.events.onPriority(cell.x, cell.y);
+          this.setTool(null);
+        } else {
+          this.select(this.cellAt(event.clientX, event.clientY));
+        }
       }
     };
     canvas.addEventListener('pointerup', release);
@@ -372,7 +430,7 @@ export class MapView {
         this.events.onToggleDebug();
       } else if (key === 'escape') {
         if (this.draft) this.cancelDraft();
-        else if (this.aimingMode) this.setAiming(false);
+        else if (this.tool) this.setTool(null);
         else this.select();
       } else if (key === '+' || key === '=' || key === '-') {
         const from = this.zoomTarget?.zoom ?? this.camera.zoom;
@@ -432,6 +490,7 @@ export class MapView {
       this.labels.draw(this.camera);
       if (this.mode === 'economic') drawResources(this.labels.context, this.camera, this.resourceMarkers);
       if (this.player !== 0) {
+        drawPriorityZones(this.labels.context, this.camera, this.priorityZones, PRIORITY_RADIUS);
         drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
       }
       this.dirty = false;

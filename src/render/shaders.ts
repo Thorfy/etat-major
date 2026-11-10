@@ -23,6 +23,7 @@ uniform sampler2D uWars;
 uniform sampler2D uTerrain;
 uniform sampler2D uEconomy;
 uniform sampler2D uSupply;
+uniform sampler2D uFort;
 uniform uint uMapMode;      // 0 : politique, 1 : économique, 2 : ravitaillement
 uniform vec2 uCenter;
 uniform vec2 uResolution;
@@ -51,6 +52,8 @@ const vec3 ECONOMY_LOW = vec3(0.866, 0.835, 0.745);
 const vec3 ECONOMY_MID = vec3(0.788, 0.502, 0.302);
 const vec3 ECONOMY_HIGH = vec3(0.420, 0.106, 0.075);
 // Ravitaillement du territoire conquis : vert s'il suit, rouge s'il est coupé.
+// Fortifications : un quadrillage sombre, comme des barbelés sur une carte d'état-major.
+const vec3 FORT_COLOR = vec3(0.137, 0.149, 0.157);
 const vec3 SUPPLY_GOOD = vec3(0.333, 0.588, 0.314);
 const vec3 SUPPLY_LOW = vec3(0.886, 0.643, 0.212);
 const vec3 SUPPLY_CUT = vec3(0.776, 0.188, 0.149);
@@ -183,6 +186,12 @@ vec3 shade(vec2 p, float gratAlpha) {
       // Plus discrètes sur la carte du ravitaillement, pour ne pas en brouiller la teinte.
       float hatch = uMapMode == 2u ? 0.18 : 0.55;
       color = mix(color, texelFetch(uPalette, ivec2(int(home), 0), 0).rgb, hatch * stripe);
+    }
+    float fort = texelFetch(uFort, wrapCell(ivec2(floor(p))), 0).r;
+    if (fort > 0.0) {
+      vec2 g = gl_FragCoord.xy / 5.0;
+      float mesh = max(step(0.72, fract(g.x + g.y)), step(0.72, fract(g.x - g.y)));
+      color = mix(color, FORT_COLOR, (0.18 + 0.42 * mesh) * fort);
     }
     color = mix(color, NATION_LINE, 0.07 * gratAlpha);
     if (owner == uSelectedOwner) color = mix(color, vec3(1.0), 0.20);

@@ -62,6 +62,70 @@ les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauve
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
 
+## État du jalon 7
+
+Terminé : une défense préparée arrête une attaque qui aurait percé sans elle. Sur une bande de
+test, la même percée contre un défenseur deux fois moins riche prend 404 cellules sans
+préparation, et 6 seulement contre un front fortifié. **Le test de plaisir reste ouvert** :
+personne n'a encore joué à la main.
+
+**Lignes fortifiées.** Un nouveau type de chantier, payé en points de construction (0,6 par
+cellule) :
+
+- **Tracer une ligne** (section Défense, puis glisser sur la carte) : une bande de 5 cellules de
+  large, 150 cellules de long au plus, sur ton seul territoire. Elle prépare une défense en
+  profondeur derrière le front.
+- **Fortifier ce front** (dans la carte de chaque front) : la bande de 3 cellules de profondeur
+  le long de la frontière avec cet ennemi.
+- **Effets :** une cellule fortifiée retire 1 au log du rapport de force de l'assaillant, et tombe
+  1,7 fois moins vite. Une cellule prise perd sa fortification. Le quadrillage sombre des
+  cellules fortifiées se voit sur toutes les cartes.
+- **Limites :** une ligne ne tient que si on y laisse des forces (avec 65 % des forces au front
+  au lieu de 100 %, la même percée passe : 580 cellules). Face à un assaillant bien plus fort
+  (défenseur cinq fois moins riche), elle ne suffit pas (649 cellules contre 622 sans).
+
+**Réserve de contre-attaque.** Un curseur de 0 à 50 % de l'armée. Quand une offensive ennemie a
+pris 25 cellules sur ton sol, la simulation lance d'elle-même une tenaille : une contre-offensive
+de chaque flanc vers l'axe de la percée, à 40 % de sa profondeur, pour la couper près de sa base.
+Chaque percée n'est contrée qu'une fois. La réserve doit exister : sans forces hors des fronts,
+rien ne part. À réserve égale, gardée inactive ou lancée d'elle-même, le gain de l'assaillant
+baisse d'un quart (589 cellules contre 438). Un message annonce chaque contre-attaque.
+
+**Secteurs prioritaires.** Trois au plus, placés d'un clic sur ton territoire : des disques de
+25 cellules de rayon où le défenseur gagne 60 % de densité. Le reste du front la paie : la part
+du front en secteur prioritaire, plafonnée à moitié, s'y retranche d'autant. Sur l'axe d'une
+percée, un secteur la divise par deux (187 cellules contre 404).
+
+**IA.** En guerre, elle garde 25 % de son armée en réserve de contre-attaque. Sur un front où
+l'ennemi a plus de forces qu'elle, elle met en chantier, en tête de file, la fortification de ce
+front (40 cellules au moins). Une première version la mettait en fin de file : sa file, pleine
+d'usines bâties en paix, ne laissait passer que 25 cellules fortifiées en une heure de partie
+mondiale ; il y en a désormais environ 1 800. Elle ne place pas de secteur prioritaire.
+
+**Sauvegarde.** Version 5 : la grille des fortifications rejoint le fichier, avec les secteurs et
+les réserves. Les sauvegardes des versions 1 à 4 sont mises à jour au chargement (testé).
+
+**Mesures.**
+
+| Mesure | Résultat |
+|---|---|
+| Pire cas, guerre mondiale, 10 semaines de jeu | Médiane 9,2 ms, p99 62 ms, **max 80 ms** (jalon 6 : 75 ms) |
+| Monde sans joueur, 60 semaines | 132 nations sur 193 (137 avant les fortifications d'urgence de l'IA) ; tick max 56 ms |
+| Navigateur | Front fortifié d'un bouton, ligne tracée à la souris, secteur posé d'un clic, réserve réglée |
+| Tests | 125 réussis, dont 8 sur la défense planifiée |
+
+Points à reprendre :
+
+- **Équilibre à éprouver par un joueur.** Une ligne fortifiée tenue à plein arrête presque tout
+  assaillant de force voisine. C'est voulu (« la défense préparée arrête l'attaque »), mais peut
+  figer les fronts : à surveiller avec les duels, non refaits pour ce jalon.
+- **Contre-attaques prudentes :** une seule tenaille par percée, à un seul point. Pas de
+  contre-attaque contre une percée sur un territoire déjà occupé, seulement sur le sol national
+  ou la cible visée.
+- **Pas d'outil pour retirer une ligne fortifiée** une fois bâtie, ni pour la réparer à
+  l'identique : il faut la retracer.
+- **L'IA ne trace pas de lignes en profondeur** ni de secteurs prioritaires.
+
 ## État du jalon 6
 
 Terminé : attaquer en boucle épuise le pays. Dans les duels scriptés, l'Allemagne qui lance

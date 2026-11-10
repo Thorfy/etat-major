@@ -36,6 +36,9 @@ export class MapRenderer {
   private query: WebGLQuery | null = null;
   private readonly dirtyTiles = new Set<number>();
   private readonly supplyTiles = new Set<number>();
+  private readonly fortTiles = new Set<number>();
+  /** Fortification de chaque cellule, comme dans la simulation. */
+  readonly forts: Uint8Array;
   /** Ravitaillement de chaque cellule, comme dans la simulation (0 : plein). */
   readonly supply: Uint8Array;
   private readonly homes: Uint16Array;
@@ -55,6 +58,7 @@ export class MapRenderer {
     this.world = world;
     this.homes = new Uint16Array(world.data.provinces.length + 1);
     this.supply = new Uint8Array(world.data.width * world.data.height);
+    this.forts = new Uint8Array(world.data.width * world.data.height);
     this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2');
     this.setup();
   }
@@ -72,7 +76,7 @@ export class MapRenderer {
     gl.bindVertexArray(gl.createVertexArray());
     for (const name of [
       'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
-      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply',
+      'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply', 'uFort',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
@@ -104,6 +108,18 @@ export class MapRenderer {
     this.bindDataTexture(6, 'uTerrain', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, world.terrainGrid);
     this.bindDataTexture(7, 'uEconomy', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
     this.bindDataTexture(8, 'uSupply', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.supply);
+    this.bindDataTexture(9, 'uFort', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.forts);
+  }
+
+  updateForts(cells: Uint32Array, values: Uint8Array): void {
+    const { width } = this.world.data;
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      this.forts[cell] = values[i];
+      const x = cell % width;
+      const y = (cell - x) / width;
+      this.fortTiles.add((y >> TILE_SHIFT) * 65536 + (x >> TILE_SHIFT));
+    }
   }
 
   /** Reporte les changements de ravitaillement ; l'envoi au GPU se fait au prochain rendu. */
@@ -174,6 +190,7 @@ export class MapRenderer {
     this.flushTiles(this.dirtyTiles, 0, this.world.ownerGrid, this.gl.RED_INTEGER, this.gl.UNSIGNED_SHORT);
     // Le ravitaillement ne se voit que sur sa carte : inutile de l'envoyer avant.
     if (this.mapMode === 2) this.flushTiles(this.supplyTiles, 8, this.supply, this.gl.RED, this.gl.UNSIGNED_BYTE);
+    this.flushTiles(this.fortTiles, 9, this.forts, this.gl.RED, this.gl.UNSIGNED_BYTE);
   }
 
   private flushTiles(tiles: Set<number>, unit: number, grid: ArrayBufferView, format: number, type: number): void {

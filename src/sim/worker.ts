@@ -52,6 +52,8 @@ function send(tickMs: number, withSnapshot: boolean, withEconomy = false): void 
     changes.homes.buffer,
     changes.supplyCells.buffer,
     changes.supplyValues.buffer,
+    changes.fortCells.buffer,
+    changes.fortValues.buffer,
   ];
   if (economy) transfer.push(...Object.values(economy).map((array: Float32Array) => array.buffer));
   scope.postMessage(update, transfer);
@@ -96,10 +98,10 @@ scope.onmessage = (event) => {
   } else if (message.type === 'save') {
     if (!sim) return;
     const save = sim.save();
-    scope.postMessage({ type: 'saved', requestId: message.requestId, save }, [save.owners.buffer, save.supply.buffer]);
+    scope.postMessage({ type: 'saved', requestId: message.requestId, save }, [save.owners.buffer, save.supply.buffer, save.forts.buffer]);
   } else if (sim) {
     sim.apply(message.command);
     // En pause, le joueur doit voir tout de suite l'effet de ses ordres.
-    send(0, true, message.command.type === 'setEffort' || message.command.type === 'build' || message.command.type === 'cancelBuild');
+    send(0, true, message.command.type !== 'setFront' && message.command.type !== 'launchOffensive');
   }
 };

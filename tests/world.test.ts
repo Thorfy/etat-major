@@ -484,7 +484,7 @@ describe('sauvegarde', () => {
 
     // Aller-retour par JSON, comme dans un vrai fichier.
     const raw = original.save();
-    const saved = { owners: raw.owners, supply: raw.supply, state: JSON.parse(JSON.stringify(raw.state)) };
+    const saved = { owners: raw.owners, supply: raw.supply, forts: raw.forts, state: JSON.parse(JSON.stringify(raw.state)) };
 
     const resumed = new Simulation({ ...config(), saved });
     expect(resumed.tick).toBe(original.tick);
@@ -533,12 +533,17 @@ describe('sauvegarde', () => {
         'oilCoverage', 'steelCoverage', 'blockaded', 'factories', 'infrastructure', 'depots', 'queues', 'buildProgress',
         'constructionRate',
       ],
+      5: ['counterShare', 'counterAttempts', 'priorityZones'],
     };
     const gzip = async (parts: BlobPart[]) =>
       new Blob([await new Response(new Blob(parts).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()]);
-    for (const version of [1, 2, 3]) {
+    for (const version of [1, 2, 3, 4]) {
       const state = JSON.parse(JSON.stringify(current.state));
-      for (let later = version + 1; later <= 4; later++) for (const key of added[later] ?? []) delete state[key];
+      for (let later = version + 1; later <= 5; later++) for (const key of added[later] ?? []) delete state[key];
+      if (version < 5) {
+        for (const front of state.fronts) for (const side of front.sides) delete side.priority;
+        for (const offensive of state.offensives) delete offensive.counter;
+      }
       if (version < 3) {
         // Avant la version 3 : poches en une seule liste, indicateur booléen, pas de ravitaillement.
         state.pocketList = state.pocketLists.flat();

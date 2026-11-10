@@ -3,12 +3,23 @@
 
 export type Stance = 'attack' | 'hold' | 'retreat';
 
-/** Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement). */
-export type BuildKind = 'factory' | 'infrastructure' | 'depot';
+/**
+ * Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement),
+ * fortifications (une bande de cellules, sans province).
+ */
+export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort';
 
 export interface BuildOrder {
   province: number;
   kind: BuildKind;
+  /** Cellules à fortifier, pour un chantier de fortifications. */
+  cells?: number[];
+}
+
+/** Secteur prioritaire : un disque de la carte où les forces d'un front se concentrent. */
+export interface PriorityZone {
+  x: number;
+  y: number;
 }
 
 export type SimCommand =
@@ -19,7 +30,12 @@ export type SimCommand =
   /** Effort de guerre voulu, de 0 à 1 : l'économie s'y reconvertit progressivement. */
   | { type: 'setEffort'; nation: number; effort: number }
   | { type: 'build'; nation: number; province: number; kind: BuildKind }
-  | { type: 'cancelBuild'; nation: number; index: number };
+  | { type: 'cancelBuild'; nation: number; index: number }
+  | { type: 'fortifyLine'; nation: number; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: 'fortifyFront'; nation: number; enemy: number }
+  | { type: 'setCounterShare'; nation: number; share: number }
+  | { type: 'addPriority'; nation: number; x: number; y: number }
+  | { type: 'removePriority'; nation: number; index: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -37,6 +53,8 @@ export interface FrontSideSnapshot {
   captured: number;
   /** Ravitaillement moyen de ses cellules de front, de 0 à 1. */
   supply: number;
+  /** Part de ses cellules de front en secteur prioritaire. */
+  priority: number;
 }
 
 export interface NationSnapshot {
@@ -68,7 +86,11 @@ export interface NationSnapshot {
   /** Points de construction par minute. */
   construction: number;
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
-  builds: (BuildOrder & { cost: number; progress: number })[];
+  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number }[];
+  /** Part de l'armée gardée pour les contre-attaques. */
+  counterShare: number;
+  /** Secteurs prioritaires (joueur seulement). */
+  priorityZones: PriorityZone[];
 }
 
 /** Économie du monde entier, envoyée moins souvent que le reste. */
@@ -105,6 +127,8 @@ export interface OffensiveSnapshot {
   inTransit: boolean;
   /** Ravitaillement de son couloir, de 0 à 1. */
   supply: number;
+  /** Lancée d'elle-même par la réserve de contre-attaque. */
+  counter: boolean;
 }
 
 export interface PocketSnapshot {
@@ -169,6 +193,9 @@ export interface WorkerUpdate {
   /** Cellules dont le ravitaillement a changé, et leur nouvelle valeur (0 : plein). */
   supplyCells: Uint32Array;
   supplyValues: Uint8Array;
+  /** Cellules dont la fortification a changé, et leur nouvelle valeur (0 : aucune). */
+  fortCells: Uint32Array;
+  fortValues: Uint8Array;
   events: SimEvent[];
   labels: NationLabel[];
   snapshot: SimSnapshot | null;
@@ -190,6 +217,8 @@ export interface SimSave {
   owners: Uint16Array;
   /** Ravitaillement de chaque cellule, tel que le dernier calcul l'a laissé. */
   supply: Uint8Array;
+  /** Fortification de chaque cellule. */
+  forts: Uint8Array;
   state: SimSaveState;
 }
 
@@ -206,7 +235,7 @@ export interface SimSaveState {
     length: number;
     logRatio: number;
     flipBudget: number;
-    sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number; supply: number }[];
+    sides: { allocation: number; stance: Stance; force: number; captured: number; rawDensity: number; density: number; supply: number; priority: number }[];
   }[];
   offensives: {
     id: number;
@@ -231,6 +260,7 @@ export interface SimSaveState {
     supply: number;
     supplySum: number;
     supplyCount: number;
+    counter: boolean;
   }[];
   frontier: number[];
   sectors: number[];
@@ -273,4 +303,8 @@ export interface SimSaveState {
   queues: BuildOrder[][];
   buildProgress: number[];
   constructionRate: number[];
+  counterShare: number[];
+  /** Tentatives de contre-attaque déjà faites : [nation, offensive ennemie, tentatives]. */
+  counterAttempts: [number, number, number][];
+  priorityZones: PriorityZone[][];
 }
