@@ -296,6 +296,11 @@ soulevée n'ouvre pas de seconde fenêtre. Les fenêtres suivantes attendent leu
 Vérifié au navigateur : deux déclarations de guerre réelles, puis une demande et une offre de paix
 simulées côté client. Pas de fenêtre pour une offensive ennemie ni pour un pacte rompu.
 
+Dixième retour (« les pays proposent la paix trop souvent, ça bloque un peu le jeu ») : une IA ne
+propose plus la paix au joueur avant 8 semaines de guerre (4 avant), puis attend 16 semaines après
+chaque offre, acceptée, refusée ou ignorée, avant la suivante. Avant, elle pouvait la reproposer
+dès la passe suivante (une chance sur trois toutes les 10 s). Le délai est sauvegardé.
+
 Points à reprendre :
 
 - **Équilibre à éprouver par un joueur :** seuils d'agressivité et de lassitude, fréquence des

@@ -404,7 +404,9 @@ export const AI_PEACE_MANPOWER = 0.25;
 /** Une IA qui tient encore presque tout son territoire et a pris plus qu'elle n'a perdu refuse. */
 export const AI_WINNING_HOME_SHARE = 0.9;
 /** L'IA propose la paix au joueur au bout de ce temps, si elle la veut. */
-export const AI_PEACE_OFFER_MIN_TICKS = 4 * WEEK;
+export const AI_PEACE_OFFER_MIN_TICKS = 8 * WEEK;
+/** Après une offre au joueur (acceptée, refusée ou ignorée), la même IA attend ce délai avant la suivante. */
+export const AI_PEACE_OFFER_COOLDOWN_TICKS = 16 * WEEK;
 export const AI_PEACE_OFFER_CHANCE = 0.3;
 export const PEACE_OFFER_TICKS = 8 * WEEK;
 

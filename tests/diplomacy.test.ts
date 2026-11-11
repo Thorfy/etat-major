@@ -125,13 +125,36 @@ describe('paix et trêves', () => {
     const sim = duel(5e5);
     sim.declareWars([[A, B]]);
     let offered = false;
+    // Une guerre qui s'enlise, et B las de la guerre : il finit par proposer la paix.
+    const internals = sim as unknown as { stability: Float64Array };
     for (let t = 0; t < 600 * 40 && !offered && sim.isAlive(B); t++) {
-      fight(sim, 1, 'attack', 'hold');
+      internals.stability[B] = 0.3;
+      fight(sim, 1, 'hold', 'hold');
       offered = sim.peaceOffersTo(A).some((offer) => offer.from === B);
     }
     expect(offered).toBe(true);
     sim.answerPeace(A, B, true);
     expect(sim.fronts).toHaveLength(0);
+  });
+
+  it("n'est reproposée au joueur qu'après un long délai, une fois refusée", () => {
+    const sim = duel(5e5);
+    sim.declareWars([[A, B]]);
+    const offers: number[] = [];
+    // Le joueur tient sans attaquer, B est las, et le joueur refuse chaque offre aussitôt.
+    const internals = sim as unknown as { stability: Float64Array };
+    for (let t = 0; t < 600 * 60 && sim.isAlive(B); t++) {
+      internals.stability[B] = 0.3;
+      fight(sim, 1, 'hold', 'hold');
+      if (sim.peaceOffersTo(A).some((offer) => offer.from === B)) {
+        offers.push(sim.tick);
+        sim.answerPeace(A, B, false);
+      }
+    }
+    expect(offers.length).toBeGreaterThanOrEqual(2);
+    // Jamais avant 8 semaines de guerre, puis 16 semaines au moins entre deux offres.
+    expect(offers[0]).toBeGreaterThanOrEqual(600 * 8);
+    for (let i = 1; i < offers.length; i++) expect(offers[i] - offers[i - 1]).toBeGreaterThanOrEqual(600 * 16);
   });
 });
 

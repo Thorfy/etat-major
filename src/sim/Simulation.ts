@@ -12,6 +12,7 @@ import {
   AI_PEACE_MANPOWER,
   AI_PEACE_OFFER_CHANCE,
   AI_PEACE_OFFER_MIN_TICKS,
+  AI_PEACE_OFFER_COOLDOWN_TICKS,
   AI_PEACE_STABILITY,
   AI_WINNING_HOME_SHARE,
   ALLIANCE_MAX_AGGRESSION,
@@ -465,6 +466,8 @@ export class Simulation {
   private readonly aggression: Float64Array;
   private readonly coalitionAgainst: Uint16Array;
   private peaceOffers: { from: number; to: number; until: number }[] = [];
+  /** Tick de la dernière offre de paix de chaque IA au joueur (très loin dans le passé : aucune). */
+  private lastPeaceOffer: Float64Array;
   /** Régions annexées qui s'agitent, par pays qui les tient. */
   private movements: MovementState[] = [];
   /** Carte de départ : de quoi faire renaître un pays annexé. */
@@ -606,6 +609,7 @@ export class Simulation {
     this.counterShare = new Float64Array(this.stride);
     this.aggression = new Float64Array(this.stride);
     this.coalitionAgainst = new Uint16Array(this.stride);
+    this.lastPeaceOffer = new Float64Array(this.stride).fill(-1e12);
     this.nationGdp = config.nations.map((nation) => nation.gdpMusd);
     this.priorityZones = Array.from({ length: this.stride }, () => []);
     this.demobilized = new Float64Array(this.stride);
@@ -1690,8 +1694,10 @@ export class Simulation {
         // L'IA propose la paix au joueur ; c'est lui qui répond.
         const ai = a === this.player ? b : a;
         if (this.tick - front.startTick < AI_PEACE_OFFER_MIN_TICKS) continue;
+        if (this.tick - this.lastPeaceOffer[ai] < AI_PEACE_OFFER_COOLDOWN_TICKS) continue;
         if (this.peaceOffers.some((offer) => offer.from === ai)) continue;
         if (this.aiWantsPeace(ai, this.player) && this.random() < AI_PEACE_OFFER_CHANCE) {
+          this.lastPeaceOffer[ai] = this.tick;
           this.peaceOffers.push({ from: ai, to: this.player, until: this.tick + PEACE_OFFER_TICKS });
           this.pendingEvents.push({ type: 'peaceOffer', tick: this.tick, from: ai, to: this.player });
         }
@@ -3707,6 +3713,7 @@ export class Simulation {
         aggression: Array.from(this.aggression),
         coalitionAgainst: Array.from(this.coalitionAgainst),
         peaceOffers: this.peaceOffers.map((offer) => ({ ...offer })),
+        lastPeaceOffer: Array.from(this.lastPeaceOffer),
         movements: this.movements.map((movement) => ({ ...movement })),
       },
     };
@@ -3788,6 +3795,7 @@ export class Simulation {
     restoreArray(this.aggression, legacy.aggression);
     if (legacy.coalitionAgainst) this.coalitionAgainst.set(legacy.coalitionAgainst);
     this.peaceOffers = (legacy.peaceOffers ?? []).map((offer) => ({ ...offer }));
+    restoreArray(this.lastPeaceOffer, legacy.lastPeaceOffer);
     this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement, invested: movement.invested ?? 0, refused: movement.refused ?? 0, care: movement.care ?? 0, ceiling: movement.ceiling ?? 0 }));
     if (saved.forts) {
       this.forts.set(saved.forts);
@@ -3856,6 +3864,7 @@ export class Simulation {
         if (this.hasTruce(n, m)) mix(this.truceUntil[n * this.stride + m]);
       }
     }
+    for (let n = 1; n < this.stride; n++) if (this.lastPeaceOffer[n] > 0) mix(this.lastPeaceOffer[n] + n);
     for (const movement of this.movements) {
       mix(movement.parent * 65536 + movement.origin);
       mix(Math.round(movement.unrest * 1e6) + movement.asked + 8 * (movement.invested ?? 0));
