@@ -4,6 +4,7 @@ import { GAME_SPEEDS, type GameClient, SPEED_LABELS } from '../game/GameClient.t
 import { formatDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapMode } from '../render/MapView.ts';
+import { Blason } from './Art.tsx';
 import { compact, formatChange, formatGdp, formatPercent, integer } from './format.ts';
 
 /** Les petites armées en entier, les grandes en abrégé : la largeur reste contenue. */
@@ -99,7 +100,7 @@ export function TopBar({ game, nation, mapMode, onMapMode }: TopBarProps) {
     <header class="panel topbar" ref={bar}>
       <div class="topbar-group identity">
         <h2 title={nation.name}>
-          <span class="swatch" style={{ background: nation.color }} />
+          <Blason nation={nation} />
           {nation.name}
         </h2>
         <time class="clock">{formatDate(game.tick)}</time>

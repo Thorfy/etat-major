@@ -113,10 +113,19 @@ export const ANNEXED_VALUE = 0.35;
 
 // Guerres déclarées par l'IA.
 export const WAR_INTERVAL_TICKS = 100;
-export const WAR_CHANCE = 0.5;
+export const WAR_CHANCE = 0.3;
 /** Nombre maximal de guerres en cours, en part des nations encore en vie. */
 export const MAX_WAR_SHARE = 0.2;
-export const WAR_CAPACITY_RATIO = 1.2;
+export const WAR_CAPACITY_RATIO = 1.4;
+/**
+ * Le joueur doit pouvoir se consacrer à son économie : l'IA ne l'attaque qu'à ce rapport de
+ * force, jamais deux fois de suite à moins de PLAYER_WAR_COOLDOWN_TICKS (26 semaines), et un
+ * joueur pacifique (agressivité sous PEACEFUL_AGGRESSION) est épargné la plupart du temps.
+ */
+export const PLAYER_WAR_RATIO = 2;
+export const PLAYER_WAR_COOLDOWN_TICKS = 26 * 600;
+export const PEACEFUL_AGGRESSION = 0.15;
+export const PEACEFUL_PLAYER_SPARED = 0.6;
 /**
  * L'IA juge la force qu'un voisin peut vraiment lui opposer : ce qu'il engage déjà sur
  * d'autres fronts n'en fait pas partie (sans descendre sous ce plancher), et un pays las ou à
@@ -125,8 +134,8 @@ export const WAR_CAPACITY_RATIO = 1.2;
 export const MIN_FREE_FORCE_SHARE = 0.25;
 export const WEARY_STRENGTH = 0.5;
 export const DRAINED_STRENGTH = 0.4;
-/** Répit du joueur en début de partie : 12 semaines, environ 3 min à vitesse normale. */
-export const PLAYER_GRACE_TICKS = 7200;
+/** Répit du joueur en début de partie : 26 semaines, environ 6 min 30 à vitesse normale. */
+export const PLAYER_GRACE_TICKS = 26 * 600;
 export const ADJACENCY_INTERVAL_TICKS = 600;
 /**
  * Voisinages par la terre puis par la mer, chacun sur un tick à part, choisi pour ne

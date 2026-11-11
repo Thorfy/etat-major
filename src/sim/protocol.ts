@@ -393,5 +393,7 @@ export interface SimSaveState {
   peaceOffers: { from: number; to: number; until: number }[];
   /** Tick de la dernière offre de paix de chaque IA au joueur. */
   lastPeaceOffer: number[];
+  /** Tick de la dernière guerre déclarée au joueur par une IA. */
+  lastWarOnPlayer?: number;
   movements: MovementState[];
 }

@@ -213,6 +213,10 @@ import {
   TERRAIN_SPEED,
   TRANSFER_RATE,
   WAR_CAPACITY_RATIO,
+  PLAYER_WAR_RATIO,
+  PLAYER_WAR_COOLDOWN_TICKS,
+  PEACEFUL_AGGRESSION,
+  PEACEFUL_PLAYER_SPARED,
   WAR_CHANCE,
   WAR_INTERVAL_TICKS,
   baseCapacity,
@@ -468,6 +472,8 @@ export class Simulation {
   private peaceOffers: { from: number; to: number; until: number }[] = [];
   /** Tick de la dernière offre de paix de chaque IA au joueur (très loin dans le passé : aucune). */
   private lastPeaceOffer: Float64Array;
+  /** Tick de la dernière guerre déclarée au joueur par une IA (très loin dans le passé : aucune). */
+  private lastWarOnPlayer = -1e12;
   /** Régions annexées qui s'agitent, par pays qui les tient. */
   private movements: MovementState[] = [];
   /** Carte de départ : de quoi faire renaître un pays annexé. */
@@ -1456,15 +1462,25 @@ export class Simulation {
     const pick = (candidates: number[]) => {
       const weak = candidates.filter((other) => {
         if (!this.alive[other]) return false;
-        if (other === this.player && this.tick < PLAYER_GRACE_TICKS) return false;
         if (this.isAllied(nation, other) || this.hasTruce(nation, other)) return false;
+        if (other === this.player) {
+          // Le joueur : seulement après son répit, pas deux guerres de suite, et à deux contre un.
+          if (this.tick < PLAYER_GRACE_TICKS || this.tick - this.lastWarOnPlayer < PLAYER_WAR_COOLDOWN_TICKS) return false;
+          return this.capacity[nation] >= this.availableStrength(other) * PLAYER_WAR_RATIO;
+        }
         return this.capacity[nation] >= this.availableStrength(other) * WAR_CAPACITY_RATIO;
       });
       return weak.length > 0 ? weak[Math.floor(this.random() * weak.length)] : 0;
     };
     const land = pick(this.landNeighbors[nation]);
     const enemy = land !== 0 ? land : this.navy[nation] > 0 ? pick(this.seaNeighbors[nation]) : 0;
-    if (enemy !== 0) this.declareWars([[nation, enemy]]);
+    if (enemy === 0) return;
+    if (enemy === this.player) {
+      // Un joueur pacifique est le plus souvent épargné.
+      if (this.aggression[enemy] < PEACEFUL_AGGRESSION && this.random() < PEACEFUL_PLAYER_SPARED) return;
+      this.lastWarOnPlayer = this.tick;
+    }
+    this.declareWars([[nation, enemy]]);
   }
 
   /**
@@ -1646,7 +1662,8 @@ export class Simulation {
     if (!this.alive[ai] || !this.alive[proposer] || this.isAllied(ai, proposer) || this.frontOf(ai, proposer)) return false;
     if (this.alliesOf(ai).length >= MAX_ALLIES) return false;
     if (this.aggression[proposer] >= ALLIANCE_MAX_AGGRESSION) return false;
-    if (this.capacity[ai] < this.capacity[proposer] * WAR_CAPACITY_RATIO) return true;
+    const ratio = proposer === this.player ? PLAYER_WAR_RATIO : WAR_CAPACITY_RATIO;
+    if (this.capacity[ai] < this.capacity[proposer] * ratio) return true;
     for (const front of this.fronts) {
       const enemy = front.a === ai ? front.b : front.b === ai ? front.a : 0;
       if (enemy !== 0 && this.frontOf(proposer, enemy)) return true;
@@ -3714,6 +3731,7 @@ export class Simulation {
         coalitionAgainst: Array.from(this.coalitionAgainst),
         peaceOffers: this.peaceOffers.map((offer) => ({ ...offer })),
         lastPeaceOffer: Array.from(this.lastPeaceOffer),
+        lastWarOnPlayer: this.lastWarOnPlayer,
         movements: this.movements.map((movement) => ({ ...movement })),
       },
     };
@@ -3796,6 +3814,7 @@ export class Simulation {
     if (legacy.coalitionAgainst) this.coalitionAgainst.set(legacy.coalitionAgainst);
     this.peaceOffers = (legacy.peaceOffers ?? []).map((offer) => ({ ...offer }));
     restoreArray(this.lastPeaceOffer, legacy.lastPeaceOffer);
+    if (typeof legacy.lastWarOnPlayer === 'number') this.lastWarOnPlayer = legacy.lastWarOnPlayer;
     this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement, invested: movement.invested ?? 0, refused: movement.refused ?? 0, care: movement.care ?? 0, ceiling: movement.ceiling ?? 0 }));
     if (saved.forts) {
       this.forts.set(saved.forts);
@@ -3865,6 +3884,7 @@ export class Simulation {
       }
     }
     for (let n = 1; n < this.stride; n++) if (this.lastPeaceOffer[n] > 0) mix(this.lastPeaceOffer[n] + n);
+    if (this.lastWarOnPlayer > 0) mix(this.lastWarOnPlayer);
     for (const movement of this.movements) {
       mix(movement.parent * 65536 + movement.origin);
       mix(Math.round(movement.unrest * 1e6) + movement.asked + 8 * (movement.invested ?? 0));

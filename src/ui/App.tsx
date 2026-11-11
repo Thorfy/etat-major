@@ -6,6 +6,7 @@ import type { LoadedWorld } from '../map/loadWorld.ts';
 import { TERRAIN_NAMES } from '../map/terrain.ts';
 import type { CellInfo, MapMode, MapTool, MapView } from '../render/MapView.ts';
 import type { BuildKind, SimEvent } from '../sim/protocol.ts';
+import { Art, Blason, landscapeOf } from './Art.tsx';
 import { SidePanel } from './SidePanel.tsx';
 import { MAP_MODES, TopBar } from './TopBar.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
@@ -179,6 +180,9 @@ function BuildOptions({ game, province, options }: { game: GameClient; province:
         </div>
       ))}
       {options.length > 0 && (
+        <Art id={`batiments/${(shown ?? options[0]).kind}`} class="build-art" />
+      )}
+      {options.length > 0 && (
         <p class="note build-effect" id="build-effect">
           {shown ? (
             <>
@@ -296,12 +300,33 @@ function popupContent(game: GameClient, popup: Popup, nameOf: (id: number) => st
 function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): string }) {
   const popup = game.popups[0];
   const content = popupContent(game, popup, nameOf);
+  const nations = game.worldData.nations;
+  // Deux variantes pour les guerres et les soulèvements, en alternance.
+  const variant = (popup.id % 2) + 1;
+  const art =
+    popup.kind === 'war'
+      ? `evenements/guerre-${variant}`
+      : popup.kind === 'uprising'
+        ? popup.coalition
+          ? 'evenements/coalition'
+          : `evenements/soulevement-${variant}`
+        : popup.kind === 'demand'
+          ? popup.demand === 'investment'
+            ? 'evenements/investissements'
+            : 'evenements/independance'
+          : 'evenements/offre-paix';
   return (
     <div class="dialog-backdrop">
       <section class={`panel dialog event ${popup.kind}`} role="alertdialog" aria-labelledby="event-title">
+        <Art id={art} class="dialog-art" eager />
         <button class="close" aria-label="Fermer et décider plus tard" title="Décider plus tard" onClick={() => game.closePopup(popup.id)}>
           ×
         </button>
+        <div class="event-blasons">
+          {popup.nations.slice(0, 5).map((id) => (
+            <Blason key={id} nation={nations[id - 1]} size="medium" />
+          ))}
+        </div>
         <p class="event-meta">
           <time>{formatShortDate(popup.tick)}</time>
           {game.popups.length > 1 ? ` · 1 / ${game.popups.length}` : ''}
@@ -331,7 +356,8 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
 function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): string }) {
   return (
     <div class="dialog-backdrop">
-      <section class="panel dialog" role="alertdialog" aria-labelledby="defeat-title">
+      <section class="panel dialog event" role="alertdialog" aria-labelledby="defeat-title">
+        <Art id="ecrans/defaite" class="dialog-art" eager />
         <h2 id="defeat-title">{nameOf(game.player)} a capitulé</h2>
         <p>
           {nameOf(game.defeatedBy)} annexe tout ce qu'il te restait, après {formatDuration(game.tick)} de partie.
@@ -378,8 +404,11 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
         </>
       ) : (
         <>
-          <div class="panel title">
-            <strong>État-major</strong> · grande stratégie
+          <div class="panel title hero">
+            <Art id="ecrans/accueil" class="hero-art" eager />
+            <p>
+              <strong>État-major</strong> · grande stratégie
+            </p>
           </div>
           <MapModeSwitch mode={state.mapMode} onMapMode={onMapMode} />
           <SetupPanel nations={nations} picked={state.selected.owner} onStart={onStart} onResume={onResume} />
@@ -403,11 +432,12 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       </div>
       {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
+          <Art id={landscapeOf(state.selected.terrain, provinceGdp, selected.areaKm2, development)} class="card-banner" />
           <button class="close" aria-label="Fermer" onClick={() => view.select()}>
             ×
           </button>
           <h2>
-            <span class="swatch" style={{ background: holder.color }} />
+            <Blason nation={holder} />
             {holder.name}
           </h2>
           <p class="province">{selected.name}</p>

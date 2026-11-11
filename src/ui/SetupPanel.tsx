@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { type SaveSlot, type StoredSave, listSaves } from '../game/saves.ts';
 import type { NationData } from '../map/types.ts';
 import { formatDate } from '../game/time.ts';
+import { Blason } from './Art.tsx';
 import { formatGdp, integer } from './format.ts';
 
 interface SetupProps {
@@ -59,6 +60,10 @@ export function SetupPanel({ nations, picked, onStart, onResume }: SetupProps) {
         </select>
       </label>
       <p class="setup-note">Ou clique sur un pays de la carte.</p>
+      <div class="setup-nation">
+        <Blason nation={chosen} size="large" />
+        <b>{chosen.name}</b>
+      </div>
       <dl class="setup-facts">
         <dt>Population</dt>
         <dd>{integer.format(chosen.population)}</dd>

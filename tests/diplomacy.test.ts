@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { DEMAND_INDEPENDENCE_AT, DEMAND_INVESTMENT_AT, MIN_WAR_TICKS_FOR_PEACE, TRUCE_TICKS } from '../src/sim/balance.ts';
+import {
+  DEMAND_INDEPENDENCE_AT,
+  DEMAND_INVESTMENT_AT,
+  MIN_WAR_TICKS_FOR_PEACE,
+  PLAYER_GRACE_TICKS,
+  PLAYER_WAR_COOLDOWN_TICKS,
+  TRUCE_TICKS,
+} from '../src/sim/balance.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
 
 const W = 200;
@@ -372,5 +379,42 @@ describe('appel aux armes', () => {
     expect(sim.fronts.map((front) => [front.a, front.b])).toEqual([[A, B]]);
     sim.declareWars([[D, C]]);
     expect(sim.fronts.map((front) => [front.a, front.b])).toEqual([[A, B], [C, D]]);
+  });
+});
+
+describe('guerres déclarées au joueur', () => {
+  /** Ticks où une IA a ouvert une guerre contre le joueur A. */
+  const warsOnPlayer = (sim: Simulation, ticks: number) => {
+    const opened: number[] = [];
+    const seen = new Set<string>();
+    for (let t = 0; t < ticks && sim.isAlive(A); t++) {
+      sim.step();
+      for (const front of sim.fronts) {
+        const key = `${front.a}-${front.b}`;
+        if ((front.a === A || front.b === A) && !seen.has(key)) {
+          seen.add(key);
+          opened.push(sim.tick);
+        }
+      }
+    }
+    return opened;
+  };
+
+  it("n'attaquent pas un joueur pacifique seulement un peu plus faible", () => {
+    // B, à droite, pèse un tiers de plus que A : assez pour attaquer une IA, pas le joueur.
+    const sim = new Simulation({ ...config((x) => (x < 100 ? A : B), (n) => (n === A ? 2e6 : 2.7e6), 2), ai: true });
+    expect(warsOnPlayer(sim, 600 * 60)).toEqual([]);
+  });
+
+  it("attendent la fin du répit, puis 26 semaines entre deux attaques", () => {
+    // A au centre, entre deux voisins bien plus puissants.
+    const sim = new Simulation({
+      ...config((x) => (x < 70 ? B : x < 130 ? A : C), (n) => (n === A ? 1e6 : 6e6), 3),
+      ai: true,
+    });
+    const opened = warsOnPlayer(sim, 600 * 80);
+    expect(opened.length).toBeGreaterThan(0);
+    expect(opened[0]).toBeGreaterThanOrEqual(PLAYER_GRACE_TICKS);
+    for (let i = 1; i < opened.length; i++) expect(opened[i] - opened[i - 1]).toBeGreaterThanOrEqual(PLAYER_WAR_COOLDOWN_TICKS);
   });
 });

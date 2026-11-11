@@ -58,8 +58,9 @@ jalon 6 :
   remplace le marché mondial abstrait des ressources. Il suit la diplomatie, dont dépendent
   les accords commerciaux et les embargos.
 
-Le jalon 11 (illustrations) a été demandé pendant le jalon 8. Il vient après les technologies et
-doctrines, pour illustrer aussi leurs cartes :
+Le jalon 11 (illustrations) a été demandé pendant le jalon 8. Prévu après les technologies et
+doctrines, il a été fait juste après le jalon 8, à la demande du joueur ; les cartes de doctrine
+et du commerce seront illustrées avec leurs jalons, par le même outil :
 
 - **Outil :** le ComfyUI du joueur et son pipeline Qwen Image, appelés par un script
   (`tools/illustrate.ts`) à travers l'API HTTP de ComfyUI (`/prompt`, `/history`, `/view`), à
@@ -79,6 +80,50 @@ Corrections ajoutées au jalon 6, à la demande du joueur : une IA qui n'attaque
 les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauvegardes mises à
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
+
+## État du jalon 11
+
+**Style retenu par le joueur, parmi quatre essais :** une sérigraphie trois couleurs (bleu-vert
+sombre, ocre, blanc cassé), trame visible, léger décalage des couleurs, papier grenu, formes
+simplifiées. Un premier essai, peint et lumineux, « faisait trop IA » : imposer une vraie technique
+d'impression, avec ses défauts, et une composition décentrée, y a remédié.
+
+**Outil.** `node tools/illustrate.ts` pilote le ComfyUI local (Qwen Image 2.1 turbo, 8 étapes) par
+son API. Le graphe est celui du flux du joueur, sans son LoRA ni sa consigne ; ComfyUI redimensionne
+puis enregistre directement en WebP (qualité 80), sans dépendance de plus dans le projet. Le script
+ne génère que ce qui manque (`--only` et `--force` pour régénérer), et la graine de chaque image se
+tire de son identifiant : une image régénérée revient à l'identique. Environ 8 s par image.
+
+**Catalogue** (`data/illustrations.json` et `data/blasons.json`) : un style commun, des règles par
+format (une scène décentrée, un blason centré), et un sujet par image.
+
+| Famille | Images | Taille | Où |
+|---|---|---|---|
+| Écrans | accueil, défaite | 1 152 × 658 | Carte de titre au menu, fenêtre de défaite |
+| Événements | guerre (2), soulèvement (2), coalition, investissements, indépendance, offre de paix | 768 × 480 | Fenêtres d'événements |
+| Bâtiments | les 10 chantiers | 512 × 320 | Au survol dans « Bâtir ici », vignettes de la file |
+| Paysages | 6 terrains × rural, industriel, ravagé | 640 × 320 | En tête de la fiche d'une province |
+| Blasons | les 193 pays | 192 × 192 | Barre du haut, fiche, menu, cartes de front, régions, fenêtres |
+
+**Blasons.** Laissé deviner les symboles d'un pays, le modèle dessinait des chevaux et des lions
+partout. Chaque pays a désormais un ou deux motifs écrits à la main (`data/blasons.json` : le coq et
+la fleur de lys pour la France, la grue et la fleur de cerisier pour le Japon…), sur un écu non
+écartelé, dans sa couleur de carte. Ce sont des blasons inventés, jamais les armoiries officielles.
+
+**Paysage d'une province :** son terrain ; ravagé si les combats ont abîmé son développement
+(sous 92 %), industriel au-delà de 3 M$ de PIB par km², rural sinon.
+
+**Intégration.** Un composant `Art` charge chaque image à l'approche (`loading="lazy"`) ; une image
+absente reste invisible sans décaler la mise en page.
+
+**Bilan.** 231 images, générées en 24 min sans échec, **4,1 Mo** en tout (7 à 10 Ko le blason,
+20 à 90 Ko le paysage ou le bâtiment, 190 Ko au plus l'écran d'accueil) ; le site publié passe de
+1,1 à 5,7 Mo, et le premier chargement ne prend que l'accueil et le blason choisi. Relues une à
+une ou en planches : l'aciérie, les fortifications et la plaine ravagée sortaient découpées en
+trois bandes (le modèle lisait « trois couleurs » comme « trois panneaux ») ; la consigne commune
+demande désormais une scène d'un seul tenant, et ces images ont été régénérées, avec un second
+soulèvement moins posé. Les ciels en aplats d'encre de quelques paysages sont gardés : ils
+appartiennent au style. Tests : 152 réussis.
 
 ## État du jalon 8
 
@@ -300,6 +345,20 @@ Dixième retour (« les pays proposent la paix trop souvent, ça bloque un peu l
 propose plus la paix au joueur avant 8 semaines de guerre (4 avant), puis attend 16 semaines après
 chaque offre, acceptée, refusée ou ignorée, avant la suivante. Avant, elle pouvait la reproposer
 dès la passe suivante (une chance sur trois toutes les 10 s). Le délai est sauvegardé.
+
+Onzième retour (« les pays sont bien trop agressifs […] tu ne peux pas te concentrer sur
+l'économie ») : une IA déclarait la guerre dès qu'elle pesait 1,2 fois ce que son voisin pouvait
+lui opposer, joueur compris, et rien n'empêchait deux attaques de suite. Désormais :
+
+- **contre le joueur,** l'IA attend la fin d'un répit de 26 semaines (12 avant), n'attaque qu'à deux
+  contre un, jamais moins de 26 semaines après la dernière guerre qu'une IA lui a déclarée, et un
+  joueur pacifique (agressivité sous 15 %) est épargné six fois sur dix ;
+- **entre IA,** il faut 1,4 fois la force du voisin, et les décisions de guerre sont moins
+  fréquentes (une chance sur trois au lieu d'une sur deux) ;
+- une IA qui n'oserait pas attaquer le joueur signe plus volontiers un pacte avec lui.
+
+Partie mondiale de 120 min : 112 guerres déclarées au lieu d'environ 190, 133 nations encore en
+vie au lieu d'environ 100 ; tick max 71 ms. Tests : 154 réussis, dont deux sur ces règles.
 
 Points à reprendre :
 

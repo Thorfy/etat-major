@@ -16,6 +16,7 @@ import {
   MAX_PRIORITY_ZONES,
 } from '../sim/balance.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
+import { Art, Blason } from './Art.tsx';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
 type Tab = 'fronts' | 'economy' | 'defense' | 'diplomacy';
@@ -69,7 +70,7 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
     <article class="front">
       <header>
         <h3>
-          <span class="swatch" style={{ background: enemy.color }} />
+          <Blason nation={enemy} />
           {enemy.name}
         </h3>
         <span class={`ratio ${noContact ? '' : ratio >= 1 ? 'ahead' : 'behind'}`}>{noContact ? 'par la mer' : formatRatio(ratio)}</span>
@@ -274,6 +275,7 @@ function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) 
               <li key={`${order.province}-${order.kind}-${index}`} title={BUILD_EFFECTS[order.kind]}>
                 <div class="offensive-row">
                   <span>
+                    <Art id={`batiments/${order.kind}`} class="queue-art" />
                     {BUILD_NAMES[order.kind]}{' '}
                     <small>
                       ·{' '}
@@ -451,6 +453,7 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
         <div class={`region ${movement.demand ? 'offer' : ''}`} key={movement.origin}>
           <div class="offensive-row">
             <span>
+              <Blason nation={nations[movement.origin - 1]} />
               {nations[movement.origin - 1].name} <small>· {formatPercent(movement.share)} du pays · équipée à {formatPercent(movement.care)}</small>
             </span>
             <b class={movement.unrest >= DEMAND_INDEPENDENCE_AT ? 'behind' : ''}>{formatPercent(movement.unrest)}</b>

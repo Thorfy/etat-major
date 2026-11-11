@@ -1,0 +1,54 @@
+{
+  "comment": "Catalogue des illustrations générées par tools/illustrate.ts avec ComfyUI (Qwen Image 2.1). Chaque image : un identifiant (son chemin sous public/art/, sans extension), un format, et un sujet. Le style commun précède chaque sujet ; les blasons des pays sont ajoutés par le script, un par nation.",
+  "style": "Vintage three-color screen print poster, flat areas of ink in dark teal, ochre and off-white, visible halftone dots, slight misregistration between colors, uneven ink coverage, coarse paper texture, simplified shapes, no gradients. One single continuous scene, not split into panels, bands or stripes.",
+  "formats": {
+    "ecran": { "width": 1344, "height": 768, "outWidth": 1152, "outHeight": 658, "rules": "Off-center composition, cropped figures, no faces in close-up, no real national flags, no text, no letters, no logos." },
+    "evenement": { "width": 1024, "height": 640, "outWidth": 768, "outHeight": 480, "rules": "Off-center composition, cropped figures, no faces in close-up, no real national flags, no text, no letters, no logos." },
+    "batiment": { "width": 1024, "height": 640, "outWidth": 512, "outHeight": 320, "rules": "Seen from a slight distance, simple readable silhouette, no people in close-up, no text, no letters, no logos." },
+    "paysage": { "width": 1024, "height": 512, "outWidth": 640, "outHeight": 320, "rules": "Wide landscape view, low horizon, no people in close-up, no text, no letters, no logos." },
+    "blason": { "width": 1024, "height": 1024, "outWidth": 192, "outHeight": 192, "rules": "A single heraldic shield centered on a plain off-white background, bold simple charges, invented design that does not reproduce any official coat of arms or flag, no text, no letters, no motto, no scroll." }
+  },
+  "images": [
+    { "id": "ecrans/accueil", "format": "ecran", "subject": "A military war room: a few officers seen from behind and in profile around a large map table, one standing apart, a desk lamp, papers and pins on the map, a window at the side." },
+    { "id": "ecrans/defaite", "format": "ecran", "subject": "An abandoned headquarters at dawn: a torn map on the table, scattered papers, an overturned chair, an officer's coat left on a hook, pale light through a broken window." },
+
+    { "id": "evenements/guerre-1", "format": "evenement", "subject": "Soldiers boarding army trucks at night at a border checkpoint, a raised barrier, searchlights sweeping the sky." },
+    { "id": "evenements/guerre-2", "format": "evenement", "subject": "A column of tanks crossing a river bridge at dawn, smoke rising on the horizon, a soldier waving them on." },
+    { "id": "evenements/soulevement-1", "format": "evenement", "subject": "A regional uprising in a small provincial town, seen from a side street: people in coats carrying banners with an invented heraldic animal emblem, an overturned car, smoke from a barricade, a soldier half hidden behind a corner." },
+    { "id": "evenements/soulevement-2", "format": "evenement", "subject": "Seen from a high window: a few armed civilians piling furniture and tires into a barricade across a narrow old-town street, one carrying a banner with an invented star-and-tower emblem, a burning tram in the background." },
+    { "id": "evenements/coalition", "format": "evenement", "subject": "Several groups of regional militias, each with its own invented emblem on armbands and banners, meeting at a crossroads in the hills, a map unfolded on the hood of a jeep." },
+    { "id": "evenements/investissements", "format": "evenement", "subject": "A delegation of townspeople in coats presenting rolled plans to an official in a provincial town hall office, construction cranes visible through the tall window." },
+    { "id": "evenements/independance", "format": "evenement", "subject": "A quiet ceremony on a mountain town square: an official lowering a plain banner while another with an invented emblem is raised, a small crowd watching, no weapons." },
+    { "id": "evenements/offre-paix", "format": "evenement", "subject": "Two officers from opposing armies facing each other across a small table in a railway carriage, a document between them, a white flag leaning in the corner." },
+
+    { "id": "batiments/factory", "format": "batiment", "subject": "An industrial factory hall with saw-tooth roofs and tall chimneys, freight wagons waiting at the loading dock." },
+    { "id": "batiments/infrastructure", "format": "batiment", "subject": "A new road and railway bridge spanning a valley, a freight train crossing, a road with a few trucks below." },
+    { "id": "batiments/depot", "format": "batiment", "subject": "A military supply depot: rows of crates and fuel drums under camouflage netting, trucks being loaded, a railway siding." },
+    { "id": "batiments/fort", "format": "batiment", "subject": "A line of concrete bunkers and anti-tank obstacles along a ridge, barbed wire in front, trenches behind." },
+    { "id": "batiments/investment", "format": "batiment", "subject": "A provincial town under renovation: scaffolding on old facades, a new school, workers paving a square, a crane." },
+    { "id": "batiments/refinery", "format": "batiment", "subject": "An oil refinery: distillation towers, pipes and round storage tanks, a flare burning at dusk." },
+    { "id": "batiments/steelworks", "format": "batiment", "subject": "A steelworks under a low smoky sky: two blast furnaces, a conveyor belt climbing to the top, glowing molten metal pouring into a ladle, piles of ore in the foreground." },
+    { "id": "batiments/recruitment", "format": "batiment", "subject": "A recruitment center in a town square: young people queueing at the door of a stone building, a few army trucks parked outside." },
+    { "id": "batiments/services", "format": "batiment", "subject": "A modest hospital and a school side by side on a quiet street, an ambulance at the entrance, children crossing." },
+    { "id": "batiments/shipyard", "format": "batiment", "subject": "A naval shipyard: a grey warship hull in a dry dock under tall cranes, sparks of welding." },
+
+    { "id": "paysages/plaine-rural", "format": "paysage", "subject": "Flat farmland with wheat fields, hedgerows and a small village with a church steeple." },
+    { "id": "paysages/plaine-industriel", "format": "paysage", "subject": "An industrial plain: factories with chimneys, railway yards, power lines and a city skyline." },
+    { "id": "paysages/plaine-ravage", "format": "paysage", "subject": "A war-torn plain: shell craters in muddy fields, burned farmhouses, broken trees and abandoned vehicles." },
+    { "id": "paysages/montagne-rural", "format": "paysage", "subject": "High mountains with pine forests, alpine pastures and a small village in the valley." },
+    { "id": "paysages/montagne-industriel", "format": "paysage", "subject": "A mountain valley with a hydroelectric dam, mines on the slopes and a railway along the river." },
+    { "id": "paysages/montagne-ravage", "format": "paysage", "subject": "A mountain pass after battle: a destroyed bridge, burned forest, abandoned artillery in the snow." },
+    { "id": "paysages/plateau-rural", "format": "paysage", "subject": "A high plateau with dry grassland, scattered sheep, low stone farmhouses and wide sky." },
+    { "id": "paysages/plateau-industriel", "format": "paysage", "subject": "A plateau with open-pit mines, conveyor belts, a mining town and a long railway." },
+    { "id": "paysages/plateau-ravage", "format": "paysage", "subject": "A scorched plateau: burned grassland, wrecked trucks along a road, smoke on the horizon." },
+    { "id": "paysages/desert-rural", "format": "paysage", "subject": "A desert with dunes and rocky hills, an oasis with palm trees and a small mud-brick village." },
+    { "id": "paysages/desert-industriel", "format": "paysage", "subject": "A desert oil field: pumpjacks, pipelines, storage tanks and a refinery flare in the distance." },
+    { "id": "paysages/desert-ravage", "format": "paysage", "subject": "A desert battlefield: burned-out tanks half buried in sand, oil fires and black smoke." },
+    { "id": "paysages/arctique-rural", "format": "paysage", "subject": "Arctic tundra with snow, a frozen bay, a few wooden houses and a fishing boat locked in ice." },
+    { "id": "paysages/arctique-industriel", "format": "paysage", "subject": "An arctic port and mining town: cranes, ice-breakers, gas plant flares under a pale sky." },
+    { "id": "paysages/arctique-ravage", "format": "paysage", "subject": "An abandoned arctic outpost after battle: wrecked barracks, snow-covered vehicles, torn radio masts." },
+    { "id": "paysages/jungle-rural", "format": "paysage", "subject": "Dense tropical jungle along a wide brown river, a village of stilt houses and dugout canoes." },
+    { "id": "paysages/jungle-industriel", "format": "paysage", "subject": "A jungle region with a plantation, a sawmill, a river port and a road cut through the forest." },
+    { "id": "paysages/jungle-ravage", "format": "paysage", "subject": "Burned jungle after battle: charred tree trunks, a destroyed river bridge, smoke over the canopy." }
+  ]
+}
