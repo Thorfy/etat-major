@@ -27,6 +27,7 @@ function stripConfig(options: { logistics?: boolean; terrain?: number } = {}): S
     width: W,
     height: H,
     nations: [{ population: 50e6, gdpMusd: 2e6 }, { population: 20e6, gdpMusd: 0.3e6 }],
+    trade: false,
     provinces: Array.from({ length: W / 20 }, (_, i) => ({
       nation: i < 5 ? 0 : 1,
       areaKm2: 20000,

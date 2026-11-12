@@ -11,8 +11,12 @@ import {
   ALLIANCE_MAX_AGGRESSION,
   DEMAND_INDEPENDENCE_AT,
   DEMAND_INVESTMENT_AT,
+  AXIS_BONUS,
   INVESTMENT_WEEKS,
+  MAX_AXES,
   MAX_COUNTER_SHARE,
+  MAX_TRADE_DEALS,
+  TRADE_DEPENDENCE,
   MAX_PRIORITY_ZONES,
 } from '../sim/balance.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
@@ -208,7 +212,69 @@ function FrontsTab({ game, nations, view, tool }: { game: GameClient; nations: N
 
 // ——— Économie ———
 
-function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) {
+/**
+ * Commerce : accès aux partenaires, accords et embargos, et axes commerciaux tracés sur la carte.
+ */
+function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; tool: MapTool | null }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
+  const names = (ids: number[]) => (ids.length > 0 ? ids.map((id) => game.worldData.nations[id - 1].name).join(', ') : 'aucun');
+  const axes = game.playerAxes;
+  const queued = stats.builds.filter((order) => order.kind === 'axis').length;
+  return (
+    <section>
+      <h3>Commerce</h3>
+      <dl>
+        <dt>Accès au commerce</dt>
+        <dd class={stats.trade < 0.8 ? 'behind' : ''}>{formatPercent(stats.trade)}</dd>
+        <dt>Effet sur le PIB</dt>
+        <dd class={stats.tradeFactor > 1.0005 ? 'ahead' : stats.tradeFactor < 0.9995 ? 'behind' : ''}>{formatChange(stats.tradeFactor - 1, 1)}</dd>
+        <dt>Accords</dt>
+        <dd>
+          {stats.deals.length} / {MAX_TRADE_DEALS} · {names(stats.deals)}
+        </dd>
+        <dt>Tes embargos</dt>
+        <dd>{names(stats.embargoes)}</dd>
+        <dt>Embargos subis</dt>
+        <dd class={stats.embargoedBy.length > 0 ? 'behind' : ''}>{names(stats.embargoedBy)}</dd>
+      </dl>
+      <Note lines={3}>
+        {`Tu commerces avec tes voisins, et par la mer avec tout pays qui borde une même mer. Guerre, embargo et ` +
+          `blocus coupent ces échanges : coupé de tous, tu perdrais ${formatPercent(TRADE_DEPENDENCE)} de ton PIB et tes ` +
+          `importations. Un accord (fiche d'un pays) en rapporte un peu plus.`}
+      </Note>
+      <h3>Axes commerciaux</h3>
+      <button class={`action ${tool === 'axis' ? 'armed' : ''}`} aria-pressed={tool === 'axis'} onClick={() => view.setTool(tool === 'axis' ? null : 'axis')}>
+        {tool === 'axis' ? "Glisse d'une de tes provinces à une autre, ou chez un partenaire" : 'Tracer un axe commercial'}
+      </button>
+      <Note lines={2}>
+        {`Chaque province traversée gagne ${formatPercent(AXIS_BONUS)} de PIB et de capacité, chez toi comme chez un ` +
+          `partenaire commercial. L'ennemi qui en prend une province le coupe. ${axes.length + queued} / ${MAX_AXES} axes.`}
+      </Note>
+      {axes.length > 0 && (
+        <ol class="builds">
+          {axes.map((axis, index) => (
+            <li key={axis.id}>
+              <div class="offensive-row">
+                <span>
+                  {axis.sea ? 'Ligne maritime' : 'Axe'} {index + 1}{' '}
+                  <small>
+                    · {axis.provinces} provinces · <b class={axis.active ? 'ahead' : 'behind'}>{axis.active ? 'actif' : 'coupé'}</b>
+                  </small>
+                </span>
+                <button class="close-inline" aria-label="Supprimer cet axe" onClick={() => game.removeAxis(axis.id)}>
+                  ×
+                </button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: NationData; view: MapView; tool: MapTool | null }) {
   const stats = game.playerStats;
   if (!stats) return null;
   const { provinces } = game.worldData;
@@ -244,6 +310,7 @@ function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) 
           <dd class={stats.steel < 0.8 ? 'behind' : ''}>{formatPercent(stats.steel)}</dd>
         </dl>
       </section>
+      <TradeSection game={game} view={view} tool={tool} />
       <section>
         <h3>Effort de guerre</h3>
         <Slider
@@ -279,7 +346,7 @@ function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) 
                     {BUILD_NAMES[order.kind]}{' '}
                     <small>
                       ·{' '}
-                      {order.kind === 'fort'
+                      {order.kind === 'fort' || order.kind === 'axis'
                         ? `${integer.format(order.cellCount)} cellules`
                         : order.kind === 'investment'
                           ? game.worldData.nations[order.region - 1].name
@@ -551,7 +618,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
       </div>
       <div class="tab-body" role="tabpanel">
         {tab === 'fronts' && <FrontsTab game={game} nations={nations} view={view} tool={tool} />}
-        {tab === 'economy' && <EconomyTab game={game} nation={nation} />}
+        {tab === 'economy' && <EconomyTab game={game} nation={nation} view={view} tool={tool} />}
         {tab === 'defense' && <DefenseTab game={game} view={view} tool={tool} />}
         {tab === 'diplomacy' && <DiplomacyTab game={game} nations={nations} />}
       </div>

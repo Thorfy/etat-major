@@ -8,7 +8,18 @@ export function eventNations(event: SimEvent): number[] {
     case 'peace':
     case 'alliance':
     case 'allianceBroken':
+    case 'tradeDeal':
+    case 'tradeDealEnded':
       return [event.a, event.b];
+    case 'tradeDealRefused':
+    case 'embargo':
+    case 'embargoLifted':
+      return [event.from, event.to];
+    case 'axisBuilt':
+    case 'axisRestored':
+      return [event.nation];
+    case 'axisCut':
+      return event.by ? [event.nation, event.by] : [event.nation];
     case 'capitulation':
       return [event.loser, event.winner];
     case 'peaceRefused':
@@ -52,6 +63,22 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
       return `${nameOf(event.rebel)} obtient son indépendance de ${nameOf(event.parent)}`;
     case 'demand':
       return `${nameOf(event.origin)} demande ${event.kind === 'investment' ? 'des investissements' : "l'indépendance"} à ${nameOf(event.parent)}`;
+    case 'tradeDeal':
+      return `Accord commercial : ${nameOf(event.a)} et ${nameOf(event.b)}`;
+    case 'tradeDealRefused':
+      return `${nameOf(event.to)} refuse l'accord commercial de ${nameOf(event.from)}`;
+    case 'tradeDealEnded':
+      return `Fin de l'accord commercial entre ${nameOf(event.a)} et ${nameOf(event.b)}`;
+    case 'embargo':
+      return `${nameOf(event.from)} impose un embargo à ${nameOf(event.to)}`;
+    case 'embargoLifted':
+      return `${nameOf(event.from)} lève son embargo sur ${nameOf(event.to)}`;
+    case 'axisBuilt':
+      return `${nameOf(event.nation)} ouvre un axe commercial`;
+    case 'axisCut':
+      return event.by ? `${nameOf(event.by)} coupe un axe commercial de ${nameOf(event.nation)}` : `Un axe commercial de ${nameOf(event.nation)} est coupé`;
+    case 'axisRestored':
+      return `${nameOf(event.nation)} rétablit un axe commercial`;
   }
 }
 

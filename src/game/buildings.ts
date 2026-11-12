@@ -1,5 +1,7 @@
 // Ce que fait chaque bâtiment, en clair, pour la fiche et la file de chantiers.
 import {
+  AXIS_BONUS,
+  AXIS_MAX_PER_PROVINCE,
   DEPOT_MIN_CONSOLIDATION,
   FACTORY_BONUS,
   FORT_DEFENSE,
@@ -31,9 +33,14 @@ export const BUILD_NAMES: Record<BuildKind, string> = {
   recruitment: 'Centre de recrutement',
   services: 'Services publics',
   shipyard: 'Chantier naval',
+  axis: 'Axe commercial',
 };
 
 export const BUILD_EFFECTS: Record<BuildKind, string> = {
+  axis:
+    `Route et voie ferrée (ou ligne maritime) de ville en ville, chez toi ou jusque chez un partenaire commercial : chaque province traversée gagne ` +
+    `+${percent(AXIS_BONUS)} de PIB et de capacité, pour ${AXIS_MAX_PER_PROVINCE} axes au plus, et compte comme équipée pour ses ` +
+    `régions. Coupé si l'ennemi en prend une province, ou si l'accord commercial prend fin (une ligne maritime : un port, ou le blocus).`,
   factory:
     `+${percent(FACTORY_BONUS)} de PIB et de capacité militaire tirés de la province, par niveau ` +
     `(${MAX_FACTORY_LEVEL} au plus). Seulement sur ton sol national.`,

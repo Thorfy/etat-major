@@ -329,6 +329,7 @@ describe('capacité militaire', () => {
       seed: 9,
       player: A,
       ai: false,
+      trade: false,
     });
   };
   const capacity = (sim: Simulation, id: number) => sim.snapshot().nations.find((n) => n.id === id)!.capacity;

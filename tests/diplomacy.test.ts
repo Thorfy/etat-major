@@ -46,6 +46,8 @@ function config(owner: (x: number, y: number) => number, gdp: (nation: number) =
     seed: 3,
     player,
     ai: false,
+    // Le commerce a ses propres tests : ici, une guerre ne coupe pas les échanges.
+    trade: false,
   };
 }
 
@@ -412,6 +414,8 @@ describe('guerres déclarées au joueur', () => {
       ...config((x) => (x < 70 ? B : x < 130 ? A : C), (n) => (n === A ? 1e6 : 6e6), 3),
       ai: true,
     });
+    // Deux voisins prudents : un commerçant n'oserait pas.
+    (sim as unknown as { profile: Uint8Array }).profile.fill(0);
     const opened = warsOnPlayer(sim, 600 * 80);
     expect(opened.length).toBeGreaterThan(0);
     expect(opened[0]).toBeGreaterThanOrEqual(PLAYER_GRACE_TICKS);

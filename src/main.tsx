@@ -100,6 +100,9 @@ async function start(): Promise<void> {
       onFort(fromX, fromY, toX, toY) {
         state.game?.fortifyLine(fromX, fromY, toX, toY);
       },
+      onAxis(fromX, fromY, toX, toY) {
+        state.game?.buildAxis(fromX, fromY, toX, toY);
+      },
       onPriority(x, y) {
         state.game?.addPriority(x, y);
       },

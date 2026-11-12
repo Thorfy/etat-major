@@ -39,7 +39,9 @@ const TERRAIN_FILES = ['plaine', 'montagne', 'plateau', 'desert', 'arctique', 'j
  * Paysage d'une province : son terrain, et son état — ravagé si les combats l'ont abîmée,
  * industriel si elle est riche (plus de 3 M$ de PIB par km²), rural sinon.
  */
-export function landscapeOf(terrain: number, gdpMusd: number, areaKm2: number, development: number): string {
+export function landscapeOf(terrain: number, gdpMusd: number, areaKm2: number, development: number, province = 0): string {
   const kind = development < 0.92 ? 'ravage' : gdpMusd / Math.max(1, areaKm2) >= 3 ? 'industriel' : 'rural';
-  return `paysages/${TERRAIN_FILES[terrain] ?? 'plaine'}-${kind}`;
+  // Trois paysages par terrain et par état : chaque province garde toujours le même.
+  const variant = province % 3;
+  return `paysages/${TERRAIN_FILES[terrain] ?? 'plaine'}-${kind}${variant > 0 ? `-${variant + 1}` : ''}`;
 }

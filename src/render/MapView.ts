@@ -2,20 +2,20 @@
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { wrapDeltaX } from '../map/projection.ts';
 import { MAX_OFFENSIVE_LENGTH } from '../sim/balance.ts';
-import type { NationLabel, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import type { AxisSnapshot, NationLabel, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import { traceRoute } from '../sim/route.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
 import { MAX_FORT_LINE_LENGTH, PRIORITY_RADIUS } from '../sim/balance.ts';
-import { type ArrowDraft, type ResourceMarker, drawCampaign, drawPriorityZones, drawResources } from './Overlay.ts';
+import { type ArrowDraft, type ResourceMarker, drawAxes, drawCampaign, drawPriorityZones, drawResources } from './Overlay.ts';
 
 const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
 const MAX_DPR = 2;
 
 /** Outil armé sur la carte : tracer une offensive, une ligne fortifiée, placer un secteur. */
-export type MapTool = 'offensive' | 'fort' | 'priority';
+export type MapTool = 'offensive' | 'fort' | 'priority' | 'axis';
 
 /** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
 export type MapMode = 'political' | 'economic' | 'supply';
@@ -36,6 +36,7 @@ export interface MapEvents {
   onToggleDebug(): void;
   onOffensive(fromX: number, fromY: number, toX: number, toY: number): void;
   onFort(fromX: number, fromY: number, toX: number, toY: number): void;
+  onAxis(fromX: number, fromY: number, toX: number, toY: number): void;
   onPriority(x: number, y: number): void;
   onToolChange(tool: MapTool | null): void;
 }
@@ -80,6 +81,8 @@ export class MapView {
   private draftPointer = -1;
   private tool: MapTool | null = null;
   private priorityZones: readonly { x: number; y: number }[] = [];
+  private axes: readonly AxisSnapshot[] = [];
+  private partners = new Set<number>();
   private commandEnabled = false;
   private selectedProvince = 0;
   private selectedOwner = 0;
@@ -242,6 +245,18 @@ export class MapView {
     this.setTool(aiming ? 'offensive' : null);
   }
 
+  /** Partenaires commerciaux du joueur : leurs routes s'affichent aussi. */
+  setTradePartners(partners: readonly number[]): void {
+    if (partners.length === this.partners.size && partners.every((partner) => this.partners.has(partner))) return;
+    this.partners = new Set(partners);
+    this.dirty = true;
+  }
+
+  setAxes(axes: readonly AxisSnapshot[]): void {
+    this.axes = axes;
+    this.dirty = true;
+  }
+
   setPriorityZones(zones: readonly { x: number; y: number }[]): void {
     this.priorityZones = zones;
     this.dirty = true;
@@ -320,12 +335,13 @@ export class MapView {
     canvas.addEventListener('pointerdown', (event) => {
       canvas.setPointerCapture(event.pointerId);
       const wantsFort = this.commandEnabled && this.tool === 'fort' && event.button === 0;
-      const wantsArrow = this.commandEnabled && !wantsFort && (event.button === 2 || (this.tool === 'offensive' && event.button === 0));
-      if (wantsArrow || wantsFort) {
+      const wantsAxis = this.commandEnabled && this.tool === 'axis' && event.button === 0;
+      const wantsArrow = this.commandEnabled && !wantsFort && !wantsAxis && (event.button === 2 || (this.tool === 'offensive' && event.button === 0));
+      if (wantsArrow || wantsFort || wantsAxis) {
         const start = this.camera.screenToCell(event.clientX, event.clientY);
         if (start) {
           this.draft = {
-            kind: wantsFort ? 'fort' : 'arrow',
+            kind: wantsFort ? 'fort' : wantsAxis ? 'axis' : 'arrow',
             fromX: start.x,
             fromY: start.y,
             toX: start.x,
@@ -355,7 +371,9 @@ export class MapView {
           this.draft =
             this.draft.kind === 'fort'
               ? { ...this.draft, ...this.planLine(this.draft.fromX, this.draft.fromY, end.x, end.y) }
-              : { ...this.draft, ...this.planArrow(this.draft.fromX, this.draft.fromY, end.x, end.y) };
+              : this.draft.kind === 'axis'
+                ? { ...this.draft, toX: end.x, toY: end.y, valid: this.isOwnCell(this.draft.fromX, this.draft.fromY) && this.isOwnCell(end.x, end.y) }
+                : { ...this.draft, ...this.planArrow(this.draft.fromX, this.draft.fromY, end.x, end.y) };
           this.dirty = true;
         }
         return;
@@ -391,6 +409,7 @@ export class MapView {
         const length = Math.hypot(wrapDeltaX(fromX, toX), toY - fromY);
         if (event.type === 'pointerup' && length >= MIN_ARROW_CELLS) {
           if (kind === 'fort') this.events.onFort(fromX, fromY, toX, toY);
+          else if (kind === 'axis') this.events.onAxis(fromX, fromY, toX, toY);
           else this.events.onOffensive(fromX, fromY, toX, toY);
           this.setTool(null);
         }
@@ -500,6 +519,7 @@ export class MapView {
       this.labels.draw(this.camera);
       if (this.mode === 'economic') drawResources(this.labels.context, this.camera, this.resourceMarkers);
       if (this.player !== 0) {
+        drawAxes(this.labels.context, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes);
         drawPriorityZones(this.labels.context, this.camera, this.priorityZones, PRIORITY_RADIUS);
         drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
       }

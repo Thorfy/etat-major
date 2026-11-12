@@ -10,6 +10,8 @@ import {
   GAME_SPEEDS,
   DEPOT_MIN_CONSOLIDATION,
   MAX_ALLIES,
+  MAX_AXES,
+  MAX_TRADE_DEALS,
   MAX_PRIORITY_ZONES,
   MAX_FACTORY_LEVEL,
   MAX_INFRASTRUCTURE_LEVEL,
@@ -17,6 +19,7 @@ import {
   OFFENSIVE_MIN_FORCE,
 } from '../sim/balance.ts';
 import type {
+  AxisSnapshot,
   BuildKind,
   EconomySnapshot,
   FromWorker,
@@ -38,6 +41,7 @@ import { landingProblem, traceRoute } from '../sim/route.ts';
 import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
 import { provinceWealth } from './economy.ts';
+import { eventNations } from './events.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
 import { type SaveSlot, writeSave } from './saves.ts';
 
@@ -84,6 +88,8 @@ export interface GameStart {
 }
 
 /** Empreinte de la carte de départ : une sauvegarde ne vaut que pour cette carte. */
+const TRADE_EVENTS = new Set<SimEvent['type']>(['tradeDeal', 'tradeDealRefused', 'tradeDealEnded', 'embargo', 'embargoLifted', 'axisBuilt', 'axisCut', 'axisRestored']);
+
 export const mapHashOf = (world: LoadedWorld) => hashGrid(world.provinceGrid);
 
 export class GameClient {
@@ -269,13 +275,21 @@ export class GameClient {
       this.watchSupply(update.snapshot);
       this.watchCounters(update.snapshot);
       this.view.setPriorityZones(this.playerStats?.priorityZones ?? []);
+      if (update.snapshot.axes) {
+        this.axes = update.snapshot.axes;
+        this.view.setAxes(this.axes);
+      }
+      this.view.setTradePartners(this.playerStats?.deals ?? []);
       this.onChange();
     }
   }
 
   private handleEvent(event: SimEvent): void {
-    this.journal.push(event);
-    if (this.journal.length > JOURNAL_SIZE) this.journal.shift();
+    // Le commerce des autres pays ne remplit pas le journal : il en noierait les guerres.
+    if (!TRADE_EVENTS.has(event.type) || eventNations(event).includes(this.player)) {
+      this.journal.push(event);
+      if (this.journal.length > JOURNAL_SIZE) this.journal.shift();
+    }
     const name = (id: number) => this.world.data.nations[id - 1].name;
     const me = this.player;
     switch (event.type) {
@@ -330,6 +344,33 @@ export class GameClient {
       case 'demand':
         if (event.parent === me) this.openPopup({ tick: event.tick, kind: 'demand', nations: [event.origin], demand: event.kind });
         break;
+      case 'tradeDeal':
+        if (event.a === me || event.b === me) this.notify(`Accord commercial signé avec ${name(event.a === me ? event.b : event.a)}.`);
+        break;
+      case 'tradeDealRefused':
+        if (event.from === me) {
+          this.notify(`${name(event.to)} refuse l'accord : tu es trop agressif, vous ne commercez pas (guerre, embargo, ni frontière ni mer commune), ou l'un de vous a déjà ${MAX_TRADE_DEALS} accords.`);
+        }
+        break;
+      case 'tradeDealEnded':
+        if (event.a === me || event.b === me) this.notify(`Fin de l'accord commercial avec ${name(event.a === me ? event.b : event.a)}.`);
+        break;
+      case 'embargo':
+        if (event.to === me) this.notify(`${name(event.from)} t'impose un embargo : ton agressivité l'inquiète. Ton commerce en souffre.`);
+        break;
+      case 'embargoLifted':
+        if (event.to === me) this.notify(`${name(event.from)} lève son embargo.`);
+        break;
+      case 'axisBuilt':
+        if (event.nation === me) this.notify('Axe commercial ouvert : les provinces traversées s\'enrichissent.');
+        break;
+      case 'axisCut':
+        if (event.nation === me) this.notify(event.by ? `${name(event.by)} a coupé un de tes axes commerciaux.` : 'Un de tes axes commerciaux est coupé.');
+        else if (event.by === me) this.notify(`Tu as coupé un axe commercial de ${name(event.nation)} : son économie en souffre.`);
+        break;
+      case 'axisRestored':
+        if (event.nation === me) this.notify('Axe commercial rétabli.');
+        break;
     }
   }
 
@@ -369,6 +410,21 @@ export class GameClient {
     if (stats?.allies.includes(nation)) return 'ally';
     if (stats?.truces.some((truce) => truce.nation === nation)) return 'truce';
     return 'peace';
+  }
+
+  /** Tempérament d'une IA (indice dans AI_PROFILES), -1 s'il est inconnu. */
+  profileOf(nation: number): number {
+    return this.snapshot?.nations.find((entry) => entry.id === nation)?.profile ?? -1;
+  }
+
+  /** Commerce avec un pays : accord, embargo (de toi ou contre toi), coupé par la guerre, ou libre. */
+  tradeRelationOf(nation: number): 'deal' | 'embargo' | 'embargoed' | 'war' | 'free' {
+    const stats = this.playerStats;
+    if (stats?.embargoes.includes(nation)) return 'embargo';
+    if (stats?.embargoedBy.includes(nation)) return 'embargoed';
+    if (this.isAtWarWith(nation)) return 'war';
+    if (stats?.deals.includes(nation)) return 'deal';
+    return 'free';
   }
 
   truceUntil(nation: number): number {
@@ -471,6 +527,55 @@ export class GameClient {
   breakAlliance(other: number): void {
     if (!this.canCommand) return;
     this.command({ type: 'breakAlliance', nation: this.player, other });
+  }
+
+  /** Axes commerciaux du monde, tels que le dernier instantané les donne. */
+  axes: AxisSnapshot[] = [];
+
+  get playerAxes(): AxisSnapshot[] {
+    return this.axes.filter((axis) => axis.nation === this.player);
+  }
+
+  proposeTradeDeal(other: number): void {
+    if (!this.canCommand) return;
+    if ((this.playerStats?.deals.length ?? 0) >= MAX_TRADE_DEALS) {
+      this.notify(`${MAX_TRADE_DEALS} accords commerciaux au plus.`);
+      return;
+    }
+    this.command({ type: 'proposeTradeDeal', nation: this.player, other });
+  }
+
+  endTradeDeal(other: number): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'endTradeDeal', nation: this.player, other });
+  }
+
+  setEmbargo(other: number, on: boolean): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'setEmbargo', nation: this.player, other, on });
+  }
+
+  /** Axe commercial entre deux cellules de son sol, tracé sur la carte. */
+  buildAxis(fromX: number, fromY: number, toX: number, toY: number): void {
+    if (!this.canCommand) return;
+    const { ownerGrid, data } = this.world;
+    const arrival = ownerGrid[toY * data.width + toX];
+    if (ownerGrid[fromY * data.width + fromX] !== this.player || (arrival !== this.player && !this.playerStats?.deals.includes(arrival))) {
+      this.notify("Un axe commercial part de ton sol, et arrive chez toi ou chez un partenaire commercial (accord dans la fiche d'un pays).");
+      return;
+    }
+    const queued = this.playerStats?.builds.filter((order) => order.kind === 'axis').length ?? 0;
+    if (this.playerAxes.length + queued >= MAX_AXES) {
+      this.notify(`${MAX_AXES} axes commerciaux au plus : supprime-en un dans l'onglet Économie.`);
+      return;
+    }
+    this.command({ type: 'buildAxis', nation: this.player, fromX, fromY, toX, toY });
+    this.notify("Axe commercial mis en chantier, de ville en ville par ton sol et celui de tes partenaires (ou par la mer) : il apparaît dans ta file.");
+  }
+
+  removeAxis(id: number): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'removeAxis', nation: this.player, id });
   }
 
   /** Annonce les contre-attaques lancées d'elles-mêmes par la réserve du joueur. */

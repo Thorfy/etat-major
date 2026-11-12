@@ -61,6 +61,12 @@ function Indicators({ game, nation }: { game: GameClient; nation: NationData }) 
       />
       <Indicator label="Acier" value={formatPercent(stats.steel)} tone={stats.steel < 0.8 ? 'behind' : ''} title="Part des besoins en acier couverte" />
       <Indicator
+        label="Commerce"
+        value={formatPercent(stats.trade)}
+        tone={stats.trade < 0.8 ? 'behind' : stats.tradeFactor > 1.0005 ? 'ahead' : ''}
+        title="Part de tes partenaires commerciaux possibles avec qui tu commerces encore"
+      />
+      <Indicator
         label="Territoire"
         value={`${territory > 0 ? '+' : ''}${integer.format(territory)}`}
         tone={territory > 0 ? 'ahead' : territory < 0 ? 'behind' : ''}

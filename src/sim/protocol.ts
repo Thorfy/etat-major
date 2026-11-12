@@ -8,16 +8,45 @@ export type Stance = 'attack' | 'hold' | 'retreat';
  * Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement),
  * fortifications (une bande de cellules, sans province).
  */
-export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | ProvinceBuilding;
+export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | 'axis' | ProvinceBuilding;
 
 export interface BuildOrder {
   province: number;
   kind: BuildKind;
   /** Cellules à fortifier, pour un chantier de fortifications. */
   cells?: number[];
+  /** Axe commercial : provinces traversées, ligne maritime ou non, et longueur en cellules. */
+  path?: number[];
+  sea?: boolean;
+  length?: number;
   /** Investissements : la région (pays d'origine annexé) qui les a demandés, et leur coût. */
   region?: number;
   cost?: number;
+}
+
+/** Axe commercial tracé entre deux provinces d'un pays. */
+export interface TradeAxis {
+  id: number;
+  nation: number;
+  sea: boolean;
+  /** Provinces traversées, dans l'ordre : elles en profitent. Ses deux ports pour une ligne maritime. */
+  provinces: number[];
+  /** Longueur, en cellules, de centre en centre. */
+  length: number;
+  /** Faux : coupé par l'ennemi, ou sous blocus. */
+  active: boolean;
+}
+
+export interface AxisSnapshot {
+  id: number;
+  nation: number;
+  sea: boolean;
+  active: boolean;
+  provinces: number;
+  /** Centres des provinces traversées : x, y, x, y… */
+  points: number[];
+  /** Pour chacune : encore tenue par le pays de l'axe. */
+  held: boolean[];
 }
 
 /** Ce qu'une région agitée demande : des investissements, ou l'indépendance sans combat. */
@@ -75,7 +104,12 @@ export type SimCommand =
   /** Répondre à la demande d'une région agitée. */
   | { type: 'answerDemand'; nation: number; origin: number; accept: boolean }
   | { type: 'proposeAlliance'; nation: number; other: number }
-  | { type: 'breakAlliance'; nation: number; other: number };
+  | { type: 'breakAlliance'; nation: number; other: number }
+  | { type: 'proposeTradeDeal'; nation: number; other: number }
+  | { type: 'endTradeDeal'; nation: number; other: number }
+  | { type: 'setEmbargo'; nation: number; other: number; on: boolean }
+  | { type: 'buildAxis'; nation: number; fromX: number; fromY: number; toX: number; toY: number }
+  | { type: 'removeAxis'; nation: number; id: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -123,6 +157,13 @@ export interface NationSnapshot {
   steel: number;
   /** Une marine ennemie bien plus forte coupe les importations par la mer. */
   blockaded: boolean;
+  /** Accès au commerce, de 0 à 1, et multiplicateur du PIB qui en vient. */
+  trade: number;
+  tradeFactor: number;
+  /** Joueur seulement : accords commerciaux, embargos qu'il impose, et qu'il subit. */
+  deals: number[];
+  embargoes: number[];
+  embargoedBy: number[];
   /** Points de construction par minute. */
   construction: number;
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
@@ -144,6 +185,8 @@ export interface NationSnapshot {
   priorityZones: PriorityZone[];
   /** Agressivité : au-delà d'un seuil, les voisins se coalisent. */
   aggression: number;
+  /** Tempérament de l'IA (indice dans AI_PROFILES). */
+  profile: number;
   /** Diplomatie du joueur (vide pour les autres nations). */
   allies: number[];
   truces: { nation: number; until: number }[];
@@ -212,6 +255,8 @@ export interface SimSnapshot {
   nations: NationSnapshot[];
   offensives: OffensiveSnapshot[];
   pockets: PocketSnapshot[];
+  /** Axes commerciaux du monde, seulement quand ils ont changé. */
+  axes?: AxisSnapshot[];
 }
 
 export type SimEvent =
@@ -226,7 +271,15 @@ export type SimEvent =
   | { type: 'coalition'; tick: number; target: number; members: number[] }
   | { type: 'secession'; tick: number; parent: number; rebel: number }
   | { type: 'demand'; tick: number; parent: number; origin: number; kind: DemandKind }
-  | { type: 'independence'; tick: number; parent: number; rebel: number };
+  | { type: 'independence'; tick: number; parent: number; rebel: number }
+  | { type: 'tradeDeal'; tick: number; a: number; b: number }
+  | { type: 'tradeDealRefused'; tick: number; from: number; to: number }
+  | { type: 'tradeDealEnded'; tick: number; a: number; b: number }
+  | { type: 'embargo'; tick: number; from: number; to: number }
+  | { type: 'embargoLifted'; tick: number; from: number; to: number }
+  | { type: 'axisBuilt'; tick: number; nation: number }
+  | { type: 'axisCut'; tick: number; nation: number; by: number }
+  | { type: 'axisRestored'; tick: number; nation: number };
 
 export interface NationLabel {
   id: number;
@@ -395,5 +448,15 @@ export interface SimSaveState {
   lastPeaceOffer: number[];
   /** Tick de la dernière guerre déclarée au joueur par une IA. */
   lastWarOnPlayer?: number;
+  /** Tempérament de chaque IA. */
+  profiles?: number[];
+  /** Commerce (jalon 9). */
+  tradeDeals?: [number, number][];
+  embargoes?: [number, number][];
+  tradeAccess?: number[];
+  tradeFactor?: number[];
+  coastSeas?: number[];
+  axes?: TradeAxis[];
+  nextAxisId?: number;
   movements: MovementState[];
 }

@@ -1,11 +1,11 @@
 // Flèches d'offensive et poches, dessinées par-dessus les noms de pays.
 import { wrapDeltaX } from '../map/projection.ts';
-import type { OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import type { AxisSnapshot, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import type { Camera } from './Camera.ts';
 
 export interface ArrowDraft {
-  /** Flèche d'offensive, ou ligne fortifiée en projet. */
-  kind: 'arrow' | 'fort';
+  /** Flèche d'offensive, ligne fortifiée ou axe commercial en projet. */
+  kind: 'arrow' | 'fort' | 'axis';
   fromX: number;
   fromY: number;
   toX: number;
@@ -124,6 +124,143 @@ function drawFortLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1:
   ctx.lineCap = 'butt';
 }
 
+const AXIS_COLOR = '247, 236, 205';
+const PARTNER_AXIS_COLOR = '168, 216, 190';
+const AXIS_CASING = '52, 40, 28';
+
+interface RoadEdge {
+  /** Courbe de Bézier du tronçon, à l'écran : départ, deux points de contrôle, arrivée. */
+  curve: [number, number, number, number, number, number, number, number];
+  /** Nombre d'axes qui l'empruntent. */
+  count: number;
+  active: boolean;
+  sea: boolean;
+  own: boolean;
+  color: string;
+}
+
+interface RoadNode {
+  x: number;
+  y: number;
+  end: boolean;
+  lost: boolean;
+  own: boolean;
+  count: number;
+  color: string;
+}
+
+/**
+ * Axes commerciaux, comme le réseau routier d'un atlas : chaque axe passe de ville en ville (le
+ * centre de chaque province traversée) en courbe douce. Les tronçons que plusieurs axes partagent
+ * ne se dessinent qu'une fois, d'autant plus larges qu'ils en portent : on voit des routes
+ * principales et des embranchements. Seuls comptent les siens, ceux de ses partenaires commerciaux
+ * (en vert) et ceux de ses ennemis (en rouge) ; une ville perdue est rouge, un tronçon coupé tireté,
+ * une ligne maritime pointillée.
+ */
+export function drawAxes(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  player: number,
+  atWar: (nation: number) => boolean,
+  partner: (nation: number) => boolean,
+  axes: readonly AxisSnapshot[],
+): void {
+  const { viewWidth, viewHeight, zoom } = camera;
+  const edges = new Map<string, RoadEdge>();
+  const nodes = new Map<string, RoadNode>();
+  for (const axis of axes) {
+    const own = axis.nation === player;
+    const enemy = !own && atWar(axis.nation);
+    if (!own && !enemy && !partner(axis.nation)) continue;
+    const color = own ? AXIS_COLOR : enemy ? ENEMY_COLOR : PARTNER_AXIS_COLOR;
+    const raw = axis.points;
+    if (raw.length < 4) continue;
+    // Points à l'écran, déroulés depuis le premier sans couper la carte au raccord.
+    const xs: number[] = [wrapDeltaX(camera.x, raw[0]) * zoom + viewWidth / 2];
+    const ys: number[] = [(raw[1] - camera.y) * zoom + viewHeight / 2];
+    for (let i = 2; i < raw.length; i += 2) {
+      xs.push(xs[xs.length - 1] + wrapDeltaX(raw[i - 2], raw[i]) * zoom);
+      ys.push((raw[i + 1] - camera.y) * zoom + viewHeight / 2);
+    }
+    const n = xs.length;
+    const keyOf = (i: number) => `${axis.nation}:${raw[2 * i]},${raw[2 * i + 1]}`;
+    for (let i = 0; i < n; i++) {
+      const key = keyOf(i);
+      const node = nodes.get(key) ?? { x: xs[i], y: ys[i], end: false, lost: false, own, count: 0, color };
+      node.end ||= i === 0 || i === n - 1;
+      node.lost ||= axis.held[i] === false;
+      node.count++;
+      nodes.set(key, node);
+    }
+    for (let i = 0; i < n - 1; i++) {
+      const [a, b] = [keyOf(i), keyOf(i + 1)];
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const existing = edges.get(key);
+      if (existing) {
+        existing.count++;
+        existing.active ||= axis.active;
+        continue;
+      }
+      let curve: RoadEdge['curve'];
+      if (axis.sea) {
+        // Une traversée : un arc léger au-dessus de la mer.
+        const bend = 0.18;
+        const qx = (xs[i] + xs[i + 1]) / 2 - (ys[i + 1] - ys[i]) * bend;
+        const qy = (ys[i] + ys[i + 1]) / 2 + (xs[i + 1] - xs[i]) * bend;
+        curve = [xs[i], ys[i], xs[i] + ((qx - xs[i]) * 2) / 3, ys[i] + ((qy - ys[i]) * 2) / 3, xs[i + 1] + ((qx - xs[i + 1]) * 2) / 3, ys[i + 1] + ((qy - ys[i + 1]) * 2) / 3, xs[i + 1], ys[i + 1]];
+      } else {
+        // Catmull-Rom : la courbe passe par chaque ville sans angle.
+        const x0 = xs[Math.max(0, i - 1)];
+        const y0 = ys[Math.max(0, i - 1)];
+        const x3 = xs[Math.min(n - 1, i + 2)];
+        const y3 = ys[Math.min(n - 1, i + 2)];
+        curve = [xs[i], ys[i], xs[i] + (xs[i + 1] - x0) / 6, ys[i] + (ys[i + 1] - y0) / 6, xs[i + 1] - (x3 - xs[i]) / 6, ys[i + 1] - (y3 - ys[i]) / 6, xs[i + 1], ys[i + 1]];
+      }
+      edges.set(key, { curve, count: 1, active: axis.active, sea: axis.sea, own, color });
+    }
+  }
+  if (edges.size === 0) return;
+
+  const widthOf = (edge: { own: boolean; count: number }) => (edge.own ? 3.5 : 3) + 1.6 * (Math.min(4, edge.count) - 1);
+  const stroke = (edge: RoadEdge) => {
+    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = edge.curve;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x1, y1);
+    ctx.stroke();
+  };
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // D'abord toutes les bordures, puis toutes les bandes claires : les croisements se fondent.
+  for (const edge of edges.values()) {
+    ctx.setLineDash(edge.sea ? [5, 7] : []);
+    ctx.lineWidth = widthOf(edge) + 3.5;
+    ctx.strokeStyle = `rgba(${AXIS_CASING}, ${edge.sea ? 0.55 : 0.85})`;
+    stroke(edge);
+  }
+  for (const edge of edges.values()) {
+    ctx.setLineDash(edge.sea ? [5, 7] : edge.active ? [] : [7, 7]);
+    ctx.lineWidth = widthOf(edge);
+    ctx.strokeStyle = `rgba(${edge.sea ? SEA_COLOR : edge.color}, 0.95)`;
+    stroke(edge);
+  }
+  ctx.setLineDash([]);
+  // Les villes : plus grosses aux bouts et aux carrefours, rouges si elles sont perdues.
+  for (const node of nodes.values()) {
+    const base = node.own ? 3.5 : 3;
+    const radius = node.end ? base + 2.5 : node.count > 1 ? base + 1.2 : base * 0.8 + 1.2;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = node.lost ? `rgb(${ENEMY_COLOR})` : `rgb(${node.color})`;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `rgba(${AXIS_CASING}, 0.9)`;
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+}
+
 /** Secteurs prioritaires du joueur : cercles tiretés. */
 export function drawPriorityZones(ctx: CanvasRenderingContext2D, camera: Camera, zones: readonly { x: number; y: number }[], radius: number): void {
   const { viewWidth, viewHeight, zoom } = camera;
@@ -207,7 +344,22 @@ export function drawCampaign(
     drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, fill, own || enemy ? 0.8 : 0.35, offensive.inTransit);
   }
 
-  if (draft && draft.kind === 'fort') {
+  if (draft && draft.kind === 'axis') {
+    const x0 = toScreenX(draft.fromX);
+    const y0 = toScreenY(draft.fromY);
+    const x1 = x0 + wrapDeltaX(draft.fromX, draft.toX) * zoom;
+    const y1 = y0 + (draft.toY - draft.fromY) * zoom;
+    ctx.setLineDash([10, 6]);
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = draft.valid ? `rgba(${AXIS_COLOR}, 0.9)` : `rgba(${ENEMY_COLOR}, 0.9)`;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineCap = 'butt';
+  } else if (draft && draft.kind === 'fort') {
     const x0 = toScreenX(draft.fromX);
     const y0 = toScreenY(draft.fromY);
     const x1 = x0 + wrapDeltaX(draft.fromX, draft.toX) * zoom;

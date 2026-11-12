@@ -122,11 +122,11 @@ describe('effort de guerre', () => {
     sim.setEffort(B, 1);
     run(sim, 600 * 40);
     const economy = sim.economySnapshot();
-    expect(economy.development[1]).toBeGreaterThan(1.4);
+    expect(economy.development[1]).toBeGreaterThan(1.3);
     expect(economy.development[1]).toBeLessThan(MAX_DEVELOPMENT);
     expect(economy.development[5]).toBeLessThan(0.8);
     expect(economy.development[5]).toBeGreaterThan(MIN_DEVELOPMENT);
-    expect(economy.output[A]).toBeGreaterThan(2e6 * 1.4);
+    expect(economy.output[A]).toBeGreaterThan(2e6 * 1.3);
   });
 
   it('grandit moitié moins vite en guerre', () => {

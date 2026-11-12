@@ -81,6 +81,112 @@ les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauve
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
 
+## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
+
+Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque
+IA tire un tempérament d'après la graine de la partie (`AI_PROFILES` dans `balance.ts`), visible
+dans la fiche d'un pays :
+
+| Tempérament | Part | Guerre | Commerce | Chantiers |
+|---|---|---|---|---|
+| Prudent | 35 % | comportement de base : attaque à 1,4 contre 1 | de base | de base |
+| Belliqueux | 15 % | tiré 6 fois plus souvent pour déclarer une guerre, attaque à 1,05 contre 1, effort +15 %, se bat plus longtemps | propose peu, ne sanctionne personne | un axe |
+| Commerçant | 30 % | tiré 4 fois moins souvent, attaque à 2 contre 1, veut vite la paix | propose 3 fois plus d'accords, embargo dès 45 % d'agressivité d'un voisin, quatre axes | +20 % |
+| Bâtisseur | 20 % | peu agressif | de base | +60 %, trois axes |
+
+Contre le joueur, chaque IA exige le rapport de force du joueur (2 contre 1) à proportion du sien :
+un belliqueux l'attaque déjà à 1,5 contre 1, un commerçant presque jamais.
+
+**État des lieux avant réglage** (partie de 120 min sans joueur) : 99 guerres et 46 capitulations,
+mais une carte figée (la Russie à 23 % des terres du début à la fin), une croissance débridée
+(États-Unis +121 %, Allemagne +168 %), aucun embargo, aucune coalition, aucun soulèvement.
+
+**Réglages retenus**, sur trois graines à chaque essai : croissance de l'industrie ramenée de 0,02
+à 0,014 par minute, développement plafonné à 1,6 au lieu de 1,8. Résultat, sur trois parties :
+
+| Tempérament | Survivants | Guerres déclarées par pays | PIB des survivants | Accords |
+|---|---|---|---|---|
+| Prudent | 65 à 84 % | 0,36 à 0,52 | +51 à +53 % | 1,6 à 1,9 |
+| Belliqueux | 75 à 79 % | 0,92 à 1,39 | −5 à +3 % | 1,0 à 1,3 |
+| Commerçant | 72 à 76 % | 0,27 à 0,30 | +58 à +68 % | 2,3 à 2,6 |
+| Bâtisseur | 69 à 74 % | 0,38 à 0,45 | +61 à +69 % | 1,6 à 2,0 |
+
+Les belliqueux font trois à cinq fois plus de guerres que les commerçants et y usent leur économie ;
+les commerçants et les bâtisseurs s'enrichissent. 0 à 30 embargos selon la partie, contre aucun
+auparavant : quand un belliqueux dépasse 45 % d'agressivité, ses voisins commerçants le
+sanctionnent. 81 à 107 guerres, 49 à 60 capitulations. Les plus grands pays en paix grandissent
+encore beaucoup (Japon +129 à +145 %) ; la carte reste peu changeante : aucun empire ne se forme.
+
+## Illustrations, deuxième série (pendant le jalon 9)
+
+329 images de plus, générées en 44 min sans échec par le même outil : un blason pour chacune des 282
+régions historiques (motifs écrits à la main dans `data/blasons.json` : l'hermine et le voilier de
+la Bretagne, le mouflon de la Corse, la licorne et le chardon de l'Écosse…), deux scènes de plus de
+guerre et de soulèvement, une de plus pour la coalition, les investissements, l'indépendance et
+l'offre de paix, deux écrans d'accueil, l'axe commercial, et deux paysages de plus par terrain et
+par état. Le jeu alterne les scènes d'un même événement, donne à chaque province l'un des trois
+paysages de son terrain, et change d'écran d'accueil d'une visite à l'autre. Relues en planches :
+trois refaites (un vrai drapeau dans un soulèvement, le modèle y revenant deux fois, d'où un autre
+sujet ; une vallée de montagne en deux panneaux ; un ciel en bandes). `public/art` pèse 9,6 Mo.
+
+## État du jalon 9
+
+**Commerce entre pays.** Le marché mondial abstrait disparaît. Un pays commerce avec ses voisins
+par la terre, et par la mer avec tout pays qui borde une même mer que lui. La guerre, l'embargo et
+le blocus coupent ces échanges. Son **accès au commerce** est la part, pondérée par le PIB, de ses
+partenaires possibles avec qui il commerce encore : ses importations de pétrole et d'acier en
+dépendent, et 15 % de son PIB et de sa capacité (un pays coupé de tous les perd). Une guerre contre
+un gros partenaire coûte donc plus qu'une guerre contre un petit.
+
+**Accords et embargos** (fiche d'un pays). Un accord commercial rapporte 3 % de PIB et de capacité,
+moins si le partenaire est plus petit (10 % au plus, 4 accords au plus), et, avec un pays qui a du
+pétrole ou de l'acier à revendre, 10 % de ses besoins en plus. L'IA signe avec qui elle commerce,
+sauf un pays trop agressif. Un embargo rompt l'accord et coupe le commerce dans les deux sens ; l'IA
+en impose un à tout voisin dont l'agressivité dépasse 60 %, et le lève sous 40 % : le belliciste
+s'isole.
+
+**Axes commerciaux** (onglet Économie, « Tracer un axe commercial ») : une route et une voie ferrée
+entre deux de ses provinces, **de ville en ville** : le plus court chemin entre les centres des
+provinces qu'on tient ; à défaut de chemin, une ligne maritime entre deux côtes. Chaque province
+traversée gagne 10 % de PIB et de capacité (deux axes au plus), et l'axe compte comme équipement
+pour ses régions historiques. 80 points plus 2 par cellule de longueur, 6 axes au plus. **L'ennemi
+qui prend une seule province du tracé le coupe** (une ligne maritime : un port, ou le blocus) : il
+ne rapporte plus rien, jusqu'à ce qu'on la reprenne. L'IA trace, en paix, deux axes au plus entre
+ses provinces riches.
+
+Le premier rendu, des traits droits et fins pour les axes de tous les pays, ressemblait à des
+rayures sur la carte (« les routes sont vraiment dégueulasses »). Un axe se dessine désormais comme
+une route d'atlas : une courbe douce passant par chaque ville, un trait sombre bordant une bande
+claire, un point à chaque ville (rouge si elle est perdue), tireté s'il est coupé, pointillé en
+mer. Seuls apparaissent ses axes et ceux de ses ennemis (en rouge).
+
+Ensuite, pour éviter les routes superposées (« les faire fusionner, quitte à les montrer plus
+larges ») : un nouvel axe reprend volontiers les tronçons déjà tracés (comptés pour moitié de leur
+longueur dans la recherche du chemin, et gratuits à construire), et un tronçon que plusieurs axes
+partagent ne se dessine qu'une fois, plus large selon le nombre d'axes qu'il porte. Le réseau se
+ramifie comme un réseau ferré : Marseille–Bordeaux reprend Paris–Marseille jusqu'à l'embranchement.
+
+**Routes internationales**, demandées ensuite : avec un accord commercial, un axe peut traverser la
+frontière et arriver chez le partenaire (Paris–Strasbourg–Francfort). Chaque province traversée gagne
+son bonus, des deux côtés : la route enrichit aussi le partenaire. Elle part toujours de chez soi,
+et c'est soi qui la paie. La fin de l'accord, une guerre entre les deux pays ou une province du
+tracé prise par un tiers la coupe ; un nouvel accord la rétablit. Les routes des partenaires
+commerciaux s'affichent en vert.
+
+**Interface.** Barre du haut : l'accès au commerce. Onglet Économie : accès, effet sur le PIB,
+accords, embargos donnés et subis, axes (actif ou coupé, à supprimer). Fiche d'un pays : l'état du
+commerce avec lui, « Accord commercial » ou « Rompre l'accord », « Embargo » ou « Lever
+l'embargo ». Le journal ne montre que le commerce qui te concerne.
+
+**Banc d'essai** (120 min jouées par l'IA, avant le dernier réglage des axes) : 111 accords, aucun
+embargo (aucune IA n'atteint 60 % d'agressivité), accès moyen au commerce de 97 %, 4 ou 5 pays sous
+50 % ; 85 axes, dont 2 coupés (avant le tracé de ville en ville). Croissance du même ordre que sans commerce (États-Unis +112 %
+contre +111 %). Tick : max 49 ms. Tests : 172 réussis, dont 13 sur le commerce ; les tests qui
+isolent l'arrière, la logistique ou la diplomatie désactivent le commerce (option `trade: false`).
+
+**Non vérifié en partie réelle :** un embargo subi par le joueur trop agressif, un axe coupé par un
+ennemi, une ligne maritime au navigateur.
+
 ## Régions historiques (complément du jalon 8)
 
 Demandé après le jalon 11 : seuls les pays conquis se soulevaient, jamais un ensemble de

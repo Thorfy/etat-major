@@ -9,6 +9,7 @@ import { inflateSync } from 'node:zlib';
 import { findLandNeighbors } from '../src/map/adjacency.ts';
 import { decodeRle } from '../src/map/codec.ts';
 import type { WorldData } from '../src/map/types.ts';
+import { AI_PROFILES } from '../src/sim/balance.ts';
 import { Simulation } from '../src/sim/Simulation.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,6 +57,7 @@ function worldGame(durationMinutes: number, seed: number) {
   const durations: number[] = [];
   let capitulations = 0;
   let wars = 0;
+  const declaredBy = new Float64Array(world.nations.length + 1);
   let maxBytes = 0;
   const firstLosses: string[] = [];
   const diplomacy: Record<string, number> = {};
@@ -71,7 +73,10 @@ function worldGame(durationMinutes: number, seed: number) {
     maxBytes = Math.max(maxBytes, changes.cells.byteLength + changes.owners.byteLength);
     for (const event of changes.events) {
       diplomacy[event.type] = (diplomacy[event.type] ?? 0) + 1;
-      if (event.type === 'war') wars++;
+      if (event.type === 'war') {
+        wars++;
+        declaredBy[event.a]++;
+      }
       else if (event.type === 'capitulation') {
         capitulations++;
         if (firstLosses.length < 8) {
@@ -105,6 +110,24 @@ function worldGame(durationMinutes: number, seed: number) {
       console.log(`         Diplomatie : ${diplomacy.peace ?? 0} paix, ${diplomacy.coalition ?? 0} coalitions, ${diplomacy.secession ?? 0} soulèvements, ${diplomacy.independence ?? 0} indépendances accordées`);
       console.log(`         Régions annexées : ${movements.length}, dont ${restless.length} agitées (max ${(Math.max(0, ...restless.map((movement) => movement.unrest)) * 100).toFixed(0)} %), ${movements.filter((movement) => movement.investing).length} avec investissements en chantier`);
       console.log(`         PIB : ${richest.join(', ')}`);
+      {
+        const internals = sim as unknown as { tradeDeals: unknown[]; embargoes: unknown[] };
+        let accessSum = 0;
+        let alive = 0;
+        let cutOff = 0;
+        for (let n = 1; n <= world.nations.length; n++) {
+          if (!sim.isAlive(n)) continue;
+          alive++;
+          accessSum += sim.tradeAccessOf(n);
+          if (sim.tradeAccessOf(n) < 0.5) cutOff++;
+        }
+        const axes = sim.tradeAxes;
+        console.log(
+          `         Commerce : ${internals.tradeDeals.length} accords, ${internals.embargoes.length} embargos, accès moyen ` +
+            `${((accessSum / Math.max(1, alive)) * 100).toFixed(0)} %, ${cutOff} pays sous 50 %, ` +
+            `${axes.length} axes (${axes.filter((axis) => !axis.active).length} coupés)`,
+        );
+      }
       let atWar = 0;
       let stabilitySum = 0;
       let manpowerSum = 0;
@@ -131,6 +154,28 @@ function worldGame(durationMinutes: number, seed: number) {
       const counters = sim.offensives.filter((offensive) => offensive.counter).length;
       console.log(`         Arrière : ${atWar} nations en guerre, stabilité moyenne ${atWar ? (stabilitySum / atWar).toFixed(2) : '-'}, réservoir moyen ${atWar ? ((manpowerSum / atWar) * 100).toFixed(0) : '-'} %, ${blockaded} sous blocus, ${factories} niveaux d'usine bâtis, ${fortified} cellules fortifiées, ${counters} contre-attaques en cours`);
       console.log(`         Bâtiments : ${levels}`);
+    }
+  }
+  {
+    // Bilan par tempérament, sur les 193 pays du départ.
+    const rows = AI_PROFILES.map((profile) => ({ name: profile.name, count: 0, alive: 0, wars: 0, growth: 0, deals: 0, axes: 0 }));
+    for (let n = 1; n <= world.nations.length; n++) {
+      if (world.nations[n - 1].parent !== undefined) continue;
+      const row = rows[sim.profileOf(n)];
+      row.count++;
+      row.wars += declaredBy[n];
+      if (!sim.isAlive(n)) continue;
+      row.alive++;
+      row.growth += sim.outputOf(n) / Math.max(1, world.nations[n - 1].gdpMusd) - 1;
+      row.deals += sim.dealsOf(n).length;
+      row.axes += sim.tradeAxes.filter((axis) => axis.nation === n).length;
+    }
+    for (const row of rows) {
+      console.log(
+        `  ${row.name.padEnd(11)} : ${row.alive}/${row.count} en vie, ${(row.wars / Math.max(1, row.count)).toFixed(2)} guerres déclarées par pays, ` +
+          `PIB ${row.alive ? ((row.growth / row.alive) * 100).toFixed(0) : '-'} %, ${row.alive ? (row.deals / row.alive).toFixed(1) : '-'} accords et ` +
+          `${row.alive ? (row.axes / row.alive).toFixed(1) : '-'} axes par survivant`,
+      );
     }
   }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);

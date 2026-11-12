@@ -12,7 +12,7 @@ import { MAP_MODES, TopBar } from './TopBar.tsx';
 import { SetupPanel } from './SetupPanel.tsx';
 import { describeEvent, eventKey, eventNations } from '../game/events.ts';
 import { formatDuration, formatShortDate } from '../game/time.ts';
-import { ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
+import { AI_PROFILES, ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
 import { formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
@@ -77,7 +77,25 @@ function Journal({ game, nameOf }: { game: GameClient; nameOf(id: number): strin
   );
 }
 
+/** L'écran d'accueil change d'une visite à l'autre, parmi trois scènes. */
+const WELCOME_ART = ['ecrans/accueil', 'ecrans/accueil-2', 'ecrans/accueil-3'][Math.floor(Math.random() * 3)];
+
 const RELATIONS = { war: 'en guerre', ally: 'pacte de non-agression', truce: 'trêve', peace: 'en paix' } as const;
+/** Ce que chaque tempérament de l'IA veut dire, au survol. */
+const PROFILE_HINTS = [
+  "Attaque à l'occasion un voisin nettement plus faible.",
+  'Attaque souvent, à force presque égale, et se bat longtemps. Ne sanctionne personne.',
+  'Attaque rarement, signe volontiers des accords, trace des axes, sanctionne vite les agresseurs.',
+  'Peu agressif, bâtit beaucoup.',
+];
+
+const TRADE_RELATIONS = {
+  deal: 'accord commercial',
+  embargo: 'ton embargo',
+  embargoed: 'son embargo contre toi',
+  war: 'coupé par la guerre',
+  free: 'échanges libres',
+} as const;
 
 /**
  * Diplomatie avec le pays sélectionné : toujours les mêmes lignes, et deux boutons à la même place
@@ -93,6 +111,8 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
   const mine = game.nationEconomy(game.player).capacity;
   const theirs = game.nationEconomy(nation).capacity;
   const canWar = game.canDeclareWar(nation);
+  const trade = game.tradeRelationOf(nation);
+  const profile = game.profileOf(nation);
   return (
     <>
       <h3>Diplomatie</h3>
@@ -108,6 +128,10 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
         </dd>
         <dt>Agressivité</dt>
         <dd class={aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>{formatPercent(aggression)}</dd>
+        <dt>Tempérament</dt>
+        <dd title={PROFILE_HINTS[profile] ?? ''}>{AI_PROFILES[profile]?.name ?? '—'}</dd>
+        <dt>Commerce</dt>
+        <dd class={trade === 'deal' ? 'ahead' : trade === 'free' ? '' : 'behind'}>{TRADE_RELATIONS[trade]}</dd>
         <dt>Pactes</dt>
         <dd>{alliances.treaty.length > 0 ? alliances.treaty.map(nameOf).join(', ') : 'aucun'}</dd>
         <dt>Soulèvement</dt>
@@ -145,6 +169,18 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
           onClick={() => game.declareWar(nation)}
         >
           {relation === 'war' ? 'En guerre' : 'Déclarer la guerre'}
+        </button>
+        {trade === 'deal' ? (
+          <button class="action quiet" onClick={() => game.endTradeDeal(nation)}>
+            Rompre l'accord
+          </button>
+        ) : (
+          <button class="action quiet" disabled={trade !== 'free'} onClick={() => game.proposeTradeDeal(nation)}>
+            Accord commercial
+          </button>
+        )}
+        <button class="action quiet" onClick={() => game.setEmbargo(nation, trade !== 'embargo')}>
+          {trade === 'embargo' ? "Lever l'embargo" : 'Embargo'}
         </button>
       </div>
     </>
@@ -301,20 +337,24 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
   const popup = game.popups[0];
   const content = popupContent(game, popup, nameOf);
   const nations = game.worldData.nations;
-  // Deux variantes pour les guerres et les soulèvements, en alternance.
-  const variant = (popup.id % 2) + 1;
+  // Plusieurs scènes par événement, en alternance : quatre pour les guerres et les soulèvements,
+  // deux pour les autres (la première sans numéro).
+  const pick = (base: string, count: number, numbered = false) => {
+    const variant = (popup.id % count) + 1;
+    return numbered || variant > 1 ? `evenements/${base}-${variant}` : `evenements/${base}`;
+  };
   const art =
     popup.kind === 'war'
-      ? `evenements/guerre-${variant}`
+      ? pick('guerre', 4, true)
       : popup.kind === 'uprising'
         ? popup.coalition
-          ? 'evenements/coalition'
-          : `evenements/soulevement-${variant}`
+          ? pick('coalition', 2)
+          : pick('soulevement', 4, true)
         : popup.kind === 'demand'
           ? popup.demand === 'investment'
-            ? 'evenements/investissements'
-            : 'evenements/independance'
-          : 'evenements/offre-paix';
+            ? pick('investissements', 2)
+            : pick('independance', 2)
+          : pick('offre-paix', 2);
   return (
     <div class="dialog-backdrop">
       <section class={`panel dialog event ${popup.kind}`} role="alertdialog" aria-labelledby="event-title">
@@ -407,7 +447,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       ) : (
         <>
           <div class="panel title hero">
-            <Art id="ecrans/accueil" class="hero-art" eager />
+            <Art id={WELCOME_ART} class="hero-art" eager />
             <p>
               <strong>État-major</strong> · grande stratégie
             </p>
@@ -434,7 +474,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       </div>
       {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
-          <Art id={landscapeOf(state.selected.terrain, provinceGdp, selected.areaKm2, development)} class="card-banner" />
+          <Art id={landscapeOf(state.selected.terrain, provinceGdp, selected.areaKm2, development, provinceId)} class="card-banner" />
           <button class="close" aria-label="Fermer" onClick={() => view.select()}>
             ×
           </button>

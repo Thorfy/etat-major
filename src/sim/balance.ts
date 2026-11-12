@@ -236,11 +236,11 @@ export const EFFORT_CHANGE_PER_SECOND = 0.008;
  * Croissance de l'industrie par minute, à effort nul : (effort par défaut − effort) × 2 ×
  * ce réglage. Au-dessus de l'effort par défaut, l'industrie s'use au même rythme.
  */
-export const GROWTH_PER_MINUTE = 0.02;
+export const GROWTH_PER_MINUTE = 0.014;
 /** En guerre, la croissance est réduite d'autant. */
 export const AT_WAR_GROWTH = 0.5;
 /** Bornes du développement d'une province, relatif à son niveau de départ. */
-export const MAX_DEVELOPMENT = 1.8;
+export const MAX_DEVELOPMENT = 1.6;
 export const MIN_DEVELOPMENT = 0.6;
 /** Destructions : part du développement perdue quand une province change de mains. */
 export const CAPTURE_DAMAGE = 0.15;
@@ -252,6 +252,35 @@ export const AI_PEACE_EFFORT = 0.35;
 export const AI_WAR_EFFORT = 0.65;
 export const AI_DESPERATE_EFFORT = 0.9;
 export const AI_EFFORT_SPREAD = 0.1;
+
+/**
+ * Tempéraments de l'IA, tirés pour chaque pays d'après la graine de la partie :
+ * - `war` : poids de chaque pays dans le tirage de qui déclare la guerre ;
+ * - `warRatio` : rapport de force qu'il exige pour attaquer une IA (le joueur, à proportion) ;
+ * - `effort` : écart d'effort de guerre ; `peaceStability` : multiplie la lassitude qui le fait
+ *   vouloir la paix (sous 1, il se bat plus longtemps) ;
+ * - `trade` : poids dans le tirage de qui propose un accord ; `embargoAt` : agressivité d'un
+ *   voisin qui lui fait imposer un embargo ; `maxAxes` : axes qu'il trace en paix ;
+ * - `build` : multiplie sa chance de lancer un chantier.
+ */
+export interface AiProfile {
+  name: string;
+  share: number;
+  war: number;
+  warRatio: number;
+  effort: number;
+  peaceStability: number;
+  trade: number;
+  embargoAt: number;
+  maxAxes: number;
+  build: number;
+}
+export const AI_PROFILES: readonly AiProfile[] = [
+  { name: 'prudent', share: 0.35, war: 1, warRatio: 1.4, effort: 0, peaceStability: 1, trade: 1, embargoAt: 0.6, maxAxes: 2, build: 1 },
+  { name: 'belliqueux', share: 0.15, war: 6, warRatio: 1.05, effort: 0.15, peaceStability: 0.6, trade: 0.2, embargoAt: 2, maxAxes: 1, build: 0.8 },
+  { name: 'commerçant', share: 0.3, war: 0.25, warRatio: 2, effort: -0.05, peaceStability: 1.4, trade: 3, embargoAt: 0.45, maxAxes: 4, build: 1.2 },
+  { name: 'bâtisseur', share: 0.2, war: 0.6, warRatio: 1.6, effort: -0.05, peaceStability: 1.2, trade: 1, embargoAt: 0.6, maxAxes: 3, build: 1.6 },
+];
 
 /** Capacité militaire de départ d'une nation, répartie ensuite entre ses provinces. */
 export function baseCapacity(population: number, gdpMusd: number): number {
@@ -301,6 +330,53 @@ export const RESOURCE_NEED_RATIO = 0.8;
 /** Part des besoins importable : par la mer, ou par la terre seule (pays enclavé ou bloqué). */
 export const SEA_IMPORT_SHARE = 0.7;
 export const LAND_IMPORT_SHARE = 0.4;
+
+// ---------------------------------------------------------------------------
+// Commerce (jalon 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Un pays commerce avec ses voisins par la terre, et par la mer avec tout pays qui borde une même
+ * mer que lui. La guerre, l'embargo et le blocus coupent ces échanges. Son accès au commerce est la
+ * part, pondérée par le PIB, de ses partenaires possibles avec qui il commerce encore ; ses
+ * importations de pétrole et d'acier en dépendent, et TRADE_DEPENDENCE de son PIB et de sa capacité :
+ * un pays coupé de tous perd cette part.
+ */
+export const TRADE_DEPENDENCE = 0.15;
+/** Accord commercial : ce gain de PIB et de capacité, réduit si le partenaire est plus petit. */
+export const TRADE_DEAL_GAIN = 0.03;
+export const TRADE_DEAL_CAP = 0.1;
+export const MAX_TRADE_DEALS = 4;
+/** Un accord avec un pays qui a du pétrole (ou de l'acier) à revendre en couvre cette part des besoins. */
+export const TRADE_DEAL_RESOURCES = 0.1;
+/** L'IA impose un embargo à un voisin plus agressif que ça, et le lève sous EMBARGO_LIFT_AGGRESSION. */
+export const EMBARGO_AGGRESSION = 0.6;
+export const EMBARGO_LIFT_AGGRESSION = 0.4;
+/** Chance, à chaque passe de diplomatie, qu'une IA propose un accord commercial. */
+export const AI_TRADE_DEAL_CHANCE = 0.3;
+/**
+ * Axes commerciaux (routes et voies ferrées, ou lignes maritimes) tracés entre deux provinces de son
+ * sol : chaque province traversée gagne AXIS_BONUS de PIB et de capacité, pour deux axes au plus.
+ * Un axe dont une cellule tombe aux mains d'un autre pays (ou une ligne maritime sous blocus) est
+ * coupé : il ne rapporte plus rien tant qu'on ne l'a pas repris.
+ */
+export const AXIS_BONUS = 0.1;
+export const AXIS_MAX_PER_PROVINCE = 2;
+export const MAX_AXES = 6;
+export const MAX_AXIS_CELLS = 400;
+export const AXIS_COST_BASE = 80;
+export const AXIS_COST_PER_CELL = 2;
+export const SEA_AXIS_COST_PER_CELL = 1;
+/**
+ * Un nouvel axe emprunte volontiers les tronçons déjà tracés : ils comptent pour cette part de leur
+ * longueur dans la recherche du chemin, et ne coûtent rien à construire. Le réseau se ramifie
+ * au lieu de doubler ses routes.
+ */
+export const AXIS_REUSE_WEIGHT = 0.5;
+/** L'IA trace un axe, en paix, entre deux de ses provinces riches assez éloignées. */
+export const AI_AXIS_MIN_DISTANCE = 25;
+export const AI_MAX_AXES = 2;
+export const AI_AXIS_CHANCE = 0.15;
 /** Une marine ennemie au moins ce nombre de fois plus forte impose un blocus. */
 export const BLOCKADE_RATIO = 2;
 /** Part de la production d'un gisement occupé qui revient à l'occupant. */

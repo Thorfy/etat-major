@@ -18,7 +18,8 @@ const H = 40;
  * bouclage de la carte. Provinces de 20 colonnes. La province 4 de B, collée à A, porte du
  * pétrole ; A n'en a pas.
  */
-function config(options: { gdpA?: number; gdpB?: number; ai?: boolean; seed?: number } = {}): SimConfig {
+/** Sans commerce par défaut : ces tests mesurent l'arrière, sans le jalon 9. */
+function config(options: { gdpA?: number; gdpB?: number; ai?: boolean; seed?: number; trade?: boolean } = {}): SimConfig {
   const ownerGrid = new Uint16Array(W * H);
   const provinceGrid = new Uint16Array(W * H);
   for (let y = 0; y < H; y++) {
@@ -51,6 +52,7 @@ function config(options: { gdpA?: number; gdpB?: number; ai?: boolean; seed?: nu
     seed: options.seed ?? 2,
     player: A,
     ai: options.ai ?? false,
+    trade: options.trade ?? false,
   };
 }
 
@@ -223,7 +225,7 @@ describe('chantiers', () => {
   it('fait bâtir l\'IA', () => {
     const sim = new Simulation(config({ ai: true, seed: 3 }));
     run(sim, 600 * 10);
-    const built = [1, 2, 3, 4, 5, 6].reduce((total, p) => total + sim.factories[p] + sim.infrastructure[p], 0);
+    const built = [1, 2, 3, 4, 5, 6].reduce((total, p) => total + sim.factories[p] + sim.infrastructure[p], 0) + sim.tradeAxes.length;
     expect(built).toBeGreaterThan(0);
   });
 });
