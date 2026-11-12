@@ -20,6 +20,8 @@ interface LabelEntry {
   name: string;
   label: NationData['label'];
   refWidth: number;
+  /** Nation disparue, ou région pas encore née. */
+  hidden: boolean;
 }
 
 export class Labels {
@@ -33,7 +35,7 @@ export class Labels {
     this.ctx.font = FONT(REFERENCE_FONT_PX);
     this.entries = nations.map((nation, index) => {
       const name = nation.name.toUpperCase();
-      return { id: index + 1, name, label: nation.label, refWidth: this.ctx.measureText(name).width };
+      return { id: index + 1, name, label: nation.label, refWidth: this.ctx.measureText(name).width, hidden: nation.parent !== undefined };
     });
     this.sort();
   }
@@ -42,16 +44,15 @@ export class Labels {
     this.entries.sort((a, b) => b.label.r - a.label.r);
   }
 
-  /** Un rayon négatif retire le nom : la nation n'existe plus. */
+  /** Un rayon négatif cache le nom : la nation n'existe plus, ou pas encore. */
   update(labels: readonly NationLabel[]): void {
     const byId = new Map(labels.map((label) => [label.id, label]));
-    this.entries = this.entries.filter((entry) => {
+    for (const entry of this.entries) {
       const label = byId.get(entry.id);
-      if (!label) return true;
-      if (label.r < 0) return false;
-      entry.label = { x: label.x, y: label.y, r: label.r };
-      return true;
-    });
+      if (!label) continue;
+      entry.hidden = label.r < 0;
+      if (!entry.hidden) entry.label = { x: label.x, y: label.y, r: label.r };
+    }
     this.sort();
   }
 
@@ -74,7 +75,8 @@ export class Labels {
     ctx.lineJoin = 'round';
 
     const placed: Box[] = [];
-    for (const { name, label, refWidth } of this.entries) {
+    for (const { name, label, refWidth, hidden } of this.entries) {
+      if (hidden) continue;
       const inscribed = label.r * zoom;
       const fitted = (REFERENCE_FONT_PX * inscribed * 2.6) / refWidth;
       const fontPx = Math.min(MAX_FONT_PX, inscribed * 0.8, fitted);

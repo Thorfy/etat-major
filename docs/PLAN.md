@@ -81,6 +81,45 @@ les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauve
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
 
+## Régions historiques (complément du jalon 8)
+
+Demandé après le jalon 11 : seuls les pays conquis se soulevaient, jamais un ensemble de
+départements d'un même pays. Désormais, la Bretagne peut quitter la France, la Catalogne
+l'Espagne, l'Écosse le Royaume-Uni, sous des noms cohérents avec leur histoire, jamais une
+« Île-de-France ».
+
+**Catalogue écrit à la main** (`data/regions.json`) : 282 régions dans 95 pays. Chacune a le nom
+du pays qui naîtrait (« Duché de Bretagne », « République corse », « Royaume d'Écosse »,
+« République du Texas », « État du Katanga »…), une identité de 1 (faible) à 4 (très forte), et ses
+subdivisions Natural Earth, par code ISO (`FR-29`), par région Natural Earth (`region:Cataluña`) ou
+par territoire rattaché (`a0:GRL` pour le Groenland). La Bretagne historique reprend la
+Loire-Atlantique ; l'Auvergne est un « Duché d'Auvergne » d'identité faible, qui ne bouge que dans
+un pays à bout ou envahi, et peut alors suivre un voisin qui se soulève. Le cœur de chaque pays
+(sa capitale et ce qui l'entoure) n'y figure jamais.
+
+**Carte.** Chaque région est une nation en sommeil, ajoutée après les 193 pays : elle ne possède
+rien au départ, ses provinces portent son indice. La fusion des petites provinces ne franchit plus
+les frontières historiques : Hong Kong, Zanzibar ou la Transnistrie gardent leurs provinces. La
+carte change donc : **les sauvegardes d'avant ne se chargent plus.**
+
+**Règles.** Une région historique encore à son pays s'agite comme une région annexée, plafond
+multiplié par son identité (0,6 à 0,9). Dans un pays stable et en paix, seule une identité très
+forte demande des investissements ; la guerre, l'instabilité et l'invasion (chaque point de
+territoire d'origine perdu monte le plafond de 1,5) réveillent les autres. L'IA ne laisse partir
+une région historique qu'en guerre. Reprise par son pays, une région indépendante redevient un
+mouvement en sommeil. Les régions agitées qui se touchent se soulèvent ensemble, en coalition.
+
+**Interface.** La fiche d'une province donne sa région historique et son agitation ; l'onglet
+Diplomatie liste les régions agitées, avec leur identité, et nomme les régions calmes. Le nom d'un
+pays qui naît apparaît aussitôt sur la carte (un pays ressuscité restait sans nom auparavant).
+
+**Banc d'essai** (partie mondiale de 120 min jouée par l'IA) : 11 régions historiques nées, toutes
+accordées en paix par un pays en guerre (Voïvodine, Alsace-Lorraine, Duché de Bretagne, États
+shan, Pount, Crète…), une cinquantaine au seuil des demandes à tout moment ; sans le facteur
+d'invasion, seulement 4. Tick : médiane 0,05 ms, max 43 ms (71 ms avant). Tests : 159 réussis.
+Non vérifié : un soulèvement de région historique né naturellement dans une partie au navigateur
+(vu en forçant la naissance de la Bretagne, de la Catalogne, de l'Écosse et de la Sicile).
+
 ## État du jalon 11
 
 **Style retenu par le joueur, parmi quatre essais :** une sérigraphie trois couleurs (bleu-vert

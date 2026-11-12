@@ -29,8 +29,10 @@ export function SetupPanel({ nations, picked, onStart, onResume }: SetupProps) {
     void listSaves().then(setSaves);
   }, []);
 
+  // Les régions historiques, en sommeil, ne se jouent pas.
   const options = nations
-    .map((nation, index) => ({ id: index + 1, name: nation.name }))
+    .map((nation, index) => ({ id: index + 1, name: nation.name, region: nation.parent !== undefined }))
+    .filter((option) => !option.region)
     .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   return (

@@ -48,7 +48,7 @@ export const BUILD_EFFECTS: Record<BuildKind, string> = {
     `L'assaillant y voit son rapport de force divisé par ${Math.exp(FORT_DEFENSE).toLocaleString('fr-FR', { maximumFractionDigits: 1 })}, ` +
     `et chaque cellule tombe ${percent(1 - FORT_SPEED)} moins vite.`,
   investment:
-    `Promis à une région annexée qui s'agite. Pendant le chantier, elle se tient tranquille ; achevé, il ` +
+    `Promis à une région qui s'agite. Pendant le chantier, elle se tient tranquille ; achevé, il ` +
     `la calme encore, et sa valeur et son PIB remontent de ${percent(INVESTMENT_BOOST)} de leur niveau d'origine. ` +
     `L'abandonner vaut un refus.`,
   refinery:
@@ -62,7 +62,7 @@ export const BUILD_EFFECTS: Record<BuildKind, string> = {
     `un réservoir plus grand, qui se reconstitue plus vite.`,
   services:
     `Hôpitaux et écoles, ${PROVINCE_BUILDINGS.services.max} niveaux. Sur l'ensemble du pays, chaque niveau moyen fait remonter la stabilité ` +
-    `${percent(SERVICES_RECOVERY_BONUS)} plus vite en paix, et la guerre l'use ${percent(SERVICES_WEARINESS_CUT)} moins. Dans une région annexée, ` +
+    `${percent(SERVICES_RECOVERY_BONUS)} plus vite en paix, et la guerre l'use ${percent(SERVICES_WEARINESS_CUT)} moins. Dans une région agitée, ` +
     `ils comptent double pour son équipement, qui la tient calme.`,
   shipyard:
     `Chaque niveau achevé lance des navires : +${percent(SHIPYARD_NAVY)} de ta marine de départ (${PROVINCE_BUILDINGS.shipyard.max} niveaux ` +

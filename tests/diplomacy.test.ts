@@ -418,3 +418,81 @@ describe('guerres déclarées au joueur', () => {
     for (let i = 1; i < opened.length; i++) expect(opened[i] - opened[i - 1]).toBeGreaterThanOrEqual(PLAYER_WAR_COOLDOWN_TICKS);
   });
 });
+
+describe('régions historiques', () => {
+  /**
+   * A à gauche, B à droite ; R, une région historique de A (ses 40 colonnes de l'ouest), en
+   * sommeil, d'identité `identity`.
+   */
+  const withRegion = (identity: number, player = 1) => {
+    const base = config((x) => (x < 100 ? A : B), (n) => (n === B ? 1e6 : 2e6), 3, player);
+    base.nations[2] = { ...base.nations[2], identity };
+    base.provinces = base.provinces.map((province) => (province.nation === 0 && province.x < 40 ? { ...province, region: 2 } : province));
+    return new Simulation(base);
+  };
+  const R = 3;
+
+  it("n'existent pas au départ, et restent calmes dans un pays stable et en paix", () => {
+    const sim = withRegion(3);
+    expect(sim.isAlive(R)).toBe(false);
+    for (let t = 0; t < 600 * 40; t++) sim.step();
+    const movement = sim.movementsOf(A).find((entry) => entry.origin === R);
+    expect(movement).toBeDefined();
+    expect(movement!.unrest).toBeLessThan(DEMAND_INVESTMENT_AT);
+    expect(movement!.demand).toBe('');
+    expect(sim.isAlive(R)).toBe(false);
+  });
+
+  it('se soulèvent dans un pays à bout, sur leurs seules provinces', () => {
+    const sim = withRegion(3);
+    sim.declareWars([[A, B]]);
+    const demands: string[] = [];
+    collapse(sim, 600 * 60, () => sim.isAlive(R), (kind) => {
+      demands.push(kind);
+      return false;
+    });
+    expect(demands).toEqual(['investment', 'independence']);
+    expect(sim.isAlive(R)).toBe(true);
+    expect(sim.owners[40 * W + 10]).toBe(R);
+    expect(sim.owners[40 * W + 70]).toBe(A);
+    expect(sim.fronts.some((front) => (front.a === A && front.b === R) || (front.a === R && front.b === A))).toBe(true);
+  });
+
+  it("obtiennent l'indépendance sans combat, si on la leur accorde", () => {
+    const sim = withRegion(4);
+    sim.declareWars([[A, B]]);
+    collapse(sim, 600 * 60, () => sim.isAlive(R), (kind) => kind === 'independence');
+    expect(sim.isAlive(R)).toBe(true);
+    expect(sim.owners[40 * W + 10]).toBe(R);
+    expect(sim.hasTruce(A, R)).toBe(true);
+  });
+
+  it("d'identité faible, ne demandent rien dans un pays seulement en guerre", () => {
+    const sim = withRegion(1);
+    sim.declareWars([[A, B]]);
+    for (let t = 0; t < 600 * 40; t++) {
+      sim.setFront(A, B, 0.2, 'hold');
+      sim.setFront(B, A, 0.2, 'hold');
+      sim.step();
+    }
+    const movement = sim.movementsOf(A).find((entry) => entry.origin === R)!;
+    expect(movement.unrest).toBeLessThan(DEMAND_INVESTMENT_AT);
+    expect(sim.isAlive(R)).toBe(false);
+  });
+
+  it("renaissent comme région si leur pays d'origine les reprend", () => {
+    const sim = withRegion(4);
+    sim.declareWars([[A, B]]);
+    collapse(sim, 600 * 60, () => sim.isAlive(R), (kind) => kind === 'independence');
+    expect(sim.isAlive(R)).toBe(true);
+    // A reprend la région par la force : elle redevient un mouvement en sommeil.
+    const internals = sim as unknown as { truceUntil: Int32Array };
+    internals.truceUntil.fill(0);
+    sim.declareWars([[A, R]]);
+    for (let t = 0; t < 600 * 60 && sim.isAlive(R); t++) fight(sim, 1, 'attack', 'hold', R);
+    expect(sim.isAlive(R)).toBe(false);
+    sim.step();
+    for (let t = 0; t < 600 * 2; t++) sim.step();
+    expect(sim.movementsOf(A).some((entry) => entry.origin === R)).toBe(true);
+  });
+});

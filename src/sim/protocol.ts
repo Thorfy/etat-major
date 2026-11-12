@@ -23,10 +23,10 @@ export interface BuildOrder {
 /** Ce qu'une région agitée demande : des investissements, ou l'indépendance sans combat. */
 export type DemandKind = 'investment' | 'independence';
 
-/** Une région annexée qui s'agite dans le pays qui la tient. */
+/** Une région annexée, ou une région historique, qui s'agite dans le pays qui la tient. */
 export interface MovementState {
   parent: number;
-  /** Pays d'origine, disparu, qui renaîtrait. */
+  /** Pays d'origine disparu, ou région historique en sommeil, qui naîtrait. */
   origin: number;
   /** Agitation, de 0 à 1 : à 1, la région se soulève. */
   unrest: number;
@@ -240,8 +240,8 @@ export interface WorkerInit {
   type: 'init';
   width: number;
   height: number;
-  nations: { population: number; gdpMusd: number }[];
-  provinces: { nation: number; areaKm2: number; x: number; y: number; population: number; gdpMusd: number; oil: number; steel: number }[];
+  nations: { population: number; gdpMusd: number; identity?: number }[];
+  provinces: { nation: number; areaKm2: number; x: number; y: number; population: number; gdpMusd: number; oil: number; steel: number; region?: number }[];
   provinceGrid: Uint16Array;
   ownerGrid: Uint16Array;
   terrainGrid: Uint8Array;

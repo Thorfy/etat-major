@@ -32,6 +32,7 @@ import {
   UNREST_BASE,
   UNREST_INSTABILITY,
   UNREST_WAR,
+  UNREST_DEFEAT,
   UNREST_SPEED_PER_WEEK,
   CARE_FULL_LEVELS,
   INVESTMENT_CARE,
@@ -47,6 +48,7 @@ import {
   INVESTMENT_WEEKS,
   INVESTMENT_BOOST,
   AI_INDEPENDENCE_MAX_SHARE,
+  REGION_IDENTITY,
   REBEL_JOIN_UNREST,
   TICKS_PER_WEEK,
   TRUCE_TICKS,
@@ -245,9 +247,11 @@ import { findSeas } from './seas.ts';
 export interface SimConfig {
   width: number;
   height: number;
-  nations: { population: number; gdpMusd: number }[];
+  /** `identity` : région historique en sommeil, force de son identité (1 à 4). */
+  nations: { population: number; gdpMusd: number; identity?: number }[];
   /**
-   * Le propriétaire initial d'une province est `nation + 1`. Sans population ni PIB,
+   * Le propriétaire initial d'une province est `nation + 1`. `region` : indice de la région
+   * historique (une nation en sommeil) dont elle fait partie. Sans population ni PIB,
    * la valeur d'une province suit la racine de sa surface.
    */
   provinces: {
@@ -259,6 +263,7 @@ export interface SimConfig {
     gdpMusd?: number;
     oil?: number;
     steel?: number;
+    region?: number;
   }[];
   provinceGrid: Uint16Array;
   /** Carte de départ, copiée : la simulation possède sa propre grille. */
@@ -478,6 +483,11 @@ export class Simulation {
   private movements: MovementState[] = [];
   /** Carte de départ : de quoi faire renaître un pays annexé. */
   private readonly startHome: Uint16Array;
+  /** Région historique de chaque province (0 : aucune), et multiplicateur d'agitation de chaque nation. */
+  private readonly regionOf: Uint16Array;
+  private readonly identity: Float64Array;
+  /** 1 pour une région historique (une nation en sommeil au départ). */
+  private readonly historicRegion: Uint8Array;
   private readonly startValue: Float64Array;
   private readonly startGdp: Float64Array;
   private readonly startManpower: Float64Array;
@@ -656,8 +666,17 @@ export class Simulation {
     const gdpTotal = new Float64Array(this.stride);
     const populationTotal = new Float64Array(this.stride);
     const rootArea = new Float64Array(this.stride);
+    this.regionOf = new Uint16Array(provinceCount);
+    this.identity = new Float64Array(this.stride).fill(1);
+    this.historicRegion = new Uint8Array(this.stride);
+    config.nations.forEach((nation, index) => {
+      if (!nation.identity) return;
+      this.identity[index + 1] = REGION_IDENTITY[nation.identity] ?? 1;
+      this.historicRegion[index + 1] = 1;
+    });
     config.provinces.forEach((province, index) => {
       const n = province.nation + 1;
+      if (province.region !== undefined) this.regionOf[index + 1] = province.region + 1;
       this.provinceHome[index + 1] = n;
       this.controller[index + 1] = n;
       gdpTotal[n] += province.gdpMusd ?? 0;
@@ -707,6 +726,8 @@ export class Simulation {
       this.alive[n] = this.cellCounts[n] > 0 ? 1 : 0;
       this.navy[n] = hasCoast[n] ? baseNavy(config.nations[n - 1].gdpMusd) : 0;
     }
+    // Une région en sommeil n'a pas de flotte, mais en aura une si elle naît sur une côte.
+    for (let p = 1; p < provinceCount; p++) if (this.provinceCoastal[p] && this.regionOf[p]) hasCoast[this.regionOf[p]] = 1;
     this.hasCoast = hasCoast;
     this.updateResources();
     this.recomputeCapacity();
@@ -1748,21 +1769,35 @@ export class Simulation {
   // -------------------------------------------------------------------------
 
   /**
-   * Chaque région annexée (un pays disparu dont le vainqueur tient les terres) s'agite quand le
-   * pays qui la tient est instable, et se calme quand il va bien. Elle demande d'abord des
+   * Qui réclame la province `p` à `holder` : son pays d'origine s'il a disparu ; sinon, si elle
+   * est encore à son pays d'origine, sa région historique tant qu'elle n'est pas indépendante.
+   * 0 : personne.
+   */
+  private claimantOf(p: number, holder = this.controller[p]): number {
+    const origin = this.startHome[p];
+    if (origin !== holder) return this.alive[origin] ? 0 : origin;
+    const region = this.regionOf[p];
+    return region !== 0 && !this.alive[region] ? region : 0;
+  }
+
+  /**
+   * Chaque région annexée (un pays disparu dont le vainqueur tient les terres), et chaque région
+   * historique encore à son pays, s'agite quand ce pays est instable, en guerre ou envahi, d'autant
+   * plus que son identité est forte, et se calme quand il va bien. Elle demande d'abord des
    * investissements, puis l'indépendance sans combat ; chaque refus l'agite davantage. À
    * l'agitation maximale, elle se soulève, avec les régions agitées qui la touchent.
    */
   private updateMovements(): void {
-    // Revendications : valeur d'origine, par (pays qui tient, pays d'origine disparu).
+    // Revendications : valeur d'origine, par (pays qui tient, pays disparu ou région en sommeil).
     const claims = new Map<number, number>();
     // Équipement, pondéré par la valeur d'origine de chaque province de la région.
     const equipped = new Map<number, number>();
     const { buildings } = this;
     for (let p = 1; p < this.controller.length; p++) {
-      const origin = this.startHome[p];
       const parent = this.controller[p];
-      if (parent === 0 || origin === parent || this.alive[origin]) continue;
+      if (parent === 0) continue;
+      const origin = this.claimantOf(p, parent);
+      if (origin === 0) continue;
       const key = parent * this.stride + origin;
       claims.set(key, (claims.get(key) ?? 0) + this.startValue[p]);
       const levels =
@@ -1776,7 +1811,7 @@ export class Simulation {
     for (const movement of this.movements) {
       const key = movement.parent * this.stride + movement.origin;
       const share = shareOf(key, movement.parent);
-      if (this.alive[movement.parent] && !this.alive[movement.origin] && share >= SECESSION_MIN_SHARE) {
+      if (this.alive[movement.parent] && !this.alive[movement.origin] && share >= this.minShareOf(movement.origin)) {
         movement.share = share;
         kept.push(movement);
       }
@@ -1786,7 +1821,7 @@ export class Simulation {
       const parent = Math.floor(key / this.stride);
       const origin = key % this.stride;
       const share = claim / Math.max(1e-9, this.totalHome[parent]);
-      if (!this.alive[parent] || share < SECESSION_MIN_SHARE) continue;
+      if (!this.alive[parent] || share < this.minShareOf(origin)) continue;
       kept.push({ parent, origin, unrest: 0, share, asked: 0, demand: '', until: 0, investing: false, invested: 0, refused: 0, care: 0, ceiling: 0 });
     }
     this.movements = kept;
@@ -1804,9 +1839,16 @@ export class Simulation {
       const buildingCare = (equipped.get(key) ?? 0) / Math.max(1e-9, claimed.get(key) ?? 0);
       movement.care = Math.min(1, buildingCare + INVESTMENT_CARE * (movement.invested ?? 0));
       const instability = Math.max(0, UNREST_STABILITY - this.stability[parent]);
+      const lost = this.totalHome[parent] > 0 ? Math.max(0, 1 - this.heldHome[parent] / this.totalHome[parent]) : 0;
       movement.ceiling = Math.min(
         1,
-        (1 - movement.care) * (UNREST_BASE + UNREST_INSTABILITY * instability + (atWar[parent] ? UNREST_WAR : 0) + REFUSAL_CEILING * (movement.refused ?? 0)),
+        (1 - movement.care) *
+          this.identity[movement.origin] *
+          (UNREST_BASE +
+            UNREST_INSTABILITY * instability +
+            (atWar[parent] ? UNREST_WAR : 0) +
+            UNREST_DEFEAT * lost +
+            REFUSAL_CEILING * (movement.refused ?? 0)),
       );
       // Vers le plafond, à vitesse fixe ; des investissements en chantier l'empêchent de monter.
       const gap = movement.ceiling - movement.unrest;
@@ -1827,6 +1869,11 @@ export class Simulation {
     if (rebel) this.revolt(rebel);
   }
 
+  /** Un pays annexé doit peser un peu pour s'agiter ; une région historique, si petite soit-elle, s'agite. */
+  private minShareOf(origin: number): number {
+    return this.historicRegion[origin] ? 0 : SECESSION_MIN_SHARE;
+  }
+
   /** La région demande ; l'IA répond aussitôt, le joueur a DEMAND_TICKS pour le faire. */
   private makeDemand(movement: MovementState, kind: DemandKind): void {
     movement.asked = kind === 'investment' ? 1 : 2;
@@ -1838,8 +1885,11 @@ export class Simulation {
     }
     const parent = movement.parent;
     const atWar = this.fronts.some((front) => front.a === parent || front.b === parent);
-    // L'IA investit si elle n'est pas en guerre ; elle laisse partir une petite région.
-    const accept = kind === 'investment' ? !atWar : movement.share < AI_INDEPENDENCE_MAX_SHARE;
+    // L'IA investit si elle n'est pas en guerre ; elle laisse partir une petite région, une région
+    // historique de son propre sol seulement si la guerre l'y oblige.
+    const historic = this.historicRegion[movement.origin] === 1;
+    const small = movement.share < AI_INDEPENDENCE_MAX_SHARE;
+    const accept = kind === 'investment' ? !atWar : small && (!historic || atWar);
     this.resolveDemand(movement, kind, accept);
   }
 
@@ -1879,7 +1929,7 @@ export class Simulation {
       movement.unrest = Math.max(0, movement.unrest - INVESTMENT_DONE_CALM);
     }
     for (let p = 1; p < this.controller.length; p++) {
-      if (this.startHome[p] !== region || this.controller[p] !== parent) continue;
+      if (this.controller[p] !== parent || this.claimantOf(p) !== region) continue;
       this.provinceValue[p] = Math.min(this.startValue[p], this.provinceValue[p] + INVESTMENT_BOOST * this.startValue[p]);
       this.provinceGdp[p] = Math.min(this.startGdp[p], this.provinceGdp[p] + INVESTMENT_BOOST * this.startGdp[p]);
     }
@@ -1929,8 +1979,8 @@ export class Simulation {
     for (let k = 0; k < landCells.length; k++) {
       const cell = landCells[k];
       if (owners[cell] !== parent) continue;
-      const origin = this.startHome[provinceGrid[cell]];
-      if (origin === parent || this.alive[origin] || touching[origin] || origin === this.player) continue;
+      const origin = this.claimantOf(provinceGrid[cell], parent);
+      if (origin === 0 || touching[origin] || origin === this.player) continue;
       const x = cell % width;
       const y = (cell - x) / width;
       if (
@@ -1957,11 +2007,14 @@ export class Simulation {
    */
   private revive(rebel: number, parent: number, peaceful = false): void {
     const { owners, provinceGrid, landCells } = this;
+    // Les provinces qu'il réclame, figées avant que les cellules changent de mains.
+    const claim = new Uint16Array(this.controller.length);
+    for (let p = 1; p < claim.length; p++) claim[p] = this.claimantOf(p, parent);
     const moved: number[] = [];
     this.peacefulTransfer = true;
     for (let k = 0; k < landCells.length; k++) {
       const cell = landCells[k];
-      if (owners[cell] !== parent || this.startHome[provinceGrid[cell]] !== rebel) continue;
+      if (owners[cell] !== parent || claim[provinceGrid[cell]] !== rebel) continue;
       owners[cell] = rebel;
       this.pocket[cell] = 0;
       if (this.forts[cell] !== 0) this.setFort(cell, 0);
@@ -1975,7 +2028,7 @@ export class Simulation {
     this.peacefulTransfer = false;
     if (moved.length === 0) return;
     for (let p = 1; p < this.controller.length; p++) {
-      if (this.startHome[p] !== rebel || this.controller[p] !== rebel) continue;
+      if (claim[p] !== rebel || this.controller[p] !== rebel) continue;
       this.provinceHome[p] = rebel;
       this.homePortsStale = true;
       this.provinceValue[p] = this.startValue[p];

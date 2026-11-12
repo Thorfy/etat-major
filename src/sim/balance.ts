@@ -446,7 +446,7 @@ export const ALLIANCE_MAX_AGGRESSION = 0.45;
 export const SECESSION_MIN_SHARE = 0.01;
 /**
  * L'agitation d'une région tend vers un plafond : (1 − équipement) × (base + instabilité + guerre
- * + refus). Une région négligée d'un pays stable plafonne à la base : elle demande des
+ * + invasion + refus). Une région négligée d'un pays stable plafonne à la base : elle demande des
  * investissements sans jamais se soulever. Une région entièrement équipée reste calme, même dans
  * un pays à bout.
  */
@@ -458,6 +458,8 @@ export const REFUSAL_CEILING = 0.15;
 export const UNREST_STABILITY = 0.45;
 /** Un pays en guerre voit ses régions mal équipées s'agiter d'autant en plus. */
 export const UNREST_WAR = 0.1;
+/** Un pays envahi les voit s'agiter d'autant par point de son territoire d'origine perdu. */
+export const UNREST_DEFEAT = 1.5;
 /** L'agitation va vers son plafond à cette vitesse, par semaine, en montant comme en descendant. */
 export const UNREST_SPEED_PER_WEEK = 0.05;
 /**
@@ -486,6 +488,14 @@ export const INVESTMENT_WEEKS = 6;
 export const INVESTMENT_BOOST = 0.3;
 /** L'IA accorde l'indépendance à une région qui pèse moins que ça. */
 export const AI_INDEPENDENCE_MAX_SHARE = 0.05;
+/**
+ * Régions historiques (data/regions.json) : une région de son propre pays s'agite comme une région
+ * annexée, plafond multiplié par la force de son identité (1 faible à 4 très forte). Dans un pays
+ * stable et en paix, seule une identité très forte demande des investissements ; la guerre et
+ * l'instabilité réveillent les autres, les plus fortes d'abord. Une identité faible ne se soulève
+ * que dans un pays à bout. L'IA ne laisse partir une région historique qu'en guerre.
+ */
+export const REGION_IDENTITY = [0, 0.6, 0.7, 0.8, 0.9];
 /**
  * Coalition rebelle : les régions dont les terres touchent celles de la première, de proche en
  * proche, se soulèvent avec elle si leur agitation atteint ce niveau. Ce sont les seules

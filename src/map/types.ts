@@ -12,6 +12,13 @@ export interface NationData {
   areaKm2: number;
   /** Centre du plus grand cercle inscrit, pour placer le nom. */
   label: { x: number; y: number; r: number };
+  /**
+   * Région historique d'un pays (data/regions.json) : en sommeil au départ, elle naît si elle
+   * obtient ou arrache son indépendance. Indice du pays dont elle fait partie.
+   */
+  parent?: number;
+  /** Force du sentiment régional, de 1 (faible) à 4 (très fort). */
+  identity?: number;
 }
 
 export interface ProvinceData {
@@ -30,6 +37,8 @@ export interface ProvinceData {
   oil: number;
   /** Production d'acier (ordre de grandeur, dizaines de Mt/an). */
   steel: number;
+  /** Indice dans WorldData.nations de la région historique dont elle fait partie. */
+  region?: number;
 }
 
 export interface WorldData {

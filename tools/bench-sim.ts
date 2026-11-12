@@ -61,6 +61,7 @@ function worldGame(durationMinutes: number, seed: number) {
   const diplomacy: Record<string, number> = {};
   const coalitions: string[] = [];
   const secessions: string[] = [];
+  let regionBirths = 0;
   console.log(`--- Partie mondiale, graine ${seed}, ${durationMinutes} min de jeu à ×1`);
   for (let t = 1; t <= ticks; t++) {
     const begin = performance.now();
@@ -78,7 +79,8 @@ function worldGame(durationMinutes: number, seed: number) {
         }
       } else if (event.type === 'coalition' && coalitions.length < 6) {
         coalitions.push(`contre ${world.nations[event.target - 1].name} (${event.members.length} pays, ${minutes(event.tick)}′)`);
-      } else if ((event.type === 'secession' || event.type === 'independence') && secessions.length < 8) {
+      } else if ((event.type === 'secession' || event.type === 'independence') && secessions.length < 16) {
+        if (world.nations[event.rebel - 1].parent !== undefined) regionBirths++;
         secessions.push(`${world.nations[event.rebel - 1].name} ${event.type === 'secession' ? 'se soulève contre' : 'quitte en paix'} ${world.nations[event.parent - 1].name} (${minutes(event.tick)}′)`);
       }
     }
@@ -94,8 +96,12 @@ function worldGame(durationMinutes: number, seed: number) {
         .slice(0, 5)
         .map((entry) => `${entry.name} ${(entry.output / 1e6).toFixed(1)} Bn (${entry.output >= entry.start ? '+' : ''}${((entry.output / entry.start - 1) * 100).toFixed(0)} %)`);
       console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
-      const movements = (sim as unknown as { movements: { unrest: number; investing: boolean }[] }).movements;
+      const allMovements = (sim as unknown as { movements: { origin: number; unrest: number; investing: boolean }[] }).movements;
+      const historic = allMovements.filter((movement) => world.nations[movement.origin - 1].parent !== undefined);
+      const movements = allMovements.filter((movement) => world.nations[movement.origin - 1].parent === undefined);
       const restless = movements.filter((movement) => movement.unrest > 0);
+      const stirring = historic.filter((movement) => movement.unrest > 0);
+      console.log(`         Régions historiques : ${historic.length} suivies, ${stirring.length} agitées (max ${(Math.max(0, ...stirring.map((movement) => movement.unrest)) * 100).toFixed(0)} %), ${historic.filter((movement) => movement.unrest >= 0.35).length} au seuil des demandes, ${regionBirths} nées parmi les séparations listées`);
       console.log(`         Diplomatie : ${diplomacy.peace ?? 0} paix, ${diplomacy.coalition ?? 0} coalitions, ${diplomacy.secession ?? 0} soulèvements, ${diplomacy.independence ?? 0} indépendances accordées`);
       console.log(`         Régions annexées : ${movements.length}, dont ${restless.length} agitées (max ${(Math.max(0, ...restless.map((movement) => movement.unrest)) * 100).toFixed(0)} %), ${movements.filter((movement) => movement.investing).length} avec investissements en chantier`);
       console.log(`         PIB : ${richest.join(', ')}`);

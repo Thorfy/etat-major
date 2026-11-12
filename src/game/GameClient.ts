@@ -176,8 +176,9 @@ export class GameClient {
       type: 'init',
       width: world.data.width,
       height: world.data.height,
-      nations: world.data.nations.map(({ population, gdpMusd }) => ({ population, gdpMusd })),
-      provinces: world.data.provinces.map(({ nation, areaKm2, x, y, population, gdpMusd, oil, steel }) => ({
+      nations: world.data.nations.map(({ population, gdpMusd, identity }) => ({ population, gdpMusd, identity })),
+      provinces: world.data.provinces.map(({ nation, areaKm2, x, y, population, gdpMusd, oil, steel, region }) => ({
+        region,
         nation,
         areaKm2,
         x,
@@ -452,7 +453,7 @@ export class GameClient {
     this.onChange();
   }
 
-  /** Agitation d'une région annexée (pays d'origine `origin`) dans le pays `parent` ; -1 si elle est calme. */
+  /** Agitation d'une région (pays d'origine ou région historique `origin`) dans le pays `parent` ; -1 sans mouvement. */
   unrestOf(parent: number, origin: number): number {
     const nation = this.snapshot?.nations.find((entry) => entry.id === parent);
     return nation?.movements.find((movement) => movement.origin === origin)?.unrest ?? -1;

@@ -1,0 +1,477 @@
+{
+  "comment": "Régions historiques qui peuvent réclamer leur indépendance, par pays (code de la nation). Chaque région : [identifiant, nom du pays qui naîtrait, identité de 1 (faible) à 4 (très forte), subdivisions]. Une subdivision se désigne par son code ISO 3166-2 ou son nom Natural Earth, 'region:X' (toutes celles de la région Natural Earth X), 'a0:XXX' (tout un territoire rattaché, comme le Groenland) ; '-X' en retire une. Un code ou un nom l'emporte sur 'region:', qui l'emporte sur 'a0:'. Le cœur du pays (sa capitale et ce qui l'entoure) n'apparaît jamais.",
+  "countries": {
+    "FRA": [
+      ["COR", "République corse", 4, ["FR-2A", "FR-2B"]],
+      ["BRE", "Duché de Bretagne", 3, ["region:Bretagne", "FR-44"]],
+      ["ALS", "Alsace-Lorraine", 3, ["FR-67", "FR-68", "FR-57"]],
+      ["NCL", "Kanaky", 4, ["a0:NCL"]],
+      ["PYF", "Royaume de Tahiti", 3, ["a0:PYF"]],
+      ["GUF", "Guyane", 2, ["FR-GF"]],
+      ["GLP", "Guadeloupe", 2, ["FR-GP"]],
+      ["MTQ", "Martinique", 2, ["FR-MQ"]],
+      ["REU", "La Réunion", 2, ["FR-RE"]],
+      ["MYT", "Mayotte", 1, ["FR-YT"]],
+      ["FLA", "Flandre-Artois", 2, ["FR-59", "FR-62"]],
+      ["SAV", "Duché de Savoie", 2, ["FR-73", "FR-74"]],
+      ["BAS", "Béarn et Pays basque", 2, ["FR-64"]],
+      ["ROU", "Comté de Roussillon", 2, ["FR-66"]],
+      ["TOU", "Comté de Toulouse", 2, ["FR-31", "FR-09", "FR-11", "FR-34", "FR-30", "FR-48", "FR-81", "FR-82", "FR-12", "FR-46", "FR-32", "FR-65"]],
+      ["PRO", "Comté de Provence", 2, ["region:Provence-Alpes-Côte-d'Azur"]],
+      ["AQU", "Duché d'Aquitaine", 1, ["FR-33", "FR-40", "FR-47", "FR-24"]],
+      ["AUV", "Duché d'Auvergne", 1, ["FR-63", "FR-15", "FR-43", "FR-03"]],
+      ["NOR", "Duché de Normandie", 1, ["region:Normandie"]],
+      ["BOU", "Duché de Bourgogne", 1, ["region:Bourgogne-Franche-Comté"]],
+      ["LOR", "Duché de Lorraine", 1, ["FR-54", "FR-55", "FR-88"]],
+      ["CHA", "Comté de Champagne", 1, ["FR-08", "FR-51", "FR-10", "FR-52"]]
+    ],
+    "GBR": [
+      ["SCO", "Royaume d'Écosse", 4, ["region:Eastern", "region:South Western", "region:Highlands and Islands", "region:North Eastern"]],
+      ["WAL", "Pays de Galles", 3, ["region:West Wales and the Valleys", "region:East Wales"]],
+      ["ULS", "Ulster", 3, ["region:Northern Ireland"]],
+      ["CON", "Duché de Cornouailles", 2, ["GB-CON", "GB-IOS"]],
+      ["NOR", "Royaume de Northumbrie", 1, ["region:North East", "region:Yorkshire and the Humber"]],
+      ["WES", "Royaume de Wessex", 1, ["region:South West"]]
+    ],
+    "ESP": [
+      ["CAT", "République catalane", 4, ["region:Cataluña"]],
+      ["EUS", "Euskadi", 4, ["region:País Vasco"]],
+      ["NAV", "Royaume de Navarre", 3, ["region:Foral de Navarra"]],
+      ["GAL", "Royaume de Galice", 3, ["region:Galicia"]],
+      ["CAN", "Canaries", 3, ["region:Canary Is."]],
+      ["AND", "Andalousie", 2, ["region:Andalucía"]],
+      ["VAL", "Royaume de Valence", 2, ["region:Valenciana"]],
+      ["BAL", "Royaume de Majorque", 2, ["region:Islas Baleares"]],
+      ["ARA", "Royaume d'Aragon", 2, ["region:Aragón"]],
+      ["AST", "Royaume des Asturies", 1, ["region:Asturias", "region:Cantabria"]],
+      ["LEO", "Royaume de León", 1, ["ES-LE", "ES-ZA", "ES-SA"]]
+    ],
+    "PRT": [
+      ["AZO", "Açores", 3, ["PT-20"]],
+      ["MAD", "Madère", 2, ["PT-30"]],
+      ["ALG", "Royaume de l'Algarve", 1, ["PT-08"]]
+    ],
+    "ITA": [
+      ["SIC", "Royaume de Sicile", 3, ["region:Sicily"]],
+      ["SAR", "Royaume de Sardaigne", 3, ["region:Sardegna"]],
+      ["TYR", "Tyrol du Sud", 3, ["IT-BZ"]],
+      ["VEN", "République de Venise", 3, ["region:Veneto", "region:Friuli-Venezia Giulia"]],
+      ["AOS", "Vallée d'Aoste", 2, ["region:Valle d'Aosta"]],
+      ["MIL", "Duché de Milan", 2, ["region:Lombardia"]],
+      ["NAP", "Royaume de Naples", 2, ["region:Campania", "region:Calabria", "region:Basilicata", "region:Apulia", "region:Molise", "region:Abruzzo"]],
+      ["PIE", "Principauté de Piémont", 1, ["region:Piemonte"]],
+      ["GEN", "République de Gênes", 1, ["region:Liguria"]],
+      ["TOS", "Grand-duché de Toscane", 1, ["region:Toscana"]],
+      ["PAP", "États pontificaux", 1, ["region:Emilia-Romagna", "region:Marche", "region:Umbria"]]
+    ],
+    "DEU": [
+      ["BAY", "Royaume de Bavière", 3, ["DE-BY"]],
+      ["SAX", "Royaume de Saxe", 2, ["DE-SN"]],
+      ["WUR", "Royaume de Wurtemberg", 1, ["DE-BW"]],
+      ["HAN", "Royaume de Hanovre", 1, ["DE-NI", "DE-HB"]],
+      ["SHL", "Schleswig-Holstein", 1, ["DE-SH"]],
+      ["RHE", "Rhénanie", 1, ["DE-NW", "DE-RP", "DE-SL"]],
+      ["MEC", "Mecklembourg", 1, ["DE-MV"]]
+    ],
+    "AUT": [
+      ["TIR", "Comté de Tyrol", 2, ["AT-7"]],
+      ["VOR", "Vorarlberg", 1, ["AT-8"]]
+    ],
+    "CHE": [
+      ["TIC", "République du Tessin", 2, ["CH-TI"]],
+      ["ROM", "Romandie", 2, ["CH-GE", "CH-VD", "CH-NE", "CH-JU"]]
+    ],
+    "BEL": [
+      ["FLA", "Flandre", 3, ["region:Flemish"]],
+      ["WAL", "Wallonie", 2, ["region:Walloon"]]
+    ],
+    "NLD": [
+      ["FRI", "Frise", 2, ["NL-FR"]]
+    ],
+    "DNK": [
+      ["GRL", "Groenland", 4, ["a0:GRL"]],
+      ["FRO", "Îles Féroé", 3, ["a0:FRO"]]
+    ],
+    "NOR": [
+      ["HAL", "Hålogaland", 1, ["NO-18", "NO-19", "NO-20"]]
+    ],
+    "SWE": [
+      ["SKA", "Skåneland", 2, ["SE-M", "SE-K", "SE-N"]],
+      ["GOT", "Gotland", 1, ["SE-I"]],
+      ["NRL", "Norrland", 1, ["SE-BD", "SE-AC", "SE-Z", "SE-Y", "SE-X"]]
+    ],
+    "FIN": [
+      ["ALA", "Åland", 4, ["a0:ALD"]],
+      ["LAP", "Laponie", 1, ["FI-10"]]
+    ],
+    "EST": [
+      ["IDA", "Ida-Viru", 1, ["EE-44"]]
+    ],
+    "LVA": [
+      ["LAT", "Latgale", 2, ["region:Latgale"]]
+    ],
+    "LTU": [
+      ["SAM", "Samogitie", 1, ["LT-TE", "LT-SA", "LT-TA"]]
+    ],
+    "POL": [
+      ["SIL", "Silésie", 2, ["PL-SL", "PL-OP"]],
+      ["POM", "Poméranie", 1, ["PL-PM"]],
+      ["MAL", "Petite-Pologne", 1, ["PL-MA", "PL-PK"]]
+    ],
+    "CZE": [
+      ["MOR", "Moravie", 2, ["CZ-JM", "CZ-ZL", "CZ-OL", "CZ-MO"]]
+    ],
+    "ROU": [
+      ["TRA", "Transylvanie", 2, ["RO-AB", "RO-BN", "RO-BV", "RO-CJ", "RO-HD", "RO-SB", "RO-SJ", "RO-MM", "RO-SM", "RO-BH", "RO-AR"]],
+      ["SIC", "Pays sicule", 3, ["RO-HR", "RO-CV", "RO-MS"]],
+      ["BAN", "Banat", 1, ["RO-TM", "RO-CS"]],
+      ["DOB", "Dobroudja", 1, ["RO-CT", "RO-TL"]]
+    ],
+    "MDA": [
+      ["TRA", "Transnistrie", 4, ["MD-SN", "MD-GRI", "MD-BD", "MD-CAM"]],
+      ["GAG", "Gagaouzie", 3, ["MD-GA"]]
+    ],
+    "UKR": [
+      ["DON", "Donbass", 2, ["UA-14", "UA-09"]],
+      ["GAL", "Galicie", 2, ["UA-46", "UA-26", "UA-61"]],
+      ["RUT", "Ruthénie subcarpatique", 1, ["UA-21"]]
+    ],
+    "RUS": [
+      ["CHE", "Itchkérie", 4, ["RU-CE"]],
+      ["DAG", "Daghestan", 3, ["RU-DA"]],
+      ["ING", "Ingouchie", 2, ["RU-IN"]],
+      ["CIR", "Circassie", 2, ["RU-KB", "RU-KC", "RU-AD"]],
+      ["ALN", "Alanie", 1, ["RU-SE"]],
+      ["TAT", "Tatarstan", 3, ["RU-TA"]],
+      ["BAS", "Bachkortostan", 2, ["RU-BA"]],
+      ["KAL", "Kalmoukie", 1, ["RU-KL"]],
+      ["CHU", "Tchouvachie", 1, ["RU-CU"]],
+      ["TUV", "Touva", 3, ["RU-TY"]],
+      ["BUR", "Bouriatie", 2, ["RU-BU"]],
+      ["SAK", "Sakha", 3, ["RU-SA"]],
+      ["CRI", "Crimée", 3, ["UA-43", "UA-40"]],
+      ["SIB", "Sibérie", 1, ["region:Siberian"]],
+      ["FER", "République d'Extrême-Orient", 1, ["region:Far Eastern"]],
+      ["URA", "République de l'Oural", 1, ["region:Urals", "-RU-X01~"]],
+      ["KAR", "Carélie", 1, ["RU-KR"]],
+      ["KGD", "Kaliningrad", 1, ["RU-KGD"]],
+      ["KOM", "Komi", 1, ["RU-KO"]]
+    ],
+    "GEO": [
+      ["ABK", "Abkhazie", 4, ["GE-AB"]],
+      ["OSS", "Ossétie du Sud", 3, ["GE-SK"]],
+      ["ADJ", "Adjarie", 2, ["GE-AJ"]]
+    ],
+    "AZE": [
+      ["ART", "Artsakh", 4, ["region:Yukhari Garabakh Economic Region", "region:Kalbajar-Lachin Economic Region"]],
+      ["NAX", "Nakhitchevan", 2, ["region:Naxçıvan Autonomous Republic"]],
+      ["TAL", "Talych", 1, ["region:Lankaran Economic Region"]]
+    ],
+    "TUR": [
+      ["KUR", "Kurdistan du Nord", 3, ["TR-73", "TR-30", "TR-65", "TR-47", "TR-63", "TR-21", "TR-72", "TR-56", "TR-13", "TR-49", "TR-12", "TR-62", "TR-04"]],
+      ["PON", "Pont", 1, ["TR-61", "TR-53", "TR-28", "TR-08"]]
+    ],
+    "GRC": [
+      ["CRE", "Crète", 2, ["GR-M"]],
+      ["ION", "République des Sept-Îles", 1, ["GR-F"]]
+    ],
+    "MKD": [
+      ["ILL", "Illirida", 2, ["region:Polog", "MK-76", "MK-35", "MK-75", "MK-16"]]
+    ],
+    "SRB": [
+      ["VOJ", "Voïvodine", 2, ["RS-01", "RS-05", "RS-03", "RS-02", "RS-04", "RS-07", "RS-06"]],
+      ["SAN", "Sandjak", 2, ["RS-18"]]
+    ],
+    "BIH": [
+      ["SRP", "Republika Srpska", 4, ["region:Repuplika Srpska"]],
+      ["HER", "Herceg-Bosna", 2, ["Herzegovina-Neretva", "West Herzegovina", "West Bosnia"]]
+    ],
+    "HRV": [
+      ["IST", "Istrie", 2, ["HR-18"]],
+      ["DAL", "Dalmatie", 1, ["HR-13", "HR-15", "HR-17", "HR-19"]],
+      ["SLA", "Slavonie", 1, ["HR-14", "HR-16", "HR-12", "HR-10"]]
+    ],
+    "KOS": [
+      ["NOR", "Kosovo du Nord", 3, ["Leposavić", "Zubin Potok", "Zvečan"]]
+    ],
+    "SYR": [
+      ["ROJ", "Rojava", 3, ["SY-HA", "SY-RA"]],
+      ["DRU", "État druze", 2, ["SY-SU"]],
+      ["ALA", "État des Alaouites", 2, ["SY-LA", "SY-TA"]]
+    ],
+    "IRQ": [
+      ["KUR", "Kurdistan du Sud", 4, ["region:Kurdistan"]],
+      ["BAS", "Bassora", 1, ["IQ-BA", "IQ-MA", "IQ-DQ"]]
+    ],
+    "IRN": [
+      ["KUR", "Kurdistan de l'Est", 3, ["IR-16", "IR-17"]],
+      ["AZE", "Azerbaïdjan du Sud", 2, ["IR-01", "IR-02", "IR-03"]],
+      ["BAL", "Sistan-et-Baloutchistan", 3, ["IR-13"]],
+      ["ARA", "Arabistan", 2, ["IR-10"]],
+      ["GIL", "Gilan", 1, ["IR-19"]]
+    ],
+    "SAU": [
+      ["HEJ", "Royaume du Hedjaz", 2, ["SA-02", "SA-03"]],
+      ["ASI", "Émirat d'Asir", 1, ["SA-14", "SA-09", "SA-10"]],
+      ["AHS", "Al-Ahsa", 1, ["SA-04"]]
+    ],
+    "YEM": [
+      ["SUD", "Yémen du Sud", 3, ["YE-AD", "YE-LA", "YE-AB", "YE-SH", "YE-HD", "YE-MR", "YE-DA"]]
+    ],
+    "OMN": [
+      ["DHO", "Dhofar", 2, ["OM-ZU"]]
+    ],
+    "AFG": [
+      ["TUR", "Turkestan afghan", 2, ["AF-BAL", "AF-JOW", "AF-FYB", "AF-SAR", "AF-SAM", "AF-KDZ", "AF-TAK", "AF-BDS"]],
+      ["HAZ", "Hazaradjat", 1, ["AF-BAM"]]
+    ],
+    "PAK": [
+      ["BAL", "Baloutchistan", 3, ["PK-BA"]],
+      ["SIN", "Sindhudesh", 2, ["PK-SD"]],
+      ["PAS", "Pachtounistan", 2, ["PK-KP", "PK-TA"]],
+      ["GIL", "Gilgit-Baltistan", 1, ["PK-GB"]],
+      ["AJK", "Azad Cachemire", 1, ["PK-JK"]]
+    ],
+    "IND": [
+      ["KAS", "Cachemire", 4, ["IN-JK"]],
+      ["KHA", "Khalistan", 3, ["IN-PB"]],
+      ["NAG", "Nagalim", 3, ["IN-NL"]],
+      ["ASS", "Assam", 2, ["IN-AS"]],
+      ["MAN", "Royaume de Manipur", 2, ["IN-MN"]],
+      ["SIK", "Royaume du Sikkim", 2, ["IN-SK"]],
+      ["TAM", "Tamil Nadu", 2, ["IN-TN", "IN-PY"]],
+      ["MIZ", "Mizoram", 1, ["IN-MZ"]],
+      ["TRI", "Royaume de Tripura", 1, ["IN-TR"]],
+      ["BEN", "Bengale", 1, ["IN-WB"]],
+      ["HYD", "État d'Hyderabad", 1, ["IN-TG"]],
+      ["TRA", "Travancore", 1, ["IN-KL"]],
+      ["MYS", "Royaume de Mysore", 1, ["IN-KA"]],
+      ["RAJ", "Rajputana", 1, ["IN-RJ"]],
+      ["KAL", "Kalinga", 1, ["IN-OR"]],
+      ["JHA", "Jharkhand", 1, ["IN-JH"]]
+    ],
+    "NPL": [
+      ["MAD", "Madhesh", 2, ["NP-JA", "NP-NA"]]
+    ],
+    "LKA": [
+      ["EEL", "Tamoul Eelam", 4, ["LK-41", "LK-42", "LK-43", "LK-44", "LK-45", "LK-51", "LK-52", "LK-53"]]
+    ],
+    "MMR": [
+      ["SHA", "États shan", 3, ["MM-17"]],
+      ["KAC", "Kachin", 3, ["MM-11"]],
+      ["KAW", "Kawthoolei", 3, ["MM-13"]],
+      ["ARA", "Arakan", 2, ["MM-16"]],
+      ["KAY", "Karenni", 2, ["MM-12"]],
+      ["CHI", "Chin", 1, ["MM-14"]],
+      ["MON", "Mon", 1, ["MM-15"]]
+    ],
+    "THA": [
+      ["PAT", "Patani", 3, ["TH-94", "TH-95", "TH-96"]],
+      ["LAN", "Royaume de Lanna", 1, ["region:Northern"]],
+      ["ISA", "Isan", 1, ["region:Northeastern"]]
+    ],
+    "VNM": [
+      ["COC", "Cochinchine", 1, ["VN-41", "VN-45", "VN-44", "VN-47", "VN-52", "VN-46", "VN-59", "VN-55", "VN-49", "VN-51", "VN-50", "VN-73", "VN-CT", "VN-58", "VN-37", "VN-43", "VN-SG", "VN-40", "VN-36", "VN-57", "VN-39"]],
+      ["HAU", "Hauts Plateaux", 1, ["VN-72", "VN-33", "VN-35", "VN-28", "VN-30"]]
+    ],
+    "MYS": [
+      ["SAB", "Sabah", 3, ["MY-12", "MY-15"]],
+      ["SAR", "Sarawak", 3, ["MY-13"]]
+    ],
+    "IDN": [
+      ["ACE", "Aceh", 4, ["ID-AC"]],
+      ["PAP", "Papouasie occidentale", 4, ["ID-PA", "ID-PB"]],
+      ["MOL", "Moluques du Sud", 2, ["ID-MA"]]
+    ],
+    "PHL": [
+      ["BAN", "Bangsamoro", 4, ["region:Autonomous Region in Muslim Mindanao (ARMM)"]],
+      ["COR", "Cordillera", 2, ["region:Cordillera Administrative Region (CAR)"]]
+    ],
+    "PNG": [
+      ["BOU", "Bougainville", 4, ["PG-NSB"]]
+    ],
+    "JPN": [
+      ["RYU", "Royaume de Ryūkyū", 3, ["JP-47"]],
+      ["EZO", "République d'Ezo", 1, ["JP-01"]]
+    ],
+    "CHN": [
+      ["TIB", "Tibet", 4, ["CN-XZ", "CN-QH"]],
+      ["TUR", "Turkestan oriental", 4, ["CN-XJ"]],
+      ["HKG", "Hong Kong", 3, ["a0:HKG"]],
+      ["MON", "Mongolie-Intérieure", 2, ["CN-NM"]],
+      ["MAN", "Mandchourie", 2, ["region:Northeast China"]],
+      ["MAC", "Macao", 1, ["a0:MAC"]],
+      ["DAL", "Royaume de Dali", 1, ["CN-YN"]],
+      ["SHU", "Shu", 1, ["CN-SC", "CN-CQ"]],
+      ["LIN", "Lingnan", 1, ["CN-GD", "CN-GX"]]
+    ],
+    "UZB": [
+      ["KAR", "Karakalpakstan", 3, ["UZ-QR"]],
+      ["KHI", "Khanat de Khiva", 1, ["UZ-XO"]],
+      ["BOU", "Émirat de Boukhara", 1, ["UZ-BU", "UZ-SA", "UZ-NW"]]
+    ],
+    "TJK": [
+      ["BAD", "Haut-Badakhchan", 3, ["TJ-GB"]]
+    ],
+    "MAR": [
+      ["RIF", "République du Rif", 2, ["MA-03"]]
+    ],
+    "DZA": [
+      ["KAB", "Kabylie", 3, ["DZ-15", "DZ-06"]]
+    ],
+    "LBY": [
+      ["CYR", "Émirat de Cyrénaïque", 3, ["LY-BU", "LY-AJ", "LY-KF", "LY-QB", "LY-JA", "LY-MJ", "LY-BA"]],
+      ["FEZ", "Fezzan", 2, ["LY-SB", "LY-MQ", "LY-GT", "LY-WS", "LY-WD"]]
+    ],
+    "SDN": [
+      ["DAR", "Darfour", 3, ["region:Darfur"]],
+      ["NOU", "Monts Nouba", 2, ["SD-KS"]],
+      ["NIL", "Nil Bleu", 1, ["SD-NB"]]
+    ],
+    "SDS": [
+      ["EQU", "Équatoria", 1, ["region:Equatoria"]]
+    ],
+    "ETH": [
+      ["TIG", "Tigré", 4, ["ET-TI"]],
+      ["ORO", "Oromia", 3, ["ET-OR"]],
+      ["OGA", "Ogaden", 3, ["ET-SO"]],
+      ["AFA", "Afar", 2, ["ET-AF"]]
+    ],
+    "SOM": [
+      ["PUN", "Pount", 3, ["SO-BR", "SO-NU", "SO-MU"]],
+      ["JUB", "Jubaland", 2, ["SO-JH", "SO-JD", "SO-GE"]]
+    ],
+    "KEN": [
+      ["PWA", "Pwani", 2, ["KE-300"]],
+      ["NFD", "District de la frontière nord", 1, ["KE-500"]]
+    ],
+    "UGA": [
+      ["BUG", "Buganda", 3, ["region:Central", "-UG-102"]]
+    ],
+    "TZA": [
+      ["ZAN", "Zanzibar", 4, ["TZ-11", "TZ-07", "TZ-15", "TZ-10", "TZ-06"]]
+    ],
+    "COD": [
+      ["KAT", "État du Katanga", 4, ["CD-KA"]],
+      ["KAS", "Sud-Kasaï", 3, ["CD-KE"]],
+      ["KIV", "Kivu", 2, ["CD-NK", "CD-SK"]],
+      ["KON", "Royaume Kongo", 1, ["CD-BC"]]
+    ],
+    "CMR": [
+      ["AMB", "Ambazonie", 4, ["CM-NW", "CM-SW"]]
+    ],
+    "CAF": [
+      ["DAR", "Dar al-Kuti", 1, ["CF-VK", "CF-BB", "CF-HK"]]
+    ],
+    "NGA": [
+      ["BIA", "Biafra", 4, ["NG-AB", "NG-AN", "NG-EB", "NG-EN", "NG-IM", "NG-RI", "NG-BY", "NG-CR", "NG-AK"]],
+      ["ODU", "Oduduwa", 2, ["NG-LA", "NG-OG", "NG-OY", "NG-OS", "NG-ON", "NG-EK"]]
+    ],
+    "NER": [
+      ["AIR", "Sultanat de l'Aïr", 1, ["NE-1"]]
+    ],
+    "MLI": [
+      ["AZA", "Azawad", 4, ["ML-6", "ML-7", "ML-8"]]
+    ],
+    "SEN": [
+      ["CAS", "Casamance", 3, ["SN-ZG", "SN-SE", "SN-KD"]]
+    ],
+    "GHA": [
+      ["TOG", "Togoland occidental", 2, ["GH-TV"]],
+      ["ASH", "Royaume ashanti", 2, ["GH-AH"]]
+    ],
+    "AGO": [
+      ["CAB", "Cabinda", 4, ["AO-CAB"]],
+      ["LUN", "Lunda", 1, ["AO-LNO", "AO-LSU"]]
+    ],
+    "ZMB": [
+      ["BAR", "Barotseland", 3, ["ZM-01"]]
+    ],
+    "ZWE": [
+      ["MAT", "Matabeleland", 3, ["ZW-MN", "ZW-MS", "ZW-BU"]]
+    ],
+    "NAM": [
+      ["CAP", "Caprivi", 3, ["NA-CA"]]
+    ],
+    "ZAF": [
+      ["CAP", "République du Cap", 2, ["ZA-WC"]],
+      ["ZOU", "Royaume zoulou", 2, ["ZA-NL"]]
+    ],
+    "CAN": [
+      ["QUE", "Québec", 4, ["CA-QC"]],
+      ["PRA", "Prairies", 2, ["CA-AB", "CA-SK", "CA-MB"]],
+      ["TNV", "Dominion de Terre-Neuve", 2, ["CA-NL"]],
+      ["COB", "Colombie-Britannique", 1, ["CA-BC"]],
+      ["MAR", "Provinces maritimes", 1, ["CA-NB", "CA-NS", "CA-PE"]],
+      ["NUN", "Nunavut", 1, ["CA-NU"]]
+    ],
+    "USA": [
+      ["TEX", "République du Texas", 3, ["US-TX"]],
+      ["CAL", "République de Californie", 3, ["US-CA"]],
+      ["HAW", "Royaume d'Hawaï", 3, ["US-HI"]],
+      ["PRI", "Porto Rico", 3, ["a0:PRI"]],
+      ["CAS", "Cascadia", 2, ["US-WA", "US-OR"]],
+      ["NEN", "Nouvelle-Angleterre", 2, ["US-ME", "US-NH", "US-VT", "US-MA", "US-RI", "US-CT"]],
+      ["ALA", "Alaska", 2, ["US-AK"]],
+      ["DES", "Deseret", 1, ["US-UT"]],
+      ["LOU", "Louisiane", 1, ["US-LA"]]
+    ],
+    "MEX": [
+      ["YUC", "République du Yucatán", 3, ["MX-YUC", "MX-CAM", "MX-ROO"]],
+      ["CHI", "Chiapas", 2, ["MX-CHP"]],
+      ["RGR", "République du Rio Grande", 2, ["MX-TAM", "MX-NLE", "MX-COA"]],
+      ["BAJ", "Basse-Californie", 1, ["MX-BCN", "MX-BCS"]]
+    ],
+    "NIC": [
+      ["MOS", "Royaume des Mosquitos", 2, ["NI-AN", "NI-AS"]]
+    ],
+    "HND": [
+      ["MOS", "Mosquitia", 1, ["HN-GD"]]
+    ],
+    "PAN": [
+      ["GUN", "Guna Yala", 1, ["PA-KY"]]
+    ],
+    "CUB": [
+      ["ORI", "Oriente", 1, ["CU-14", "CU-13", "CU-12", "CU-11", "CU-10"]]
+    ],
+    "COL": [
+      ["ANT", "Antioquia", 1, ["CO-ANT"]]
+    ],
+    "VEN": [
+      ["ZUL", "République de Zulia", 2, ["VE-V"]]
+    ],
+    "ECU": [
+      ["GUA", "Province libre de Guayaquil", 1, ["EC-G", "EC-SE"]]
+    ],
+    "PER": [
+      ["SUD", "État du Sud-Pérou", 1, ["PE-CUS", "PE-PUN", "PE-ARE", "PE-MOQ", "PE-TAC", "PE-APU", "PE-AYA"]],
+      ["LOR", "État fédéral de Loreto", 1, ["PE-LOR"]]
+    ],
+    "BOL": [
+      ["MED", "Media Luna", 2, ["BO-S", "BO-B", "BO-N", "BO-T"]]
+    ],
+    "CHL": [
+      ["WAL", "Wallmapu", 2, ["CL-AR", "CL-LR"]],
+      ["MAG", "Magallanes", 1, ["CL-MA"]]
+    ],
+    "ARG": [
+      ["PAT", "Patagonie", 1, ["AR-Q", "AR-R", "AR-U", "AR-Z", "AR-V"]]
+    ],
+    "BRA": [
+      ["RGS", "République riograndense", 2, ["BR-RS", "BR-SC"]],
+      ["SPA", "São Paulo", 1, ["BR-SP"]],
+      ["EQU", "Confédération de l'Équateur", 1, ["BR-PE", "BR-PB", "BR-RN", "BR-CE", "BR-AL"]]
+    ],
+    "GUY": [
+      ["RUP", "Rupununi", 1, ["GY-UT"]]
+    ],
+    "AUS": [
+      ["WAU", "Australie-Occidentale", 2, ["AU-WA"]],
+      ["TAS", "Tasmanie", 1, ["AU-TAS"]],
+      ["QLD", "Queensland", 1, ["AU-QLD"]]
+    ],
+    "NZL": [
+      ["SUD", "Île du Sud", 1, ["region:South Island"]]
+    ]
+  }
+}

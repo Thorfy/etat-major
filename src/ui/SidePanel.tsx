@@ -423,13 +423,18 @@ function DiplomacyTab({ game, nations }: { game: GameClient; nations: NationData
 }
 
 /**
- * Régions annexées qui s'agitent : une jauge chacune, des repères aux seuils des demandes, et les
- * demandes en attente avec leurs boutons.
+ * Régions annexées et régions historiques du pays : une jauge chacune, des repères aux seuils des
+ * demandes, et les demandes en attente avec leurs boutons. Les régions historiques calmes ne sont
+ * que nommées.
  */
 function RegionsSection({ game, nations }: { game: GameClient; nations: NationData[] }) {
   const stats = game.playerStats;
   if (!stats) return null;
-  const movements = [...stats.movements].sort((a, b) => b.unrest - a.unrest || a.origin - b.origin);
+  const historic = (origin: number) => nations[origin - 1].parent !== undefined;
+  const quiet = (movement: (typeof stats.movements)[number]) =>
+    historic(movement.origin) && movement.unrest < 0.01 && movement.demand === '' && !movement.investing;
+  const movements = stats.movements.filter((movement) => !quiet(movement)).sort((a, b) => b.unrest - a.unrest || a.origin - b.origin);
+  const calm = stats.movements.filter(quiet).sort((a, b) => b.share - a.share);
   const cost = Math.max(50, Math.round(stats.construction * INVESTMENT_WEEKS));
   const status = (movement: (typeof movements)[number]) => {
     if (movement.demand === 'investment') return `demande des investissements, avant le ${formatShortDate(movement.until)}`;
@@ -442,19 +447,23 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
   };
   return (
     <section>
-      <h3>Régions annexées</h3>
+      <h3>Régions</h3>
       <Note lines={3}>
-        {`Leur agitation tend vers un plafond (le trait blanc) : bas si tu les équipes (usines, services publics, ` +
-          `recrutement…), haut si elles sont négligées et ton pays instable ou en guerre. Elles demandent des ` +
-          `investissements, puis l'indépendance ; à 100 %, elles se soulèvent.`}
+        {`Régions annexées et régions historiques de ton pays. Leur agitation tend vers un plafond (le trait blanc) : ` +
+          `bas si tu les équipes, haut si ton pays est instable ou en guerre, et plus haut pour une identité forte. ` +
+          `Elles demandent des investissements, puis l'indépendance ; à 100 %, elles se soulèvent.`}
       </Note>
-      {movements.length === 0 && <Note lines={1}>Aucune région annexée.</Note>}
+      {movements.length === 0 && <Note lines={1}>Aucune région ne s'agite.</Note>}
       {movements.map((movement) => (
         <div class={`region ${movement.demand ? 'offer' : ''}`} key={movement.origin}>
           <div class="offensive-row">
             <span>
               <Blason nation={nations[movement.origin - 1]} />
-              {nations[movement.origin - 1].name} <small>· {formatPercent(movement.share)} du pays · équipée à {formatPercent(movement.care)}</small>
+              {nations[movement.origin - 1].name}{' '}
+              <small>
+                · {historic(movement.origin) ? `identité ${IDENTITY_NAMES[nations[movement.origin - 1].identity ?? 1]}` : 'annexée'} ·{' '}
+                {formatPercent(movement.share)} du pays · équipée à {formatPercent(movement.care)}
+              </small>
             </span>
             <b class={movement.unrest >= DEMAND_INDEPENDENCE_AT ? 'behind' : ''}>{formatPercent(movement.unrest)}</b>
           </div>
@@ -480,9 +489,16 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
           )}
         </div>
       ))}
+      {calm.length > 0 && (
+        <p class="region-calm">
+          Calmes : {calm.map((movement) => nations[movement.origin - 1].name).join(', ')}.
+        </p>
+      )}
     </section>
   );
 }
+
+const IDENTITY_NAMES = ['', 'faible', 'moyenne', 'forte', 'très forte'];
 
 function enemyOffensivesOf(game: GameClient) {
   return (game.snapshot?.offensives ?? []).filter((offensive) => offensive.nation !== game.player && game.isAtWarWith(offensive.nation));

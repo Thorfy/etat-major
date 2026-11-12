@@ -263,8 +263,8 @@ function popupContent(game: GameClient, popup: Popup, nameOf: (id: number) => st
     case 'uprising':
       return {
         title: 'Soulèvement !',
-        text: `${who} ${plural ? 'se soulèvent' : 'se soulève'} contre toi${popup.coalition ? ', ensemble' : ''}, et ${plural ? 'reprennent leurs' : 'reprend ses'} terres d'origine.`,
-        note: 'Pour éviter les suivants : équipe tes régions annexées (onglet Diplomatie).',
+        text: `${who} ${plural ? 'se soulèvent' : 'se soulève'} contre toi${popup.coalition ? ', ensemble' : ''}, et ${plural ? 'prennent leurs' : 'prend ses'} terres.`,
+        note: 'Pour éviter les suivants : équipe tes régions agitées, et ne perds pas de terrain (onglet Diplomatie).',
         choices: false,
       };
     case 'demand': {
@@ -387,8 +387,10 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
   const development = economy ? economy.development[provinceId] : 1;
   const provinceGdp = economy ? economy.provinceGdp[provinceId] * development : selected?.gdpMusd ?? 0;
   const buildOptions = game ? game.buildOptions(provinceId) : [];
-  // Une région annexée qui s'agite dans le pays qui la tient.
-  const unrest = game && owner && origin !== owner ? game.unrestOf(owner, origin) : -1;
+  // Une région annexée qui s'agite dans le pays qui la tient, ou la région historique de la province.
+  const region = selected?.region !== undefined ? selected.region + 1 : 0;
+  const claimant = origin !== owner ? origin : region;
+  const unrest = game && owner && claimant ? game.unrestOf(owner, claimant) : -1;
 
   return (
     <>
@@ -471,6 +473,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
             <dd class={state.selected.supply < 0.4 ? 'behind' : ''}>{formatPercent(state.selected.supply)}</dd>
             <dt>Pays d'origine</dt>
             <dd>{nameOf(origin)}</dd>
+            <dt>Région historique</dt>
+            <dd>{region ? nameOf(region) : '—'}</dd>
             <dt>Agitation</dt>
             <dd class={unrest >= 0.65 ? 'behind' : ''}>{unrest >= 0 ? formatPercent(unrest) : '—'}</dd>
             <dt>Consolidation</dt>

@@ -101,6 +101,11 @@ const resolveNation = (n: Nation): Nation => {
 
 interface RawProvince {
   name: string;
+  /** Code ISO 3166-2 et nom d'origine, pour le catalogue des régions historiques. */
+  iso: string | null;
+  neName: string;
+  /** Région historique (clé « FRA-BRE »), attribuée d'après data/regions.json. */
+  historic: string | null;
   region: string | null;
   nation: Nation;
   isFallback: boolean;
@@ -115,7 +120,7 @@ for (const f of admin0) {
   const p = f.properties;
   if (excluded.has(p.ADM0_A3)) continue;
   const id = raw.length;
-  raw.push({ name: p.NAME_FR ?? p.NAME, region: null, nation: a0ToNation.get(p.ADM0_A3)!, isFallback: true, a0: p.ADM0_A3 });
+  raw.push({ name: p.NAME_FR ?? p.NAME, iso: null, neName: p.NAME, historic: null, region: null, nation: a0ToNation.get(p.ADM0_A3)!, isFallback: true, a0: p.ADM0_A3 });
   for (const polygon of polygonsOf(f.geometry)) rasterizePolygon(grid, W, H, polygon, id);
 }
 for (const f of admin1) {
@@ -126,6 +131,9 @@ for (const f of admin1) {
   const id = raw.length;
   raw.push({
     name: p.name_fr || p.name || p.admin,
+    iso: p.iso_3166_2 ?? null,
+    neName: p.name ?? '',
+    historic: null,
     region: p.region || null,
     nation,
     isFallback: false,
@@ -250,6 +258,74 @@ for (let i = 0; i < grid.length; i++) {
 }
 
 // ---------------------------------------------------------------------------
+// Régions historiques (data/regions.json) : chaque subdivision reçoit au plus une région.
+// Un code ou un nom l'emporte sur « region: », qui l'emporte sur « a0: ».
+// ---------------------------------------------------------------------------
+
+interface RegionDef {
+  key: string;
+  country: string;
+  name: string;
+  identity: number;
+}
+const regionDefs = new Map<string, RegionDef>();
+{
+  const catalog = JSON.parse(readFileSync(join(root, 'data', 'regions.json'), 'utf8')).countries as Record<
+    string,
+    [string, string, number, string[]][]
+  >;
+  const rank = new Map<number, number>();
+  for (const [country, list] of Object.entries(catalog)) {
+    const members = raw.flatMap((r, id) => (r && resolveNation(r.nation).code === country ? [id] : []));
+    if (members.length === 0) throw new Error(`Régions : pays inconnu ${country}`);
+    for (const [id, name, identity, specs] of list) {
+      const key = `${country}-${id}`;
+      if (regionDefs.has(key)) throw new Error(`Régions : ${key} en double`);
+      if (!(identity >= 1 && identity <= 4)) throw new Error(`Régions : ${key} : identité ${identity}`);
+      regionDefs.set(key, { key, country, name, identity });
+      const removed: number[] = [];
+      for (const spec of specs) {
+        const negative = spec.startsWith('-');
+        const body = negative ? spec.slice(1) : spec;
+        let level: number;
+        let match: (r: RawProvince) => boolean;
+        if (body.startsWith('a0:')) {
+          level = 1;
+          match = (r) => r.a0 === body.slice(3);
+        } else if (body.startsWith('region:')) {
+          level = 2;
+          match = (r) => r.region === body.slice(7);
+        } else {
+          level = 3;
+          match = (r) => r.iso === body || r.neName === body || r.name === body;
+        }
+        const hits = members.filter((m) => match(raw[m]!));
+        if (hits.length === 0) throw new Error(`Régions : ${key} : « ${spec} » ne désigne rien`);
+        for (const m of hits) {
+          const r = raw[m]!;
+          if (negative) {
+            removed.push(m);
+            continue;
+          }
+          const current = rank.get(m) ?? 0;
+          if (current === level && r.historic !== key) throw new Error(`Régions : ${r.name} à la fois dans ${r.historic} et ${key}`);
+          if (level >= current) {
+            r.historic = key;
+            rank.set(m, level);
+          }
+        }
+      }
+      for (const m of removed) {
+        if (raw[m]!.historic === key) {
+          raw[m]!.historic = null;
+          rank.delete(m);
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Provinces : on fusionne les trop petites, puis on scinde les trop grandes.
 // ---------------------------------------------------------------------------
 
@@ -260,7 +336,7 @@ interface Blob {
   sx: number;
   sy: number;
   x0: number;
-  members: { name: string; region: string | null; cells: number; isFallback: boolean }[];
+  members: { name: string; region: string | null; historic: string | null; cells: number; isFallback: boolean }[];
   neighbors: Map<Blob, number>;
   parent: Blob | null;
 }
@@ -298,7 +374,7 @@ for (let i = 0; i < grid.length; i++) {
 for (const b of blobs) {
   if (b && b.cells > 0) {
     const r = raw[b.id]!;
-    b.members.push({ name: r.name, region: r.region, cells: b.cells, isFallback: r.isFallback });
+    b.members.push({ name: r.name, region: r.region, historic: r.historic, cells: b.cells, isFallback: r.isFallback });
   }
 }
 forEachBorder((a, c) => {
@@ -334,6 +410,20 @@ const regionOf = (b: Blob) => {
   return dominant?.region ?? null;
 };
 
+const historicOf = (b: Blob) => {
+  const dominant = [...b.members].sort((m, n) => n.cells - m.cells)[0];
+  return dominant?.historic ?? null;
+};
+/**
+ * Une province ne déborde pas d'une région historique : une région, même minuscule, garde ses
+ * provinces. Seul un éclat hors région, trop petit pour tenir seul, peut y être rattaché.
+ */
+const crossesHistory = (b: Blob, other: Blob) => {
+  const mine = historicOf(b);
+  if (mine === historicOf(other)) return false;
+  return mine !== null || b.cells >= config.minProvinceCells / 3;
+};
+
 let changed = true;
 while (changed) {
   changed = false;
@@ -345,7 +435,7 @@ while (changed) {
     let target: Blob | null = null;
     let bestScore = -1;
     for (const [other, count] of b.neighbors) {
-      if (other.cells + b.cells > config.maxProvinceCells) continue;
+      if (other.cells + b.cells > config.maxProvinceCells || crossesHistory(b, other)) continue;
       const sameRegion = regionOf(other) !== null && regionOf(other) === regionOf(b) ? 3 : 1;
       const score = (count * sameRegion) / (1 + other.cells / config.minProvinceCells);
       if (score > bestScore) {
@@ -359,7 +449,7 @@ while (changed) {
       let bestDistance = config.nearestNationRadiusCells;
       for (const other of alive) {
         if (other === b || other.parent || other.nation !== b.nation) continue;
-        if (other.cells + b.cells > config.maxProvinceCells) continue;
+        if (other.cells + b.cells > config.maxProvinceCells || crossesHistory(b, other)) continue;
         const o = blobCenter(other);
         const distance = Math.hypot(wrapDeltaX(c.x, o.x), c.y - o.y);
         if (distance < bestDistance) {
@@ -389,13 +479,30 @@ function blobName(b: Blob): string {
 interface FinalProvince {
   name: string;
   nation: Nation;
+  historic: string | null;
+}
+
+/** Région historique majoritaire en cellules (le cœur du pays compte comme une région). */
+const historicStats = new Map<string, { inside: number; outside: number }>();
+function blobHistoric(b: Blob): string | null {
+  const cells = new Map<string | null, number>();
+  for (const m of b.members) cells.set(m.historic, (cells.get(m.historic) ?? 0) + m.cells);
+  const best = [...cells].sort((x, y) => y[1] - x[1] || String(x[0]).localeCompare(String(y[0])))[0][0];
+  for (const [key, count] of cells) {
+    if (key === null) continue;
+    const stats = historicStats.get(key) ?? { inside: 0, outside: 0 };
+    if (key === best) stats.inside += count;
+    else stats.outside += count;
+    historicStats.set(key, stats);
+  }
+  return best;
 }
 const finals: (FinalProvince | null)[] = [null];
 const blobToFinal = new Map<Blob, number>();
 for (const b of blobs) {
   if (!b || b.parent || b.cells === 0) continue;
   blobToFinal.set(b, finals.length);
-  finals.push({ name: blobName(b), nation: b.nation });
+  finals.push({ name: blobName(b), nation: b.nation, historic: blobHistoric(b) });
 }
 const remap = new Uint16Array(raw.length);
 for (const b of blobs) {
@@ -480,11 +587,11 @@ const SECTORS = ['Est', 'Sud-Est', 'Sud', 'Sud-Ouest', 'Ouest', 'Nord-Ouest', 'N
       used.set(sector, rank);
       const name = `${parent.name} ${sector}${rank > 1 ? ` ${rank}` : ''}`;
       if (c === 0) {
-        finals[id] = { name, nation: parent.nation };
+        finals[id] = { name, nation: parent.nation, historic: parent.historic };
         partIds.push(id);
       } else {
         partIds.push(finals.length);
-        finals.push({ name, nation: parent.nation });
+        finals.push({ name, nation: parent.nation, historic: parent.historic });
       }
     }
     for (let i = 0; i < cells.length; i++) grid[cells[i]] = partIds[assignment[i]];
@@ -766,6 +873,98 @@ let unplacedCities = 0;
   }
 }
 
+// ---------------------------------------------------------------------------
+// Régions historiques : des nations en sommeil, après les nations du départ, pour ne pas
+// changer leurs indices. Elles ne possèdent rien ; leurs provinces portent leur indice.
+// ---------------------------------------------------------------------------
+
+const regionReport: string[] = [];
+{
+  const used = new Map<string, number>();
+  for (const e of order) if (e.f.historic) used.set(e.f.historic, (used.get(e.f.historic) ?? 0) + 1);
+  const keys = [...regionDefs.keys()].filter((key) => used.has(key));
+  const missing = [...regionDefs.keys()].filter((key) => !used.has(key));
+  if (missing.length > 0) regionReport.push(`Régions sans province (trop petites, fondues dans une voisine) : ${missing.join(', ')}`);
+  const regionIndex = new Map(keys.map((key, k) => [key, nationList.length + k]));
+  order.forEach((e, index) => {
+    if (e.f.historic) provinces[index].region = regionIndex.get(e.f.historic)!;
+  });
+  // Grille des régions : 0 l'eau, 0xffff la terre hors région.
+  const regionOfCell = new Uint16Array(W * H);
+  for (let i = 0; i < grid.length; i++) {
+    if (grid[i] === 0) continue;
+    const region = provinces[grid[i] - 1].region;
+    regionOfCell[i] = region === undefined ? 0xffff : region + 1;
+  }
+  const regionDistances = distanceToBoundary(regionOfCell, W, H);
+  const totals = keys.map(() => ({ cells: 0, area: 0, population: 0, gdp: 0, label: { x: 0, y: 0, r: -1 }, near: new Set<string>() }));
+  for (let i = 0; i < grid.length; i++) {
+    const region = regionOfCell[i];
+    if (region === 0 || region === 0xffff) continue;
+    const t = totals[region - 1 - nationList.length];
+    const x = i % W;
+    const y = (i - x) / W;
+    t.cells++;
+    t.area += cellAreaKm2(y);
+    if (regionDistances[i] > t.label.r) t.label = { x, y, r: Math.round(regionDistances[i] * 10) / 10 };
+    for (const j of [y * W + (x + 1) % W, y * W + (x + W - 1) % W, y > 0 ? i - W : -1, y + 1 < H ? i + W : -1]) {
+      if (j < 0 || nationOfCell[j] === 0) continue;
+      const other = regionOfCell[j];
+      if (other !== region && other !== 0xffff && other !== 0) t.near.add(`r${other}`);
+      t.near.add(colors[nationOfCell[j] - 1]);
+    }
+  }
+  provinces.forEach((province) => {
+    if (province.region === undefined) return;
+    const t = totals[province.region - nationList.length];
+    t.population += province.population;
+    t.gdp += province.gdpMusd;
+  });
+  // Couleur : ni celle du pays, ni celle d'un voisin, ni celle d'une région voisine.
+  const regionColors: string[] = [];
+  keys.forEach((key, k) => {
+    const def = regionDefs.get(key)!;
+    const t = totals[k];
+    const parent = nationIndex.get(nations.get(def.country)!)!;
+    const taken = new Set<string>([colors[parent]]);
+    for (const near of t.near) {
+      if (near.startsWith('r')) {
+        const other = Number(near.slice(1)) - 1 - nationList.length;
+        if (regionColors[other]) taken.add(regionColors[other]);
+      } else taken.add(near);
+    }
+    regionColors[k] = PALETTE.find((c) => !taken.has(c)) ?? PALETTE[(k * 5) % PALETTE.length];
+    nationData.push({
+      code: key,
+      name: def.name,
+      continent: nationList[parent].continent,
+      population: Math.round(t.population),
+      gdpMusd: Math.round(t.gdp * 10) / 10,
+      color: regionColors[k],
+      cells: 0,
+      areaKm2: Math.round(t.area),
+      label: t.label,
+      parent,
+      identity: def.identity,
+    });
+  });
+  // Fidélité au catalogue : part des cellules de chaque région restées dans ses provinces.
+  let inside = 0;
+  let outside = 0;
+  const worst: string[] = [];
+  for (const [key, stats] of historicStats) {
+    inside += stats.inside;
+    outside += stats.outside;
+    const share = stats.inside / Math.max(1, stats.inside + stats.outside);
+    if (share < 0.75) worst.push(`${key} ${(share * 100).toFixed(0)} %`);
+  }
+  regionReport.push(
+    `${keys.length} régions historiques dans ${new Set(keys.map((key) => regionDefs.get(key)!.country)).size} pays, ` +
+      `${((inside / Math.max(1, inside + outside)) * 100).toFixed(1)} % de leurs cellules dans leurs provinces`,
+  );
+  if (worst.length > 0) regionReport.push(`Régions mal découpées par les provinces : ${worst.join(', ')}`);
+}
+
 mkdirSync(outDir, { recursive: true });
 const terrainRle = encodeRle(terrainGrid);
 const terrainCompressed = deflateSync(Buffer.from(terrainRle.buffer, terrainRle.byteOffset, terrainRle.byteLength), { level: 9 });
@@ -825,7 +1024,8 @@ for (const [code, reference] of Object.entries(REFERENCE_KM2)) {
   console.log(`
 Ressources : ${depositPlaces.length} gisements. Pétrole : ${total('oil')}. Acier : ${total('steel')}`);
 }
-const smallest = [...nationData].sort((a, b) => a.cells - b.cells).slice(0, 12);
+console.log(`\n${regionReport.join('\n')}`);
+const smallest = [...nationData].filter((n) => n.parent === undefined).sort((a, b) => a.cells - b.cells).slice(0, 12);
 console.log(`\nPlus petites nations : ${smallest.map((n) => `${n.name} (${n.cells})`).join(', ')}`);
 const counts = new Map<string, number>();
 for (const p of provinces) {

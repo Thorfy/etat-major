@@ -221,9 +221,12 @@ describe('vraie carte', () => {
   it('répartit tout le PIB et toute la population de chaque pays', () => {
     const gdp = new Float64Array(world.nations.length);
     const population = new Float64Array(world.nations.length);
+    // Une région historique, en sommeil, compte ce que pèsent ses provinces.
     for (const province of world.provinces) {
-      gdp[province.nation] += province.gdpMusd;
-      population[province.nation] += province.population;
+      for (const n of province.region === undefined ? [province.nation] : [province.nation, province.region]) {
+        gdp[n] += province.gdpMusd;
+        population[n] += province.population;
+      }
     }
     world.nations.forEach((nation, n) => {
       expect(Math.abs(gdp[n] - nation.gdpMusd)).toBeLessThanOrEqual(Math.max(1, nation.gdpMusd * 0.001));

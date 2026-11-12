@@ -25,10 +25,11 @@ let lastEconomyTick = -Infinity;
 
 function send(tickMs: number, withSnapshot: boolean, withEconomy = false): void {
   const changes = sim!.drainChanges();
-  // Noms de pays : régulièrement, et tout de suite après une capitulation.
+  // Noms de pays : régulièrement, et tout de suite après une capitulation ou une naissance.
   const capitulation = changes.events.some((event) => event.type === 'capitulation');
+  const born = changes.events.some((event) => event.type === 'secession' || event.type === 'independence');
   let labels: WorkerUpdate['labels'] = [];
-  if (capitulation || sim!.tick - lastLabelTick >= ADJACENCY_INTERVAL_TICKS) {
+  if (capitulation || born || sim!.tick - lastLabelTick >= ADJACENCY_INTERVAL_TICKS) {
     labels = sim!.updateLabels();
     lastLabelTick = sim!.tick;
   }

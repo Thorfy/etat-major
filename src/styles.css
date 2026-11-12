@@ -598,6 +598,13 @@ canvas {
   font-size: 12px;
 }
 
+.region-calm {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .gauge.unrest {
   position: relative;
   margin-top: 3px;
