@@ -261,7 +261,11 @@ export const AI_EFFORT_SPREAD = 0.1;
  *   vouloir la paix (sous 1, il se bat plus longtemps) ;
  * - `trade` : poids dans le tirage de qui propose un accord ; `embargoAt` : agressivité d'un
  *   voisin qui lui fait imposer un embargo ; `maxAxes` : axes qu'il trace en paix ;
- * - `build` : multiplie sa chance de lancer un chantier.
+ * - `build` : multiplie sa chance de lancer un chantier ;
+ * - `annexedValue` : part de leur valeur que gardent les provinces qu'il annexe ;
+ * - `conqueror` : il cherche une guerre à son propre rythme (CONQUEROR_WAR_CHANCE à chaque
+ *   passe, dès qu'il est en paix), vise la plus grosse proie qu'il peut battre, et refuse la paix
+ *   tant qu'il gagne et qu'il lui reste des hommes : il pousse jusqu'à la capitulation.
  */
 export interface AiProfile {
   name: string;
@@ -274,12 +278,15 @@ export interface AiProfile {
   embargoAt: number;
   maxAxes: number;
   build: number;
+  annexedValue: number;
+  conqueror: boolean;
 }
+export const CONQUEROR_WAR_CHANCE = 0.05;
 export const AI_PROFILES: readonly AiProfile[] = [
-  { name: 'prudent', share: 0.35, war: 1, warRatio: 1.4, effort: 0, peaceStability: 1, trade: 1, embargoAt: 0.6, maxAxes: 2, build: 1 },
-  { name: 'belliqueux', share: 0.15, war: 6, warRatio: 1.05, effort: 0.15, peaceStability: 0.6, trade: 0.2, embargoAt: 2, maxAxes: 1, build: 0.8 },
-  { name: 'commerçant', share: 0.3, war: 0.25, warRatio: 2, effort: -0.05, peaceStability: 1.4, trade: 3, embargoAt: 0.45, maxAxes: 4, build: 1.2 },
-  { name: 'bâtisseur', share: 0.2, war: 0.6, warRatio: 1.6, effort: -0.05, peaceStability: 1.2, trade: 1, embargoAt: 0.6, maxAxes: 3, build: 1.6 },
+  { name: 'prudent', share: 0.35, war: 1, warRatio: 1.4, effort: 0, peaceStability: 1, trade: 1, embargoAt: 0.6, maxAxes: 2, build: 1, annexedValue: 0.35, conqueror: false },
+  { name: 'belliqueux', share: 0.15, war: 6, warRatio: 1.05, effort: 0.15, peaceStability: 0.6, trade: 0.2, embargoAt: 2, maxAxes: 1, build: 0.8, annexedValue: 0.6, conqueror: true },
+  { name: 'commerçant', share: 0.3, war: 0.25, warRatio: 2, effort: -0.05, peaceStability: 1.4, trade: 3, embargoAt: 0.45, maxAxes: 4, build: 1.2, annexedValue: 0.35, conqueror: false },
+  { name: 'bâtisseur', share: 0.2, war: 0.6, warRatio: 1.6, effort: -0.05, peaceStability: 1.2, trade: 1, embargoAt: 0.6, maxAxes: 3, build: 1.6, annexedValue: 0.45, conqueror: false },
 ];
 
 /** Capacité militaire de départ d'une nation, répartie ensuite entre ses provinces. */

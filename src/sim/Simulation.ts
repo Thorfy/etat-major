@@ -243,6 +243,7 @@ import {
   AI_MAX_AXES,
   AI_AXIS_CHANCE,
   AI_PROFILES,
+  CONQUEROR_WAR_CHANCE,
 } from './balance.ts';
 import type {
   BuildKind,
@@ -1570,15 +1571,23 @@ export class Simulation {
     return result;
   }
 
-  /** Une nation en paix attaque parfois un voisin plus faible, par terre d'abord. */
+  /**
+   * Une nation en paix attaque parfois un voisin plus faible, par terre d'abord : une seule, tirée
+   * selon son tempérament, à chaque passe. Les conquérants cherchent en plus la guerre à leur
+   * propre rythme, dès qu'ils sont en paix.
+   */
   private decideWars(): void {
+    if (this.fronts.length >= Math.max(1, this.aliveCount * MAX_WAR_SHARE)) return;
+    for (let n = 1; n < this.stride; n++) {
+      if (n === this.player || !this.alive[n] || !AI_PROFILES[this.profile[n]].conqueror) continue;
+      if (this.random() < CONQUEROR_WAR_CHANCE) this.tryWar(n);
+    }
     if (this.random() >= WAR_CHANCE) return;
     const living: number[] = [];
     for (let n = 1; n < this.stride; n++) {
       if (this.alive[n] && n !== this.player) living.push(n);
     }
     if (living.length === 0) return;
-    if (this.fronts.length >= Math.max(1, this.aliveCount * MAX_WAR_SHARE)) return;
     // Un pays belliqueux est tiré bien plus souvent qu'un commerçant.
     let total = 0;
     for (const n of living) total += AI_PROFILES[this.profile[n]].war;
@@ -1591,6 +1600,11 @@ export class Simulation {
         break;
       }
     }
+    this.tryWar(nation);
+  }
+
+  /** La nation déclare la guerre à un voisin qu'elle peut battre, s'il y en a un et qu'elle est en paix. */
+  private tryWar(nation: number): void {
     const ratio = AI_PROFILES[this.profile[nation]].warRatio;
     if (this.fronts.some((front) => front.a === nation || front.b === nation)) return;
 
@@ -1600,13 +1614,19 @@ export class Simulation {
         if (!this.alive[other]) return false;
         if (this.isAllied(nation, other) || this.hasTruce(nation, other)) return false;
         if (other === this.player) {
-          // Le joueur : seulement après son répit, pas deux guerres de suite, et à deux contre un.
+          // Le joueur : seulement après son répit, pas deux guerres de suite, et à deux contre un au
+          // moins, même pour un belliqueux ; un commerçant en exige davantage.
           if (this.tick < PLAYER_GRACE_TICKS || this.tick - this.lastWarOnPlayer < PLAYER_WAR_COOLDOWN_TICKS) return false;
-          return this.capacity[nation] >= this.availableStrength(other) * PLAYER_WAR_RATIO * (ratio / WAR_CAPACITY_RATIO);
+          return this.capacity[nation] >= this.availableStrength(other) * PLAYER_WAR_RATIO * Math.max(1, ratio / WAR_CAPACITY_RATIO);
         }
         return this.capacity[nation] >= this.availableStrength(other) * ratio;
       });
-      return weak.length > 0 ? weak[Math.floor(this.random() * weak.length)] : 0;
+      if (weak.length === 0) return 0;
+      if (AI_PROFILES[this.profile[nation]].conqueror) {
+        // Un conquérant vise la plus grosse proie qu'il peut battre.
+        return weak.reduce((best, other) => (this.totalHome[other] > this.totalHome[best] ? other : best));
+      }
+      return weak[Math.floor(this.random() * weak.length)];
     };
     const land = pick(this.landNeighbors[nation]);
     const enemy = land !== 0 ? land : this.navy[nation] > 0 ? pick(this.seaNeighbors[nation]) : 0;
@@ -1691,7 +1711,8 @@ export class Simulation {
     const tired = this.stability[ai] < AI_PEACE_STABILITY * AI_PROFILES[this.profile[ai]].peaceStability;
     const drained = this.manpowerMax[ai] > 0 && this.manpower[ai] / this.manpowerMax[ai] < AI_PEACE_MANPOWER;
     const winning = held >= AI_WINNING_HOME_SHARE && theirs < held;
-    // Qui gagne refuse, sauf à bout de forces.
+    // Qui gagne refuse, sauf à bout de forces ; un conquérant, tant qu'il lui reste des hommes.
+    if (winning && AI_PROFILES[this.profile[ai]].conqueror && !drained) return false;
     if (winning && !(tired && drained) && this.stability[ai] >= AI_PEACE_STABILITY * 0.6) return false;
     return tired || drained || held < theirs;
   }
@@ -1751,9 +1772,10 @@ export class Simulation {
       this.provinceHome[p] = holder;
       this.homePortsStale = true;
       this.consolidation[p] = 0;
-      this.provinceValue[p] *= ANNEXED_VALUE;
-      this.provinceGdp[p] *= ANNEXED_VALUE;
-      this.provinceManpower[p] *= ANNEXED_VALUE;
+      const kept = this.annexedValueOf(this.controller[p]);
+      this.provinceValue[p] *= kept;
+      this.provinceGdp[p] *= kept;
+      this.provinceManpower[p] *= kept;
       this.pendingHomes.push(p, holder);
     }
     // Les forces du front rentrent ; les offensives de l'un chez l'autre s'arrêtent.
@@ -2254,9 +2276,10 @@ export class Simulation {
       this.provinceHome[p] = this.controller[p];
       this.homePortsStale = true;
       this.consolidation[p] = 0;
-      this.provinceValue[p] *= ANNEXED_VALUE;
-      this.provinceGdp[p] *= ANNEXED_VALUE;
-      this.provinceManpower[p] *= ANNEXED_VALUE;
+      const kept = this.annexedValueOf(this.controller[p]);
+      this.provinceValue[p] *= kept;
+      this.provinceGdp[p] *= kept;
+      this.provinceManpower[p] *= kept;
       this.pendingHomes.push(p, this.controller[p]);
     }
 
@@ -2479,6 +2502,11 @@ export class Simulation {
 
   tradeAccessOf(nation: number): number {
     return this.tradeAccess[nation];
+  }
+
+  /** Part de leur valeur que gardent les provinces annexées par une nation. */
+  private annexedValueOf(nation: number): number {
+    return nation === this.player || nation === 0 ? ANNEXED_VALUE : AI_PROFILES[this.profile[nation]].annexedValue;
   }
 
   profileOf(nation: number): number {

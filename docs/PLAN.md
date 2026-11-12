@@ -94,8 +94,9 @@ dans la fiche d'un pays :
 | Commerçant | 30 % | tiré 4 fois moins souvent, attaque à 2 contre 1, veut vite la paix | propose 3 fois plus d'accords, embargo dès 45 % d'agressivité d'un voisin, quatre axes | +20 % |
 | Bâtisseur | 20 % | peu agressif | de base | +60 %, trois axes |
 
-Contre le joueur, chaque IA exige le rapport de force du joueur (2 contre 1) à proportion du sien :
-un belliqueux l'attaque déjà à 1,5 contre 1, un commerçant presque jamais.
+Contre le joueur, toute IA exige au moins 2 contre 1, même un belliqueux, et davantage à proportion
+de son tempérament (un commerçant, près de 3 contre 1) : les empires se forment entre IA, et le
+joueur les voit venir.
 
 **État des lieux avant réglage** (partie de 120 min sans joueur) : 99 guerres et 46 capitulations,
 mais une carte figée (la Russie à 23 % des terres du début à la fin), une croissance débridée
@@ -116,6 +117,24 @@ les commerçants et les bâtisseurs s'enrichissent. 0 à 30 embargos selon la pa
 auparavant : quand un belliqueux dépasse 45 % d'agressivité, ses voisins commerçants le
 sanctionnent. 81 à 107 guerres, 49 à 60 capitulations. Les plus grands pays en paix grandissent
 encore beaucoup (Japon +129 à +145 %) ; la carte reste peu changeante : aucun empire ne se forme.
+
+**Empires.** Pour que la carte bouge, les belliqueux deviennent des conquérants : chacun cherche la
+guerre à son propre rythme dès qu'il est en paix (5 % de chances à chaque passe, au lieu d'attendre
+d'être tiré parmi tous les pays), vise la plus grosse proie qu'il peut battre, refuse la paix tant
+qu'il gagne et qu'il lui reste des hommes, et garde 60 % de la valeur de ce qu'il annexe (35 % pour
+les autres, 45 % pour un bâtisseur). Deux essais intermédiaires ont échoué : viser le voisin le plus
+faible et refuser la paix, sans rythme propre, enfermait les belliqueux dans de longues guerres
+contre de petites proies (69 à 101 guerres, aucun empire).
+
+Sur trois parties de 120 min : 145 à 199 guerres déclarées (81 à 107 avant), 62 à 80 capitulations.
+Des empires se forment (l'Inde triple son territoire jusqu'à 4,7 % des terres du monde ; l'Iran, le
+Maroc, le Guatemala grossissent), puis se fissurent : 14 à 38 soulèvements, 1 à 10 coalitions
+rebelles et 31 à 63 embargos, contre presque rien avant ; sur une partie, le nombre de pays en vie
+remonte de 164 à 182, les régions renaissant. Les belliqueux s'y usent (PIB −18 à +6 %), les
+commerçants s'enrichissent (+55 à +57 %). Tick : max 80 à 91 ms (contre 37 à 46), avec deux fois
+plus de fronts ouverts. Un conquérant voisin n'attaque le joueur qu'à 2 contre 1, comme toute IA,
+avec le répit, 26 semaines entre deux guerres, et six chances sur dix d'épargner un joueur
+pacifique. Non vérifié : ce que le joueur en ressent, et si les pics de calcul se voient en jeu.
 
 ## Illustrations, deuxième série (pendant le jalon 9)
 

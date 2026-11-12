@@ -101,6 +101,16 @@ function worldGame(durationMinutes: number, seed: number) {
         .slice(0, 5)
         .map((entry) => `${entry.name} ${(entry.output / 1e6).toFixed(1)} Bn (${entry.output >= entry.start ? '+' : ''}${((entry.output / entry.start - 1) * 100).toFixed(0)} %)`);
       console.log(`  ${minutes(t)}′ : ${sim.aliveCount} nations, ${sim.fronts.length} guerres (${wars} déclarées), ${capitulations} capitulations, ${sim.offensives.length} offensives, frontière ${sim.frontierSize} — ${ranking.join(', ')}`);
+      {
+        // Conquérants : les plus gros gains de terres depuis le départ, avec leur tempérament.
+        const gains = world.nations
+          .map((nation, index) => ({ nation, id: index + 1, gain: sim.cellsOf(index + 1) - nation.cells }))
+          .filter((entry) => entry.nation.parent === undefined && entry.gain > 0)
+          .sort((x, y) => y.gain - x.gain)
+          .slice(0, 4)
+          .map((entry) => `${entry.nation.name} +${((entry.gain / Math.max(1, entry.nation.cells)) * 100).toFixed(0)} % (${AI_PROFILES[sim.profileOf(entry.id)].name}, ${((sim.cellsOf(entry.id) / landTotal) * 100).toFixed(1)} % des terres)`);
+        console.log(`         Conquérants : ${gains.join(', ') || 'aucun'}`);
+      }
       const allMovements = (sim as unknown as { movements: { origin: number; unrest: number; investing: boolean }[] }).movements;
       const historic = allMovements.filter((movement) => world.nations[movement.origin - 1].parent !== undefined);
       const movements = allMovements.filter((movement) => world.nations[movement.origin - 1].parent === undefined);
