@@ -12,7 +12,7 @@ import {
   ALLIANCE_MAX_AGGRESSION,
   DEMAND_INDEPENDENCE_AT,
   DEMAND_INVESTMENT_AT,
-  AXIS_BONUS,
+  AUTO_TRANSIT_BONUS,
   INVESTMENT_WEEKS,
   AUTO_HUBS_PER_PROVINCES,
   HUB_BONUS,
@@ -295,7 +295,7 @@ function AutoNetwork({ game }: { game: GameClient }) {
       </dl>
       <Note lines={4}>
         {`Tes départements les plus riches sont reliés d'eux-mêmes au plus riche : ils gagnent ${formatPercent(HUB_BONUS)} ` +
-          `de PIB et de capacité, et les départements traversés ${formatPercent(AXIS_BONUS)}. Un département déjà sur une route ` +
+          `de PIB et de capacité, et les départements traversés ${formatPercent(AUTO_TRANSIT_BONUS)}. Un département déjà sur une route ` +
           `laisse sa place au suivant, et garde le bonus. Le réseau se redessine quand un département en dépasse un autre. ` +
           `Plus de villes : un territoire plus grand (une par ${AUTO_HUBS_PER_PROVINCES} départements), ou la recherche sur ` +
           `les échanges (onglet Doctrine, deux par niveau).`}

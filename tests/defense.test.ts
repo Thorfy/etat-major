@@ -37,6 +37,8 @@ function config(options: { gdpB?: number; ai?: boolean } = {}): SimConfig {
     seed: 6,
     player: A,
     ai: options.ai ?? false,
+    // Ces tests mesurent la défense : pas de bonus du réseau commercial.
+    autoTrade: false,
   };
 }
 

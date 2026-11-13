@@ -232,6 +232,31 @@ function worldGame(durationMinutes: number, seed: number) {
     }
   }
   doctrineReport(sim);
+  {
+    // Économie mondiale et réseaux commerciaux automatiques, sur les pays en vie.
+    let start = 0;
+    let now = 0;
+    let networks = 0;
+    let hubs = 0;
+    let principal = 0;
+    let stability = 0;
+    let alive = 0;
+    for (let n = 1; n <= world.nations.length; n++) {
+      if (!sim.isAlive(n)) continue;
+      alive++;
+      start += world.nations[n - 1].gdpMusd;
+      now += sim.outputOf(n);
+      stability += sim.stabilityOf(n);
+      const network = sim.networkOf(n);
+      if (network.hubs.length > 1) networks++;
+      hubs += network.hubs.length;
+      principal += network.principal.length;
+    }
+    console.log(
+      `  Monde : PIB ${(((now / Math.max(1, start)) - 1) * 100).toFixed(0)} % depuis le départ, stabilité moyenne ${(stability / Math.max(1, alive)).toFixed(2)} ; ` +
+        `réseaux : ${networks} pays reliés, ${(hubs / Math.max(1, alive)).toFixed(1)} villes principales et ${(principal / Math.max(1, alive)).toFixed(1)} avec les sautées, en moyenne`,
+    );
+  }
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);
   console.log(`  Coalitions : ${coalitions.join(', ') || 'aucune'}`);
   console.log(`  Séparations : ${secessions.join(', ') || 'aucune'}`);

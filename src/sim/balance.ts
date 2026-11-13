@@ -389,7 +389,9 @@ export const AUTO_HUBS_PER_PROVINCES = 20;
 export const AUTO_HUBS_TERRITORY_MAX = 6;
 /** Et deux par niveau de recherche sur l'axe Échanges de la doctrine. */
 export const AUTO_HUBS_PER_RESEARCH = 2;
-export const HUB_BONUS = 0.2;
+export const HUB_BONUS = 0.15;
+/** Un département que le réseau automatique ne fait que traverser. */
+export const AUTO_TRANSIT_BONUS = 0.05;
 /** Un département hors réseau détrône la plus petite ville principale s'il la dépasse d'autant. */
 export const HUB_SWAP_MARGIN = 1.1;
 /** Chaque pays vérifie son réseau une passe d'économie sur ce nombre. */

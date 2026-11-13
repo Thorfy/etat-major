@@ -230,6 +230,26 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   du pays (elle baisse quand on alourdit, remonte quand on allège). **Proposer l'indépendance** :
   la région renaît en paix, avec une trêve d'un an.
 
+## Campagne d'équilibrage du réseau automatique
+
+Quatre parties mondiales de 200 semaines (graines 1 à 4), comparées à deux parties de la version
+d'avant (réseau tracé à la main), graines 1 et 2.
+
+- **Premier passage (villes principales +20 %, traversées +10 %, réseau compté comme équipement
+  des régions).** Guerres et capitulations inchangées, mais les soulèvements s'effondraient (10 à
+  33 contre 35 à 50) et les coalitions aussi (2 à 5 contre 7 à 11) : le réseau, gratuit, équipait
+  toutes les régions, qui ne s'agitaient plus. Les grandes économies prenaient 20 à 50 points de
+  croissance de plus (États-Unis +150 % au lieu de +125 %).
+- **Réglage.** Villes principales +15 %, départements traversés +5 % (AUTO_TRANSIT_BONUS) ; le
+  réseau automatique ne compte plus comme équipement des régions (un axe tracé à la main, dans
+  les tests, le reste).
+- **Second passage.** Soulèvements 31 à 48, coalitions 4 à 15 : revenus au niveau d'avant.
+  Croissance des grandes économies +106 à +142 % (avant : +121 à +128 %). Tempéraments toujours
+  contrastés (belliqueux −17 à +2 % de PIB, commerçants +100 à +118 %), 5 à 6 villes principales
+  par pays en moyenne, 120 à 144 pays reliés. Pire tick 111 à 181 ms (avant : 133 à 219 ms).
+- **Non réglé :** la croissance du monde reste forte (+73 à +130 % de PIB en 4 ans), comme avant le
+  réseau ; une graine voit la Chine s'effondrer (−18 %, 90 indépendances accordées dans le monde).
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

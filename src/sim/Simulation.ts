@@ -248,6 +248,7 @@ import {
   AUTO_HUBS_PER_RESEARCH,
   AUTO_HUBS_TERRITORY_MAX,
   HUB_BONUS,
+  AUTO_TRANSIT_BONUS,
   HUB_SWAP_MARGIN,
   NETWORK_CHECK_GROUPS,
   MAX_AXIS_CELLS,
@@ -2063,7 +2064,8 @@ export class Simulation {
         buildings.steelworks[p] +
         buildings.shipyard[p] +
         2 * buildings.services[p] +
-        Math.min(AXIS_MAX_PER_PROVINCE, this.axisCount[p]);
+        // Un axe tracé à la main équipe la région ; le réseau automatique, gratuit, ne la calme pas.
+        (this.autoTrade ? 0 : Math.min(AXIS_MAX_PER_PROVINCE, this.axisCount[p]));
       equipped.set(key, (equipped.get(key) ?? 0) + this.startValue[p] * Math.min(1, levels / CARE_FULL_LEVELS));
     }
     const claimed = new Map(claims);
@@ -3137,7 +3139,7 @@ export class Simulation {
       for (const network of this.networks) {
         for (const p of network?.principal ?? []) if (this.axisCount[p] > 0) this.axisCount[p] = 2;
       }
-      for (let p = 1; p < this.axisBonus.length; p++) this.axisBonus[p] = this.axisCount[p] === 2 ? HUB_BONUS : this.axisCount[p] === 1 ? AXIS_BONUS : 0;
+      for (let p = 1; p < this.axisBonus.length; p++) this.axisBonus[p] = this.axisCount[p] === 2 ? HUB_BONUS : this.axisCount[p] === 1 ? AUTO_TRANSIT_BONUS : 0;
       this.capacityDirty = true;
       return;
     }

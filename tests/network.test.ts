@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AUTO_HUBS_BASE, AUTO_HUBS_PER_PROVINCES, AUTO_HUBS_PER_RESEARCH, AXIS_BONUS, HUB_BONUS, NETWORK_CHECK_GROUPS } from '../src/sim/balance.ts';
+import { AUTO_HUBS_BASE, AUTO_HUBS_PER_PROVINCES, AUTO_HUBS_PER_RESEARCH, AUTO_TRANSIT_BONUS, HUB_BONUS, NETWORK_CHECK_GROUPS } from '../src/sim/balance.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
 
 const W = 200;
@@ -88,7 +88,7 @@ describe('réseau commercial automatique', () => {
     // Un département traversé, qui n'est pas parmi les plus riches, n'a que le bonus de passage.
     const transit = sim.tradeAxes.filter((axis) => axis.auto).flatMap((axis) => axis.provinces).filter((p) => !network.principal.includes(p));
     expect(transit.length).toBeGreaterThan(0);
-    for (const p of transit) expect(bonusOf(sim, p)).toBe(AXIS_BONUS);
+    for (const p of transit) expect(bonusOf(sim, p)).toBe(AUTO_TRANSIT_BONUS);
     // Le département sauté laisse sa place : il y a toujours autant de villes reliées.
     expect(network.hubs).toHaveLength(sim.hubCapacityOf(A).total);
   });
