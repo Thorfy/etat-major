@@ -10,7 +10,7 @@ import {
   GAME_SPEEDS,
   DEPOT_MIN_CONSOLIDATION,
   MAX_ALLIES,
-  MAX_AXES,
+  MAX_AXIS_TERMINALS,
   MAX_TRADE_DEALS,
   MAX_PRIORITY_ZONES,
   MAX_FACTORY_LEVEL,
@@ -120,6 +120,8 @@ export class GameClient {
   economy: EconomySnapshot | null = null;
   /** Effort de guerre demandé, à jour dès le geste. */
   private effortOrder: number | null = null;
+  /** Onglet que le panneau doit ouvrir : il le fait à chaque nouveau numéro (une guerre ouvre les fronts). */
+  tabRequest = { tab: '', seq: 0 };
   /** Doctrine visée par le joueur, axe par axe, en attendant que l'état la confirme. */
   private doctrineOrders: (number | null)[] = Array(DOCTRINE_AXIS_COUNT).fill(null);
   private counterOrder: number | null = null;
@@ -306,6 +308,8 @@ export class GameClient {
       case 'war': {
         if (event.a !== me && event.b !== me) break;
         const enemy = event.a === me ? event.b : event.a;
+        // Une guerre, déclarée ou subie, ouvre l'onglet des fronts.
+        this.tabRequest = { tab: 'fronts', seq: this.tabRequest.seq + 1 };
         if (this.pendingWars.has(enemy)) this.notify(`Guerre déclarée : ${name(enemy)}.${this.effortReminder()}`);
         else this.openPopup({ tick: event.tick, kind: 'war', nations: [enemy] });
         break;
@@ -373,6 +377,13 @@ export class GameClient {
         break;
       case 'axisBuilt':
         if (event.nation === me) this.notify('Axe commercial ouvert : les provinces traversées s\'enrichissent.');
+        break;
+      case 'axisRefused':
+        if (event.nation === me) {
+          this.notify(
+            `Ton réseau aurait ${event.terminals} terminus, ${MAX_AXIS_TERMINALS} au plus : prolonge une route ou relie deux villes du réseau, ou supprime une branche (onglet Économie).`,
+          );
+        }
         break;
       case 'axisCut':
         if (event.nation === me) this.notify(event.by ? `${name(event.by)} a coupé un de tes axes commerciaux.` : 'Un de tes axes commerciaux est coupé.');
@@ -628,13 +639,7 @@ export class GameClient {
       this.notify("Un axe commercial part de ton sol, et arrive chez toi ou chez un partenaire commercial (accord dans la fiche d'un pays).");
       return;
     }
-    const queued = this.playerStats?.builds.filter((order) => order.kind === 'axis').length ?? 0;
-    if (this.playerAxes.length + queued >= MAX_AXES) {
-      this.notify(`${MAX_AXES} axes commerciaux au plus : supprime-en un dans l'onglet Économie.`);
-      return;
-    }
     this.command({ type: 'buildAxis', nation: this.player, fromX, fromY, toX, toY });
-    this.notify("Axe commercial mis en chantier, de ville en ville par ton sol et celui de tes partenaires (ou par la mer) : il apparaît dans ta file.");
   }
 
   removeAxis(id: number): void {

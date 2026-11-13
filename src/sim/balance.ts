@@ -369,7 +369,13 @@ export const AI_TRADE_DEAL_CHANCE = 0.3;
  */
 export const AXIS_BONUS = 0.1;
 export const AXIS_MAX_PER_PROVINCE = 2;
-export const MAX_AXES = 8;
+/**
+ * Le réseau commercial d'un pays a 6 terminus au plus : les villes où une route s'arrête. Un axe
+ * qui prolonge une route ou relie deux villes du réseau n'en ajoute pas ; une branche en ajoute un.
+ * On limite les extrémités du réseau, pas le nombre d'axes (MAX_AXES n'est qu'un garde-fou).
+ */
+export const MAX_AXIS_TERMINALS = 6;
+export const MAX_AXES = 30;
 export const MAX_AXIS_CELLS = 400;
 export const AXIS_COST_BASE = 80;
 export const AXIS_COST_PER_CELL = 2;

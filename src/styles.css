@@ -1489,3 +1489,22 @@ canvas {
 .legend .ramp.interior {
   background: linear-gradient(90deg, #ccd1bd, #d9a861 55%, #8c261f);
 }
+
+/* Réseau commercial : la liste des axes se replie au-delà de quatre. */
+.link-button {
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.axis-list .offensive-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

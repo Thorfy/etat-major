@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AXIS_BONUS, TRADE_DEAL_GAIN, TRADE_DEPENDENCE } from '../src/sim/balance.ts';
+import { AXIS_BONUS, MAX_AXIS_TERMINALS, TRADE_DEAL_GAIN, TRADE_DEPENDENCE } from '../src/sim/balance.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
 
 const W = 200;
@@ -183,6 +183,36 @@ describe('axes commerciaux', () => {
     expect(axis.provinces.length).toBeGreaterThan(3);
     expect(axis.seaLinks![0]).toBeGreaterThan(0);
     expect(axis.active).toBe(true);
+  });
+
+  it("comptent les terminus du réseau : prolonger n'en ajoute pas, une branche en ajoute un", () => {
+    const sim = wide();
+    // Rangée du haut : provinces 1 (x 0-20) à 10 ; rangée du bas : 11 à 20.
+    const at = (x: number, y: number) => sim.provinceGrid[y * W + x];
+    expect(sim.buildAxisBetween(A, at(10, 10), at(90, 10))).toBeGreaterThan(0);
+    expect(sim.axisTerminals(A)).toBe(2);
+    // Prolonger la route jusqu'au bout de la rangée.
+    expect(sim.buildAxisBetween(A, at(90, 10), at(190, 10))).toBeGreaterThan(0);
+    expect(sim.axisTerminals(A)).toBe(2);
+    // Une branche vers la rangée du bas : un terminus de plus.
+    expect(sim.buildAxisBetween(A, at(50, 10), at(50, 30))).toBeGreaterThan(0);
+    expect(sim.axisTerminals(A)).toBe(3);
+  });
+
+  it(`refusent un axe qui porterait le réseau au-delà de ${MAX_AXIS_TERMINALS} terminus`, () => {
+    const sim = new Simulation(config(() => A, 1));
+    const at = (x: number, y: number) => sim.provinceGrid[y * W + x];
+    // Une étoile : du centre vers chaque province.
+    const hub = at(100, 30);
+    let refused = 0;
+    for (let y = 10; y < H; y += 20) {
+      for (let x = 10; x < W; x += 20) {
+        if (at(x, y) !== hub && sim.buildAxisBetween(A, hub, at(x, y)) === 0) refused++;
+      }
+      expect(sim.axisTerminals(A)).toBeLessThanOrEqual(MAX_AXIS_TERMINALS);
+    }
+    expect(refused).toBeGreaterThan(0);
+    expect(sim.drainChanges().events.some((event) => event.type === 'axisRefused' && event.nation === A)).toBe(true);
   });
 
   it('reprennent les tronçons déjà tracés, sans les payer deux fois', () => {

@@ -322,7 +322,7 @@ function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) 
 function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: MapMode): void }) {
   return (
     <div class="panel map-mode">
-      <div class="speeds" role="group" aria-label="Carte affichée (touches E, R, T et I)">
+      <div class="speeds" role="group" aria-label="Carte affichée (touches E, T, I et R)">
         {MAP_MODES.map(({ id, label }) => (
           <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
             {label}
@@ -528,8 +528,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game && <Journal game={game} nameOf={nameOf} />}
       <div class="panel hints">
         {game
-          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, R, T, I : cartes'
-          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, R, T, I : cartes · F3 : mesures'}
+          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, T, I, R : cartes'
+          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, T, I, R : cartes · F3 : mesures'}
       </div>
       {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">

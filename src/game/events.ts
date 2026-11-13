@@ -18,6 +18,7 @@ export function eventNations(event: SimEvent): number[] {
       return [event.from, event.to];
     case 'axisBuilt':
     case 'axisRestored':
+    case 'axisRefused':
     case 'researchDone':
     case 'doctrineNamed':
       return [event.nation];
@@ -82,6 +83,8 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
       return event.by ? `${nameOf(event.by)} coupe un axe commercial de ${nameOf(event.nation)}` : `Un axe commercial de ${nameOf(event.nation)} est coupé`;
     case 'axisRestored':
       return `${nameOf(event.nation)} rétablit un axe commercial`;
+    case 'axisRefused':
+      return `Axe commercial refusé : ${event.terminals} terminus`;
     case 'researchDone':
       return `Recherche achevée : ${DOCTRINE_AXES[event.axis].name}, niveau ${event.level}`;
     case 'doctrineNamed':

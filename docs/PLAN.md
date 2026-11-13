@@ -179,7 +179,9 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   neutre ; un accord commercial raye le pays de vert, et un neutre agressif tire vers l'orange.
 - **Carte de l'intérieur** (touche I) : la stabilité de chaque pays, du calme pâle au rouge sombre
   d'un pays à bout, et par-dessus ses régions agitées, d'autant plus rouges qu'elles s'agitent.
-- **8 axes commerciaux** au plus, au lieu de 6.
+- **6 terminus au plus** pour le réseau commercial, plutôt qu'un nombre d'axes (8 un temps) : un
+  terminus est une ville où une seule route s'arrête. Prolonger une route ou relier deux villes du
+  réseau n'en ajoute pas ; une branche en ajoute un. Les routes d'accords ne comptent pas.
 - **Routes des accords.** Un accord commercial trace une route d'une capitale à l'autre (la
   province nationale la plus riche de chaque pays), par leurs terres ou par la mer, en reprenant
   les tronçons déjà tracés. Elle apparaît à la signature et disparaît avec l'accord ; elle
@@ -193,6 +195,11 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   la coupe. Avant, une route ne prenait la mer qu'entre deux villes côtières.
 - **File militaire dans l'onglet Défense**, la civile dans l'onglet Économie ; chaque onglet montre
   le nombre de chantiers de sa file.
+- **Réseau commercial dans l'onglet Économie :** un résumé (axes, villes reliées, axes coupés,
+  routes d'accords), puis les axes d'une ville à l'autre (« Sarthe → Finistère · 5 villes »), les
+  coupés en tête ; au-delà de quatre, la liste se replie.
+- **Une guerre ouvre l'onglet Fronts**, qu'on la déclare ou qu'on la subisse.
+- **Ordre des cartes :** Pays, Économie, Relations, Intérieur, puis Ravitaillement (touches E, T, I, R).
 - **Fortifier une frontière** (fiche d'un pays voisin) : en paix comme en guerre, une bande de
   fortifications le long de la frontière avec ce pays, dans la file militaire. L'IA ne fortifie
   toujours que ses fronts.

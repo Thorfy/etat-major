@@ -1,6 +1,6 @@
 // Panneau de gauche, en onglets : chaque onglet garde ses lignes à la même place, et défile seul.
 import type { ComponentChildren } from 'preact';
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { type GameClient, LOW_SUPPLY } from '../game/GameClient.ts';
 import { BUILD_EFFECTS, BUILD_NAMES } from '../game/buildings.ts';
 import { POLE_EFFECTS, axisEffects, poleName } from '../game/doctrines.ts';
@@ -14,7 +14,7 @@ import {
   DEMAND_INVESTMENT_AT,
   AXIS_BONUS,
   INVESTMENT_WEEKS,
-  MAX_AXES,
+  MAX_AXIS_TERMINALS,
   MAX_COUNTER_SHARE,
   MAX_TRADE_DEALS,
   TRADE_DEPENDENCE,
@@ -30,7 +30,7 @@ import {
   RESEARCH_COST,
   archetypeOf,
 } from '../sim/doctrine.ts';
-import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
+import type { AxisSnapshot, FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { Art, Blason } from './Art.tsx';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
@@ -260,28 +260,84 @@ function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; t
       </button>
       <Note lines={2}>
         {`Chaque province traversée gagne ${formatPercent(AXIS_BONUS)} de PIB et de capacité, chez toi comme chez un ` +
-          `partenaire commercial. L'ennemi qui en prend une province le coupe. ${axes.length + queued} / ${MAX_AXES} axes.`}
+          `partenaire commercial. L'ennemi qui en prend une province le coupe. Ton réseau a ${MAX_AXIS_TERMINALS} terminus ` +
+          `au plus : prolonger une route ou relier deux de ses villes n'en ajoute pas, une branche en ajoute un.`}
       </Note>
-      {axes.length > 0 && (
-        <ol class="builds">
-          {axes.map((axis, index) => (
-            <li key={axis.id}>
-              <div class="offensive-row">
-                <span>
-                  {axis.seaLinks.length > 0 && axis.seaLinks.length === axis.provinces - 1 ? 'Ligne maritime' : 'Axe'} {index + 1}{' '}
-                  <small>
-                    · {axis.provinces} provinces · <b class={axis.active ? 'ahead' : 'behind'}>{axis.active ? 'actif' : 'coupé'}</b>
-                  </small>
-                </span>
-                <button class="close-inline" aria-label="Supprimer cet axe" onClick={() => game.removeAxis(axis.id)}>
-                  ×
-                </button>
-              </div>
-            </li>
-          ))}
+      <AxisNetwork game={game} axes={axes} queued={queued} />
+    </section>
+  );
+}
+
+/**
+ * Le réseau commercial en un coup d'œil : combien d'axes, de villes reliées, de tronçons coupés, et
+ * les routes de ses accords ; la liste des axes, d'une ville à l'autre, se replie dès qu'elle
+ * s'allonge, les axes coupés en tête.
+ */
+function AxisNetwork({ game, axes, queued }: { game: GameClient; axes: AxisSnapshot[]; queued: number }) {
+  const [open, setOpen] = useState(false);
+  const { provinces } = game.worldData;
+  const routes = game.axes.filter((axis) => axis.partner !== 0 && (axis.nation === game.player || axis.partner === game.player));
+  const cities = new Set([...axes, ...routes].flatMap((axis) => axis.path));
+  const cut = axes.filter((axis) => !axis.active);
+  const partners = routes.map((axis) => (axis.nation === game.player ? axis.partner : axis.nation));
+  const sorted = [...cut, ...axes.filter((axis) => axis.active)];
+  const folded = sorted.length > 4 && !open;
+  const shown = folded ? sorted.slice(0, 3) : sorted;
+  const city = (province: number) => provinces[province - 1]?.name ?? '?';
+  const terminals = game.playerStats?.axisTerminals ?? 0;
+  return (
+    <>
+      <dl>
+        <dt>Terminus</dt>
+        <dd class={terminals >= MAX_AXIS_TERMINALS ? 'behind' : ''}>
+          {terminals} / {MAX_AXIS_TERMINALS}
+        </dd>
+        <dt>Axes</dt>
+        <dd>
+          {axes.length + queued}
+          {queued > 0 ? ` · ${queued} en chantier` : ''}
+        </dd>
+        <dt>Villes reliées</dt>
+        <dd>{integer.format(cities.size)}</dd>
+        <dt>Coupés</dt>
+        <dd class={cut.length > 0 ? 'behind' : ''}>{cut.length > 0 ? `${cut.length} sur ${axes.length}` : 'aucun'}</dd>
+        <dt>Routes d'accords</dt>
+        <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
+      </dl>
+      {shown.length > 0 && (
+        <ol class="builds axis-list">
+          {shown.map((axis) => {
+            const bySea = axis.seaLinks.length > 0;
+            return (
+              <li key={axis.id}>
+                <div class="offensive-row">
+                  <span>
+                    {city(axis.path[0])} → {city(axis.path[axis.path.length - 1])}{' '}
+                    <small>
+                      {bySea ? '· par la mer ' : ''}· {axis.provinces} villes
+                      {!axis.active && (
+                        <>
+                          {' '}
+                          · <b class="behind">coupé</b>
+                        </>
+                      )}
+                    </small>
+                  </span>
+                  <button class="close-inline" aria-label="Supprimer cet axe" onClick={() => game.removeAxis(axis.id)}>
+                    ×
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ol>
       )}
-    </section>
+      {sorted.length > 4 && (
+        <button class="link-button" onClick={() => setOpen(!open)}>
+          {open ? 'Replier la liste' : `Voir les ${sorted.length} axes`}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -761,6 +817,13 @@ interface SidePanelProps {
 
 export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
   const [tab, setTab] = useState<Tab>('fronts');
+  // Le jeu peut demander un onglet (une guerre ouvre les fronts) ; le joueur reste libre d'en changer ensuite.
+  const handled = useRef(game.tabRequest.seq);
+  useEffect(() => {
+    if (game.tabRequest.seq === handled.current) return;
+    handled.current = game.tabRequest.seq;
+    setTab(game.tabRequest.tab as Tab);
+  }, [game.tabRequest.seq]);
   if (game.error) {
     return (
       <section class="panel side">

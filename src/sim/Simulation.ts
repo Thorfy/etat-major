@@ -236,6 +236,7 @@ import {
   AXIS_BONUS,
   AXIS_MAX_PER_PROVINCE,
   MAX_AXES,
+  MAX_AXIS_TERMINALS,
   MAX_AXIS_CELLS,
   AXIS_COST_BASE,
   AXIS_COST_PER_CELL,
@@ -2921,11 +2922,44 @@ export class Simulation {
     return this.buildAxisBetween(nation, cellOf(fromX, fromY), cellOf(toX, toY));
   }
 
+  /**
+   * Terminus du réseau commercial d'une nation : les villes où ne passe qu'un seul tronçon de ses
+   * axes (en chantier compris), une route d'accord non comprise. `extra` : un tracé envisagé.
+   */
+  axisTerminals(nation: number, extra: number[] = []): number {
+    const paths = [
+      ...this.axes.filter((axis) => axis.nation === nation && !axis.partner).map((axis) => axis.provinces),
+      ...this.queues[nation].filter((order) => order.kind === 'axis').map((order) => order.path ?? []),
+      extra,
+    ];
+    const links = new Set<number>();
+    const degree = new Map<number, number>();
+    for (const path of paths) {
+      for (let i = 0; i + 1 < path.length; i++) {
+        const [a, b] = [path[i], path[i + 1]];
+        if (a === b) continue;
+        const key = Math.min(a, b) * 65536 + Math.max(a, b);
+        if (links.has(key)) continue;
+        links.add(key);
+        degree.set(a, (degree.get(a) ?? 0) + 1);
+        degree.set(b, (degree.get(b) ?? 0) + 1);
+      }
+    }
+    let terminals = 0;
+    for (const value of degree.values()) if (value === 1) terminals++;
+    return terminals;
+  }
+
   buildAxisBetween(nation: number, from: number, to: number): number {
     if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return 0;
     if (this.axesOf(nation) >= MAX_AXES) return 0;
     const plan = this.planAxis(nation, from, to);
     if (!plan) return 0;
+    const terminals = this.axisTerminals(nation, plan.path);
+    if (terminals > MAX_AXIS_TERMINALS && terminals > this.axisTerminals(nation)) {
+      if (nation === this.player) this.pendingEvents.push({ type: 'axisRefused', tick: this.tick, nation, terminals });
+      return 0;
+    }
     this.queues[nation].push({ province: from, kind: 'axis', path: plan.path, sea: plan.sea, length: plan.length, seaLinks: plan.seaLinks, seaLength: plan.seaLength });
     return Math.max(1, Math.round(plan.length + plan.seaLength));
   }
@@ -4603,6 +4637,7 @@ export class Simulation {
               }))
             : [],
         doctrine: this.doctrineOf(id),
+        axisTerminals: id === this.player ? this.axisTerminals(id) : 0,
         doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
         research: id === this.player ? Array.from(this.research.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
         movements: this.movements
@@ -4666,6 +4701,7 @@ export class Simulation {
         active: axis.active,
         provinces: axis.provinces.length,
         points,
+        path: axis.provinces.slice(),
         held: axis.provinces.map((p) => this.axisAllows(axis.nation, this.controller[p])),
         partner: axis.partner ?? 0,
         seaLinks: this.seaLinksOf(axis),

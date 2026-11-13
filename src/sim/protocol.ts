@@ -64,6 +64,8 @@ export interface AxisSnapshot {
   provinces: number;
   /** Centres des provinces traversées : x, y, x, y… */
   points: number[];
+  /** Provinces traversées, dans l'ordre. */
+  path: number[];
   /** Pour chacune : encore tenue par le pays de l'axe. */
   held: boolean[];
   /** Route d'un accord commercial : le partenaire relié (0 : un axe ordinaire). */
@@ -204,6 +206,8 @@ export interface NationSnapshot {
   militaryShare: number;
   /** Doctrine atteinte sur chaque axe, de −1 à +1. */
   doctrine: number[];
+  /** Joueur seulement : terminus de son réseau commercial (axes en chantier compris). */
+  axisTerminals: number;
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
   doctrineTarget: number[];
   research: number[];
@@ -327,6 +331,8 @@ export type SimEvent =
   | { type: 'axisBuilt'; tick: number; nation: number }
   | { type: 'axisCut'; tick: number; nation: number; by: number }
   | { type: 'axisRestored'; tick: number; nation: number }
+  /** Axe refusé : il porterait le réseau au-delà de ses terminus. */
+  | { type: 'axisRefused'; tick: number; nation: number; terminals: number }
   | { type: 'researchDone'; tick: number; nation: number; axis: number; level: number }
   /** La doctrine du joueur change de nom (−1 : équilibrée). */
   | { type: 'doctrineNamed'; tick: number; nation: number; archetype: number };
