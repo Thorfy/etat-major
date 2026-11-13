@@ -264,6 +264,21 @@ import type {
   TradeAxis,
   AxisSnapshot,
 } from './protocol.ts';
+import {
+  AI_DOCTRINE_LEANING,
+  AI_DOCTRINE_SPREAD,
+  AI_RESEARCH_CHANCE,
+  DOCTRINE_AXIS_COUNT,
+  DOCTRINE_EFFECTS,
+  DOCTRINE_REACH,
+  DOCTRINE_SPEED_PER_WEEK,
+  DOCTRINE_WAR_SPEED,
+  MAX_RESEARCH_LEVEL,
+  RESEARCH_COST,
+  archetypeOf,
+  doctrineModifiers,
+  type DoctrineModifiers,
+} from './doctrine.ts';
 import { landingProblem, traceRoute } from './route.ts';
 import { findSeas } from './seas.ts';
 
@@ -302,6 +317,8 @@ export interface SimConfig {
   logistics?: boolean;
   /** Faux : le commerce ne compte pas (accès toujours entier), pour les tests qui l'isolent. */
   trade?: boolean;
+  /** Faux : l'IA garde une doctrine au centre, pour les tests qui ne mesurent pas les doctrines. */
+  doctrines?: boolean;
   /** Partie à reprendre. */
   saved?: SimSave;
 }
@@ -528,6 +545,15 @@ export class Simulation {
   private sentAxesVersion = 0;
   /** Régions annexées qui s'agitent, par pays qui les tient. */
   private movements: MovementState[] = [];
+
+  // Doctrines (jalon 10) : cinq axes par nation, à plat (nation × DOCTRINE_AXIS_COUNT + axe).
+  private readonly doctrine: Float64Array;
+  private readonly doctrineTarget: Float64Array;
+  private readonly research: Uint8Array;
+  /** Effets de la doctrine de chaque nation, recalculés quand elle bouge. */
+  private readonly mods: DoctrineModifiers[];
+  /** Grande doctrine du joueur, pour annoncer quand elle change. */
+  private playerArchetype = -1;
   /** Carte de départ : de quoi faire renaître un pays annexé. */
   private readonly startHome: Uint16Array;
   /** Région historique de chaque province (0 : aucune), et multiplicateur d'agitation de chaque nation. */
@@ -652,6 +678,26 @@ export class Simulation {
       while (index < AI_PROFILES.length - 1 && roll >= AI_PROFILES[index].share) roll -= AI_PROFILES[index++].share;
       this.profile[n] = index;
     }
+    // Doctrines : tout le monde part du centre. L'IA vise une position tirée de son tempérament,
+    // avec un écart propre à chaque pays (un hachage, comme le tempérament).
+    this.doctrine = new Float64Array(this.stride * DOCTRINE_AXIS_COUNT);
+    this.doctrineTarget = new Float64Array(this.stride * DOCTRINE_AXIS_COUNT);
+    this.research = new Uint8Array(this.stride * DOCTRINE_AXIS_COUNT);
+    // Sans IA (ou sans doctrines), tout le monde reste au centre.
+    const aiDoctrines = this.aiEnabled && (config.doctrines ?? true);
+    for (let n = 1; aiDoctrines && n < this.stride; n++) {
+      if (n === this.player) continue;
+      const leaning = AI_DOCTRINE_LEANING[this.profile[n]] ?? AI_DOCTRINE_LEANING[0];
+      for (let axis = 0; axis < DOCTRINE_AXIS_COUNT; axis++) {
+        let hash = Math.imul((config.seed >>> 0) ^ Math.imul(n * 8 + axis + 1, 2246822519), 2654435761) >>> 0;
+        hash = Math.imul(hash ^ (hash >>> 16), 3266489917) >>> 0;
+        const roll = ((hash ^ (hash >>> 13)) >>> 0) / 4294967296;
+        const value = leaning[axis] + (roll * 2 - 1) * AI_DOCTRINE_SPREAD;
+        this.doctrineTarget[n * DOCTRINE_AXIS_COUNT + axis] = Math.max(-1, Math.min(1, value));
+      }
+    }
+    const neutral = doctrineModifiers([0, 0, 0, 0, 0]);
+    this.mods = Array.from({ length: this.stride }, () => neutral);
     this.output = new Float64Array(this.stride);
     this.growth = new Float64Array(this.stride);
     this.rawCapacity = new Float64Array(this.stride);
@@ -1024,6 +1070,12 @@ export class Simulation {
         break;
       case 'removeAxis':
         this.removeAxis(command.nation, command.id);
+        break;
+      case 'setDoctrine':
+        this.setDoctrine(command.nation, command.axis, command.value);
+        break;
+      case 'research':
+        this.queueResearch(command.nation, command.axis);
         break;
     }
   }
@@ -1994,6 +2046,7 @@ export class Simulation {
         1,
         (1 - movement.care) *
           this.identity[movement.origin] *
+          this.mods[parent].unrest *
           (UNREST_BASE +
             UNREST_INSTABILITY * instability +
             (atWar[parent] ? UNREST_WAR : 0) +
@@ -2347,7 +2400,7 @@ export class Simulation {
       const value = this.provinceValue[p];
       const home = this.provinceHome[p];
       const holder = this.controller[p];
-      const developed = development[p] * (1 + FACTORY_BONUS * this.factories[p]) * (1 + this.axisBonus[p]);
+      const developed = development[p] * (1 + FACTORY_BONUS * this.factories[p]) * (1 + this.axisBonus[p] * this.mods[holder].axisBonus);
       this.totalHome[home] += value;
       if (holder === home) {
         this.heldHome[home] += value;
@@ -2364,7 +2417,7 @@ export class Simulation {
     }
     for (let n = 1; n < this.stride; n++) {
       output[n] *= this.tradeFactor[n];
-      rawCapacity[n] = Math.max(0, rawCapacity[n] * (EFFORT_CAPACITY_BASE + this.effort[n]) * this.tradeFactor[n]);
+      rawCapacity[n] = Math.max(0, rawCapacity[n] * (EFFORT_CAPACITY_BASE + this.effort[n]) * this.tradeFactor[n] * this.mods[n].capacity);
       // Sans pétrole, une armée ne roule pas.
       capacity[n] = rawCapacity[n] * (OIL_SHORTAGE_FLOOR + (1 - OIL_SHORTAGE_FLOOR) * this.oilCoverage[n]);
     }
@@ -2380,6 +2433,7 @@ export class Simulation {
       const recruited = 1 + RECRUITMENT_BONUS * this.buildings.recruitment[p];
       manpowerMax[holder] += this.provinceManpower[p] * recruited * (holder === this.provinceHome[p] ? 1 : OCCUPIED_MANPOWER);
     }
+    for (let n = 1; n < this.stride; n++) manpowerMax[n] *= this.mods[n].manpower;
   }
 
   /**
@@ -2395,7 +2449,7 @@ export class Simulation {
     for (let p = 1; p < this.controller.length; p++) {
       if (this.provinceOil[p] === 0 && this.provinceSteel[p] === 0) continue;
       const holder = this.controller[p];
-      const share = holder === this.provinceHome[p] ? 1 : OCCUPIED_RESOURCES;
+      const share = (holder === this.provinceHome[p] ? 1 : OCCUPIED_RESOURCES) * this.mods[holder].resources;
       oil[holder] += this.provinceOil[p] * share * (1 + REFINERY_BONUS * this.buildings.refinery[p]);
       steel[holder] += this.provinceSteel[p] * share * (1 + STEELWORKS_BONUS * this.buildings.steelworks[p]);
     }
@@ -2407,14 +2461,14 @@ export class Simulation {
     for (let n = 1; n < this.stride; n++) {
       const enemyNavy = strongestEnemyNavy[n];
       this.blockaded[n] = this.hasCoast[n] && enemyNavy > 0 && enemyNavy >= BLOCKADE_RATIO * this.navy[n] ? 1 : 0;
-      oilNeed[n] = this.rawCapacity[n] * this.oilPerCapacity;
-      steelNeed[n] = this.output[n] * this.steelPerOutput;
+      oilNeed[n] = this.rawCapacity[n] * this.oilPerCapacity * this.mods[n].oilNeed;
+      steelNeed[n] = this.output[n] * this.steelPerOutput * this.mods[n].steelNeed;
     }
     this.updateTrade();
     for (let n = 1; n < this.stride; n++) {
       // Un pays importe d'autant plus qu'il commerce avec ses partenaires possibles, et chaque
       // accord avec un pays qui a du pétrole ou de l'acier à revendre en apporte encore.
-      const base = (this.hasCoast[n] && !this.blockaded[n] ? SEA_IMPORT_SHARE : LAND_IMPORT_SHARE) * this.tradeAccess[n];
+      const base = ((this.hasCoast[n] && !this.blockaded[n] ? SEA_IMPORT_SHARE : LAND_IMPORT_SHARE) + this.mods[n].imports) * this.tradeAccess[n];
       let oilDeals = 0;
       let steelDeals = 0;
       for (const [a, b] of this.tradeDeals) {
@@ -2481,7 +2535,9 @@ export class Simulation {
       }
       for (const m of this.landNeighbors[n]) byLand[m] = 0;
       this.tradeAccess[n] = potential > 0 ? trading / potential : 1;
-      this.tradeFactor[n] = 1 - TRADE_DEPENDENCE * (1 - this.tradeAccess[n]) + Math.min(TRADE_DEAL_CAP, dealGain[n]);
+      const mods = this.mods[n];
+      this.tradeFactor[n] =
+        1 - TRADE_DEPENDENCE * mods.tradeDependence * (1 - this.tradeAccess[n]) + Math.min(TRADE_DEAL_CAP * mods.dealGain, dealGain[n] * mods.dealGain);
     }
   }
 
@@ -2815,6 +2871,7 @@ export class Simulation {
    * tenues par leur pays grandissent (effort bas) ou s'usent (effort haut).
    */
   private updateEconomy(): void {
+    this.updateDoctrines();
     const { effort, effortTarget, development, provinceGdp } = this;
     const step = (EFFORT_CHANGE_PER_SECOND * ECONOMY_INTERVAL_TICKS) / TICKS_PER_SECOND;
     for (let n = 1; n < this.stride; n++) {
@@ -2854,7 +2911,7 @@ export class Simulation {
     const consolidating = ECONOMY_INTERVAL_TICKS / TICKS_PER_SECOND / CONSOLIDATION_SECONDS;
     for (let p = 1; p < this.controller.length; p++) {
       if (this.controller[p] === this.provinceHome[p] || this.consolidation[p] >= 1) continue;
-      this.consolidation[p] = Math.min(1, this.consolidation[p] + consolidating);
+      this.consolidation[p] = Math.min(1, this.consolidation[p] + consolidating * this.mods[this.controller[p]].consolidation);
       this.supplyDirty = ALL_SUPPLY_GROUPS;
     }
 
@@ -2882,9 +2939,105 @@ export class Simulation {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Doctrines et recherche (jalon 10)
+  // -------------------------------------------------------------------------
+
+  doctrineOf(nation: number): number[] {
+    return Array.from(this.doctrine.subarray(nation * DOCTRINE_AXIS_COUNT, (nation + 1) * DOCTRINE_AXIS_COUNT));
+  }
+
+  researchOf(nation: number, axis: number): number {
+    return this.research[nation * DOCTRINE_AXIS_COUNT + axis];
+  }
+
+  /** Borne que la recherche permet sur un axe, des deux côtés. */
+  reachOf(nation: number, axis: number): number {
+    return DOCTRINE_REACH[this.research[nation * DOCTRINE_AXIS_COUNT + axis]];
+  }
+
+  setDoctrine(nation: number, axis: number, value: number): void {
+    if (nation <= 0 || nation >= this.stride || !Number.isInteger(axis) || axis < 0 || axis >= DOCTRINE_AXIS_COUNT) return;
+    if (!Number.isFinite(value)) return;
+    this.doctrineTarget[nation * DOCTRINE_AXIS_COUNT + axis] = Math.max(-1, Math.min(1, value));
+  }
+
+  /** Met en file la recherche du niveau suivant d'un axe, s'il en reste un. */
+  queueResearch(nation: number, axis: number): boolean {
+    if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return false;
+    if (!Number.isInteger(axis) || axis < 0 || axis >= DOCTRINE_AXIS_COUNT) return false;
+    const queue = this.queues[nation];
+    const queued = queue.filter((order) => order.kind === 'research' && order.axis === axis).length;
+    const level = this.research[nation * DOCTRINE_AXIS_COUNT + axis] + queued;
+    if (level >= MAX_RESEARCH_LEVEL) return false;
+    queue.push({ province: 0, kind: 'research', axis, cost: RESEARCH_COST * (level + 1) });
+    return true;
+  }
+
+  private completeResearch(nation: number, axis: number): void {
+    const index = nation * DOCTRINE_AXIS_COUNT + axis;
+    if (this.research[index] >= MAX_RESEARCH_LEVEL) return;
+    this.research[index]++;
+    if (nation === this.player) this.pendingEvents.push({ type: 'researchDone', tick: this.tick, nation, axis, level: this.research[index] });
+  }
+
+  /**
+   * Chaque doctrine glisse vers sa cible, dans les bornes de sa recherche : moitié moins vite en
+   * guerre, où l'armée se réforme sous le feu.
+   */
+  private updateDoctrines(): void {
+    const atWar = new Uint8Array(this.stride);
+    for (const front of this.fronts) {
+      atWar[front.a] = 1;
+      atWar[front.b] = 1;
+    }
+    const weeks = ECONOMY_INTERVAL_TICKS / TICKS_PER_WEEK;
+    for (let n = 1; n < this.stride; n++) {
+      if (!this.alive[n]) continue;
+      const step = DOCTRINE_SPEED_PER_WEEK * weeks * (atWar[n] ? DOCTRINE_WAR_SPEED : 1);
+      let moved = false;
+      for (let axis = 0; axis < DOCTRINE_AXIS_COUNT; axis++) {
+        const index = n * DOCTRINE_AXIS_COUNT + axis;
+        const reach = DOCTRINE_REACH[this.research[index]];
+        const target = Math.max(-reach, Math.min(reach, this.doctrineTarget[index]));
+        const gap = target - this.doctrine[index];
+        if (gap === 0) continue;
+        this.doctrine[index] += Math.sign(gap) * Math.min(Math.abs(gap), step);
+        moved = true;
+      }
+      if (!moved) continue;
+      this.mods[n] = doctrineModifiers(this.doctrineOf(n));
+      if (n === this.player) {
+        const archetype = archetypeOf(this.doctrineOf(n));
+        if (archetype !== this.playerArchetype) {
+          this.playerArchetype = archetype;
+          this.pendingEvents.push({ type: 'doctrineNamed', tick: this.tick, nation: n, archetype });
+        }
+      }
+    }
+  }
+
+  /** L'IA recherche l'axe où sa doctrine visée dépasse le plus ses bornes. */
+  private aiResearch(nation: number): boolean {
+    if (this.queues[nation].some((order) => order.kind === 'research')) return false;
+    let best = -1;
+    let bestGap = 0.05;
+    for (let axis = 0; axis < DOCTRINE_AXIS_COUNT; axis++) {
+      const index = nation * DOCTRINE_AXIS_COUNT + axis;
+      if (this.research[index] >= MAX_RESEARCH_LEVEL) continue;
+      const gap = Math.abs(this.doctrineTarget[index]) - DOCTRINE_REACH[this.research[index]];
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = axis;
+      }
+    }
+    return best >= 0 && this.queueResearch(nation, best);
+  }
+
   /** Effort de guerre que la stabilité permet encore : tout, tant qu'elle reste à son niveau de départ. */
   private effortCap(nation: number): number {
-    return Math.min(1, MIN_EFFORT_CAP + ((1 - MIN_EFFORT_CAP) * this.stability[nation]) / START_STABILITY);
+    const cap = Math.min(1, MIN_EFFORT_CAP + ((1 - MIN_EFFORT_CAP) * this.stability[nation]) / START_STABILITY);
+    return Math.max(0, Math.min(1, cap + this.mods[nation].effortCap));
   }
 
   private steelFactor(nation: number): number {
@@ -2895,7 +3048,7 @@ export class Simulation {
   private updateStability(n: number, atWar: boolean, minutes: number, services = 0): void {
     let stability = this.stability[n];
     if (atWar) {
-      stability -= WAR_WEARINESS_PER_MINUTE * (0.5 + this.effort[n]) * (1 - SERVICES_WEARINESS_CUT * services) * minutes;
+      stability -= WAR_WEARINESS_PER_MINUTE * (0.5 + this.effort[n]) * (1 - SERVICES_WEARINESS_CUT * services) * this.mods[n].weariness * minutes;
     } else {
       const gap = PEACE_STABILITY - stability;
       const recovery = STABILITY_RECOVERY_PER_MINUTE * (1 + SERVICES_RECOVERY_BONUS * services);
@@ -2910,7 +3063,7 @@ export class Simulation {
 
   /** La part civile de l'économie fait avancer le premier chantier de la file. */
   private advanceConstruction(n: number, minutes: number): void {
-    const rate = CONSTRUCTION_PER_MINUTE * Math.sqrt(Math.max(0, this.output[n]) / 1000) * (1 - this.effort[n]) * this.steelFactor(n);
+    const rate = CONSTRUCTION_PER_MINUTE * Math.sqrt(Math.max(0, this.output[n]) / 1000) * (1 - this.effort[n]) * this.steelFactor(n) * this.mods[n].construction;
     this.constructionRate[n] = rate;
     const queue = this.queues[n];
     if (queue.length === 0) {
@@ -2934,6 +3087,7 @@ export class Simulation {
       else if (order.kind === 'depot') this.depots[order.province] = 1;
       else if (order.kind === 'investment') this.completeInvestment(n, order.region ?? 0);
       else if (order.kind === 'axis') this.completeAxis(n, order);
+      else if (order.kind === 'research') this.completeResearch(n, order.axis ?? 0);
       else if (isProvinceBuilding(order.kind)) {
         this.buildings[order.kind][order.province]++;
         // Le chantier naval lance ses navires à l'achèvement.
@@ -2950,6 +3104,7 @@ export class Simulation {
 
   private orderValid(nation: number, order: BuildOrder): boolean {
     if (order.kind === 'fort') return (order.cells?.length ?? 0) > 0;
+    if (order.kind === 'research') return this.research[nation * DOCTRINE_AXIS_COUNT + (order.axis ?? 0)] < MAX_RESEARCH_LEVEL;
     if (order.kind === 'investment') return this.investmentValid(nation, order.region ?? 0);
     if (order.kind === 'axis') {
       const path = order.path ?? [];
@@ -2959,8 +3114,8 @@ export class Simulation {
   }
 
   orderCost(order: BuildOrder): number {
-    if (order.kind === 'fort') return Math.ceil((order.cells?.length ?? 0) * FORT_COST_PER_CELL);
-    if (order.kind === 'investment') return order.cost ?? 0;
+    if (order.kind === 'fort') return order.cost ?? Math.ceil((order.cells?.length ?? 0) * FORT_COST_PER_CELL);
+    if (order.kind === 'investment' || order.kind === 'research') return order.cost ?? 0;
     if (order.kind === 'axis') return Math.ceil(AXIS_COST_BASE + (order.length ?? 0) * (order.sea ? SEA_AXIS_COST_PER_CELL : AXIS_COST_PER_CELL));
     return this.buildCost(order.province, order.kind);
   }
@@ -2976,7 +3131,8 @@ export class Simulation {
   private queueFort(nation: number, cells: number[], urgent = false): number {
     if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return 0;
     if (cells.length === 0) return 0;
-    const order: BuildOrder = { province: 0, kind: 'fort', cells: cells.slice(0, MAX_FORT_CELLS) };
+    const fortCells = cells.slice(0, MAX_FORT_CELLS);
+    const order: BuildOrder = { province: 0, kind: 'fort', cells: fortCells, cost: Math.ceil(fortCells.length * FORT_COST_PER_CELL * this.mods[nation].fortCost) };
     const queue = this.queues[nation];
     if (urgent) {
       // Une urgence passe en tête de la file, qui n'a pas de limite.
@@ -3169,7 +3325,7 @@ export class Simulation {
   canBuild(nation: number, province: number, kind: BuildKind, queued: number): boolean {
     if (province <= 0 || province >= this.controller.length || this.controller[province] !== nation) return false;
     const home = this.provinceHome[province] === nation;
-    if (kind === 'fort' || kind === 'investment' || kind === 'axis') return false;
+    if (kind === 'fort' || kind === 'investment' || kind === 'axis' || kind === 'research') return false;
     if (kind === 'factory') return home && this.factories[province] + queued < MAX_FACTORY_LEVEL;
     if (isProvinceBuilding(kind)) {
       if (!home || this.buildings[kind][province] + queued >= PROVINCE_BUILDINGS[kind].max) return false;
@@ -3232,6 +3388,7 @@ export class Simulation {
         if (weakest && this.fortifyFront(n, weakest.a === n ? weakest.b : weakest.a, true) > 0) continue;
       }
       if (this.queues[n].length >= AI_MAX_QUEUE) continue;
+      if (this.random() < AI_RESEARCH_CHANCE && this.aiResearch(n)) continue;
       const provinces = owned[n];
       if (provinces.length === 0) continue;
       if (atWar[n]) {
@@ -3289,8 +3446,9 @@ export class Simulation {
       const length = Math.max(front.length, MIN_FRONT_LENGTH);
       sideA.rawDensity = sideA.force / length;
       sideB.rawDensity = sideB.force / length;
-      sideA.density = sideA.rawDensity * DEFENSE_MULTIPLIER[sideA.stance];
-      sideB.density = sideB.rawDensity * DEFENSE_MULTIPLIER[sideB.stance];
+      // La qualité donne plus de poids à chaque homme, la masse moins.
+      sideA.density = sideA.rawDensity * DEFENSE_MULTIPLIER[sideA.stance] * this.mods[front.a].strength;
+      sideB.density = sideB.rawDensity * DEFENSE_MULTIPLIER[sideB.stance] * this.mods[front.b].strength;
       const logRatio = Math.log((sideA.density + 1e-3) / (sideB.density + 1e-3));
       front.logRatio = logRatio;
 
@@ -3311,8 +3469,8 @@ export class Simulation {
       const total = sideA.force + sideB.force;
       if (engaged && total > 0) {
         const scale = ATTRITION_PER_TICK * Math.min(1, front.length / MIN_FRONT_LENGTH);
-        const lossA = sideA.force * (2 * sideB.force) / total * scale * LOSS_MULTIPLIER[sideA.stance];
-        const lossB = sideB.force * (2 * sideA.force) / total * scale * LOSS_MULTIPLIER[sideB.stance];
+        const lossA = sideA.force * (2 * sideB.force) / total * scale * LOSS_MULTIPLIER[sideA.stance] * this.mods[front.a].losses;
+        const lossB = sideB.force * (2 * sideA.force) / total * scale * LOSS_MULTIPLIER[sideB.stance] * this.mods[front.b].losses;
         sideA.force = Math.max(0, sideA.force - lossA);
         sideB.force = Math.max(0, sideB.force - lossB);
       }
@@ -3471,7 +3629,7 @@ export class Simulation {
       const ey = py - t * offensive.dy;
       const squared = ex * ex + ey * ey;
       if (squared > OFFENSIVE_HALF_WIDTH * OFFENSIVE_HALF_WIDTH) continue;
-      const pressure = own.rawDensity + offensive.force / (2 * OFFENSIVE_HALF_WIDTH);
+      const pressure = (own.rawDensity + offensive.force / (2 * OFFENSIVE_HALF_WIDTH)) * this.mods[attacker].strength;
       const depth = t * Math.sqrt(offensive.lengthSquared);
       const edge =
         Math.log((pressure + 1e-3) / (enemy.density + 1e-3)) -
@@ -3486,7 +3644,8 @@ export class Simulation {
   }
 
   private scanFrontier(): void {
-    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, supplySums, priorityCounts, supply, forts, sectors, sectorColumns, terrain, pocket, fronts, offensivesByNation, provinceHome, provinceGrid } = this;
+    const { owners, width: W, height: H, stride, frontIndex, advantage, lengthCounts, supplySums, priorityCounts, supply, forts, sectors, sectorColumns, terrain, pocket, fronts, offensivesByNation, provinceHome, provinceGrid, mods } = this;
+    const airEdge = DOCTRINE_EFFECTS.airEdge;
     const list = this.frontier;
     const count = this.frontierCount;
     for (const front of fronts) {
@@ -3519,12 +3678,14 @@ export class Simulation {
       const defenderSupply = SUPPLY_LEVELS[supply[cell]];
       // Une cellule fortifiée résiste mieux et tombe moins vite.
       const fort = forts[cell] / 255;
+      const defenderMods = mods[defender];
       const local =
         sector -
         TERRAIN_DEFENSE[terrainId] -
         (onHomeSoil ? HOME_DEFENSE : 0) +
         (encircled ? 0 : SUPPLY_DEFENSE_PENALTY * (1 - defenderSupply)) -
-        FORT_DEFENSE * fort;
+        FORT_DEFENSE * fort * defenderMods.fortDefense -
+        defenderMods.defenseEdge;
       const fortSpeed = 1 - (1 - FORT_SPEED) * fort;
       const prioritized = this.priorityZones[defender].length > 0 && this.inPriorityZone(defender, x, y);
 
@@ -3556,11 +3717,13 @@ export class Simulation {
             matched = this.matchedOffensive!;
             matched.supplySum += attackerSupply;
             matched.supplyCount++;
-            speed = OFFENSIVE_SPEED;
+            speed = OFFENSIVE_SPEED * mods[attacker].offensiveSpeed;
             if (offensiveEdge > edge) edge = offensiveEdge;
           }
         }
         edge -= SUPPLY_ATTACK_PENALTY * (1 - attackerSupply);
+        // Doctrine : élan de l'attaquant, et supériorité aérienne de qui a le plus d'avions.
+        edge += mods[attacker].attackEdge + airEdge * (mods[attacker].air - defenderMods.air);
         // Secteurs prioritaires : le défenseur s'y concentre, et s'amincit d'autant ailleurs.
         const defenderSide = fronts[index].a === defender ? fronts[index].sides[0] : fronts[index].sides[1];
         if (prioritized) edge -= Math.log(1 + PRIORITY_BOOST);
@@ -4164,6 +4327,7 @@ export class Simulation {
       aggression: Float32Array.from(this.aggression),
       coalitionAgainst: this.coalitionAgainst.slice(),
       alliances: Uint16Array.from(this.pairsOf((a, b) => this.allied[a * this.stride + b]).flat()),
+      doctrine: Float32Array.from(this.doctrine),
     };
   }
 
@@ -4224,8 +4388,12 @@ export class Simulation {
                 cost: this.orderCost(order),
                 progress: index === 0 ? this.buildProgress[id] : 0,
                 region: order.region ?? 0,
+                axis: order.axis ?? 0,
               }))
             : [],
+        doctrine: this.doctrineOf(id),
+        doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
+        research: id === this.player ? Array.from(this.research.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
         movements: this.movements
           .filter((movement) => movement.parent === id)
           .map(({ origin, unrest, share, demand, until, investing, care, ceiling }) => ({
@@ -4314,7 +4482,8 @@ export class Simulation {
         provinceValue: Array.from(this.provinceValue),
         controller: Array.from(this.controller),
         provinceCounts: this.provinceCounts.map((counts) => (counts ? [...counts] : null)),
-        pocketLists: this.pocketLists.map((list) => list.slice()),
+        // Une cellule prise dans une poche n'en fait plus partie, même si elle reste dans la liste.
+        pocketLists: this.pocketLists.map((list) => list.filter((cell) => this.pocket[cell] === 1)),
         pocketCounts: Array.from(this.pocketCounts),
         pockets: this.pockets.map((pocket) => ({ ...pocket })),
         landNeighbors: this.landNeighbors,
@@ -4370,6 +4539,9 @@ export class Simulation {
         coastSeas: Array.from(this.coastSeas),
         axes: this.axes.map((axis) => ({ ...axis, provinces: axis.provinces.slice() })),
         nextAxisId: this.nextAxisId,
+        doctrine: Array.from(this.doctrine),
+        doctrineTarget: Array.from(this.doctrineTarget),
+        research: Array.from(this.research),
         movements: this.movements.map((movement) => ({ ...movement })),
       },
     };
@@ -4462,6 +4634,12 @@ export class Simulation {
     this.axes = (legacy.axes ?? []).map((axis) => ({ ...axis, provinces: axis.provinces.slice() }));
     this.nextAxisId = legacy.nextAxisId ?? 1;
     this.recomputeAxisBonus();
+    // Une partie d'avant les doctrines garde les cibles tirées pour l'IA, et part du centre.
+    restoreArray(this.doctrine, legacy.doctrine);
+    restoreArray(this.doctrineTarget, legacy.doctrineTarget);
+    if (legacy.research) this.research.set(legacy.research.slice(0, this.research.length));
+    for (let n = 1; n < this.stride; n++) this.mods[n] = doctrineModifiers(this.doctrineOf(n));
+    if (this.player) this.playerArchetype = archetypeOf(this.doctrineOf(this.player));
     this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement, invested: movement.invested ?? 0, refused: movement.refused ?? 0, care: movement.care ?? 0, ceiling: movement.ceiling ?? 0 }));
     if (saved.forts) {
       this.forts.set(saved.forts);
@@ -4536,6 +4714,10 @@ export class Simulation {
     for (const [a, b] of this.embargoes) mix(a * 65536 + b + 7);
     for (const axis of this.axes) mix(axis.id * 1024 + axis.nation * 2 + (axis.active ? 1 : 0));
     for (let n = 1; n < this.stride; n++) mix(Math.round(this.tradeFactor[n] * 1e6));
+    for (let i = DOCTRINE_AXIS_COUNT; i < this.doctrine.length; i++) {
+      mix(Math.round(this.doctrine[i] * 1e6) + this.research[i]);
+      mix(Math.round(this.doctrineTarget[i] * 1e6));
+    }
     for (const movement of this.movements) {
       mix(movement.parent * 65536 + movement.origin);
       mix(Math.round(movement.unrest * 1e6) + movement.asked + 8 * (movement.invested ?? 0));

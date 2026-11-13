@@ -10,6 +10,11 @@ import { findLandNeighbors } from '../src/map/adjacency.ts';
 import { decodeRle } from '../src/map/codec.ts';
 import type { WorldData } from '../src/map/types.ts';
 import { AI_PROFILES } from '../src/sim/balance.ts';
+import { AI_DOCTRINE_LEANING, ARCHETYPES, DOCTRINE_AXES, archetypeOf } from '../src/sim/doctrine.ts';
+
+// DOCTRINES=hasard : les doctrines de l'IA ne dépendent plus de son tempérament, pour mesurer chaque
+// position sans le biais des belliqueux (qui penchent vers le mouvement et la masse).
+if (process.env.DOCTRINES === 'hasard') for (const leaning of AI_DOCTRINE_LEANING as number[][]) leaning.fill(0);
 import { Simulation } from '../src/sim/Simulation.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,6 +54,44 @@ const summary = (durations: number[]) => {
 // ---------------------------------------------------------------------------
 // Partie mondiale
 // ---------------------------------------------------------------------------
+
+/**
+ * Bilan par doctrine, sur les 193 pays du départ : par grande doctrine, puis pôle par pôle (les pays
+ * nettement d'un côté de l'axe, à 0,3 au moins). Terres : cellules finales sur cellules de départ.
+ */
+function doctrineReport(sim: Simulation) {
+  type Row = { count: number; alive: number; land: number; gdp: number };
+  const row = (): Row => ({ count: 0, alive: 0, land: 0, gdp: 0 });
+  const add = (target: Row, n: number) => {
+    target.count++;
+    if (!sim.isAlive(n)) return;
+    target.alive++;
+    target.land += sim.cellsOf(n) / Math.max(1, world.nations[n - 1].cells);
+    target.gdp += sim.outputOf(n) / Math.max(1, world.nations[n - 1].gdpMusd) - 1;
+  };
+  const show = (name: string, entry: Row) =>
+    `${name} ${entry.alive}/${entry.count}, terres ×${entry.alive ? (entry.land / entry.alive).toFixed(2) : '-'}, PIB ${entry.alive ? ((entry.gdp / entry.alive) * 100).toFixed(0) : '-'} %`;
+  const archetypes = new Map<number, Row>();
+  const poles = DOCTRINE_AXES.map(() => [row(), row()]);
+  for (let n = 1; n <= world.nations.length; n++) {
+    if (world.nations[n - 1].parent !== undefined) continue;
+    const doctrine = sim.doctrineOf(n);
+    const archetype = archetypeOf(doctrine);
+    if (!archetypes.has(archetype)) archetypes.set(archetype, row());
+    add(archetypes.get(archetype)!, n);
+    doctrine.forEach((value, axis) => {
+      if (value <= -0.3) add(poles[axis][0], n);
+      else if (value >= 0.3) add(poles[axis][1], n);
+    });
+  }
+  console.log('  Doctrines :');
+  for (const [archetype, entry] of [...archetypes].sort((a, b) => b[1].count - a[1].count)) {
+    console.log(`    ${show(archetype < 0 ? 'Équilibrée' : ARCHETYPES[archetype].name, entry)}`);
+  }
+  DOCTRINE_AXES.forEach((axis, index) => {
+    console.log(`    ${axis.name.padEnd(12)} : ${show(axis.minus, poles[index][0])} | ${show(axis.plus, poles[index][1])}`);
+  });
+}
 
 function worldGame(durationMinutes: number, seed: number) {
   const sim = make(0, seed);
@@ -188,6 +231,7 @@ function worldGame(durationMinutes: number, seed: number) {
       );
     }
   }
+  doctrineReport(sim);
   console.log(`  Premières capitulations : ${firstLosses.join(', ')}`);
   console.log(`  Coalitions : ${coalitions.join(', ') || 'aucune'}`);
   console.log(`  Séparations : ${secessions.join(', ') || 'aucune'}`);

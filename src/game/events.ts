@@ -1,4 +1,5 @@
 // Textes des événements du monde, pour le journal et les messages.
+import { ARCHETYPES, BALANCED_ARCHETYPE, DOCTRINE_AXES } from '../sim/doctrine.ts';
 import type { SimEvent } from '../sim/protocol.ts';
 
 /** Nations concernées par un événement. */
@@ -17,6 +18,8 @@ export function eventNations(event: SimEvent): number[] {
       return [event.from, event.to];
     case 'axisBuilt':
     case 'axisRestored':
+    case 'researchDone':
+    case 'doctrineNamed':
       return [event.nation];
     case 'axisCut':
       return event.by ? [event.nation, event.by] : [event.nation];
@@ -79,6 +82,10 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
       return event.by ? `${nameOf(event.by)} coupe un axe commercial de ${nameOf(event.nation)}` : `Un axe commercial de ${nameOf(event.nation)} est coupé`;
     case 'axisRestored':
       return `${nameOf(event.nation)} rétablit un axe commercial`;
+    case 'researchDone':
+      return `Recherche achevée : ${DOCTRINE_AXES[event.axis].name}, niveau ${event.level}`;
+    case 'doctrineNamed':
+      return `Doctrine de ${nameOf(event.nation)} : ${(ARCHETYPES[event.archetype] ?? BALANCED_ARCHETYPE).name}`;
   }
 }
 

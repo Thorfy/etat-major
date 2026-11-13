@@ -415,6 +415,7 @@ describe('guerres de l\'IA', () => {
       }),
       ai: true,
       seed: 11,
+      doctrines: false,
     });
     let declared = false;
     let landed = false;

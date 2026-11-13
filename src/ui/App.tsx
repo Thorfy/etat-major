@@ -13,6 +13,8 @@ import { SetupPanel } from './SetupPanel.tsx';
 import { describeEvent, eventKey, eventNations } from '../game/events.ts';
 import { formatDuration, formatShortDate } from '../game/time.ts';
 import { AI_PROFILES, ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
+import { DOCTRINE_AXES, archetypeName } from '../sim/doctrine.ts';
+import { poleName } from '../game/doctrines.ts';
 import { formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
@@ -97,6 +99,15 @@ const TRADE_RELATIONS = {
   free: 'échanges libres',
 } as const;
 
+/** Les penchants d'une doctrine, axe par axe : « Mouvement 40 %, Qualité 25 % ». */
+function doctrineSummary(doctrine: number[]): string {
+  const leanings = doctrine
+    .map((value, axis) => ({ value, axis }))
+    .filter(({ value, axis }) => axis < DOCTRINE_AXES.length && Math.abs(value) >= 0.05)
+    .map(({ value, axis }) => `${poleName(axis, value)} ${Math.round(Math.abs(value) * 100)} %`);
+  return leanings.length > 0 ? leanings.join(', ') : 'Au centre sur tous les axes';
+}
+
 /**
  * Diplomatie avec le pays sélectionné : toujours les mêmes lignes, et deux boutons à la même place
  * (paix, pacte ou rupture ; déclaration de guerre). Personne ne vient en aide à qui est attaqué.
@@ -130,6 +141,8 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
         <dd class={aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>{formatPercent(aggression)}</dd>
         <dt>Tempérament</dt>
         <dd title={PROFILE_HINTS[profile] ?? ''}>{AI_PROFILES[profile]?.name ?? '—'}</dd>
+        <dt>Doctrine</dt>
+        <dd title={doctrineSummary(game.doctrineOf(nation))}>{archetypeName(game.doctrineOf(nation))}</dd>
         <dt>Commerce</dt>
         <dd class={trade === 'deal' ? 'ahead' : trade === 'free' ? '' : 'behind'}>{TRADE_RELATIONS[trade]}</dd>
         <dt>Pactes</dt>

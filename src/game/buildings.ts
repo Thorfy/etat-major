@@ -18,6 +18,7 @@ import {
   MAX_FACTORY_LEVEL,
   MAX_INFRASTRUCTURE_LEVEL,
 } from '../sim/balance.ts';
+import { DOCTRINE_REACH } from '../sim/doctrine.ts';
 import type { BuildKind } from '../sim/protocol.ts';
 
 const percent = (share: number) => `${Math.round(share * 100)} %`;
@@ -34,9 +35,13 @@ export const BUILD_NAMES: Record<BuildKind, string> = {
   services: 'Services publics',
   shipyard: 'Chantier naval',
   axis: 'Axe commercial',
+  research: 'Recherche',
 };
 
 export const BUILD_EFFECTS: Record<BuildKind, string> = {
+  research:
+    `Repousse les bornes d'un axe de doctrine : ${Math.round(DOCTRINE_REACH[0] * 100)} % vers chaque pôle au départ, puis ${DOCTRINE_REACH.slice(1).map((reach) => `${Math.round(reach * 100)} %`).join(', ')} ` +
+    `à chaque niveau. Elle prend sur tes chantiers, comme un bâtiment.`,
   axis:
     `Route et voie ferrée (ou ligne maritime) de ville en ville, chez toi ou jusque chez un partenaire commercial : chaque province traversée gagne ` +
     `+${percent(AXIS_BONUS)} de PIB et de capacité, pour ${AXIS_MAX_PER_PROVINCE} axes au plus, et compte comme équipée pour ses ` +

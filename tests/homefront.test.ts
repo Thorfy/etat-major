@@ -53,6 +53,7 @@ function config(options: { gdpA?: number; gdpB?: number; ai?: boolean; seed?: nu
     player: A,
     ai: options.ai ?? false,
     trade: options.trade ?? false,
+    doctrines: false,
   };
 }
 

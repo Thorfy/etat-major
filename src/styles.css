@@ -252,7 +252,7 @@ canvas {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   border-bottom: 1px solid var(--panel-line);
 }
 
@@ -1315,4 +1315,88 @@ canvas {
 .card-banner,
 .dialog-art {
   max-width: none;
+}
+
+/* Doctrine : un curseur par axe, sous une barre qui montre les bornes de la recherche et la doctrine atteinte. */
+.doctrine-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.doctrine-head h3 {
+  margin: 0;
+}
+
+.doctrine-head small {
+  color: var(--ink-soft);
+}
+
+.art.doctrine-art {
+  width: 84px;
+  height: 84px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.doctrine-axis .poles {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.doctrine-axis .poles span {
+  cursor: help;
+}
+
+.doctrine-axis .poles b {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 400;
+  text-align: center;
+}
+
+.reach-bar {
+  position: relative;
+  height: 6px;
+  margin: 6px 0 0;
+  border-radius: 3px;
+  background: var(--panel-line);
+}
+
+.reach-bar .reach {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.reach-bar .mid {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 50%;
+  width: 1px;
+  background: var(--ink-soft);
+}
+
+.reach-bar .current {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 12px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+
+.doctrine-range {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
 }

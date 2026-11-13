@@ -37,6 +37,7 @@ import type {
   WorkerInit,
   WorkerUpdate,
 } from '../sim/protocol.ts';
+import { ARCHETYPES, BALANCED_ARCHETYPE, DOCTRINE_AXES, DOCTRINE_AXIS_COUNT, DOCTRINE_REACH, MAX_RESEARCH_LEVEL } from '../sim/doctrine.ts';
 import { landingProblem, traceRoute } from '../sim/route.ts';
 import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
@@ -117,6 +118,8 @@ export class GameClient {
   economy: EconomySnapshot | null = null;
   /** Effort de guerre demandé, à jour dès le geste. */
   private effortOrder: number | null = null;
+  /** Doctrine visée par le joueur, axe par axe, en attendant que l'état la confirme. */
+  private doctrineOrders: (number | null)[] = Array(DOCTRINE_AXIS_COUNT).fill(null);
   private counterOrder: number | null = null;
   private highlighted = 0;
 
@@ -370,6 +373,15 @@ export class GameClient {
         break;
       case 'axisRestored':
         if (event.nation === me) this.notify('Axe commercial rétabli.');
+        break;
+      case 'researchDone':
+        if (event.nation === me) {
+          const axis = DOCTRINE_AXES[event.axis];
+          this.notify(`Recherche achevée : ${axis.name}, niveau ${event.level}. Ta doctrine peut aller jusqu'à ${Math.round(DOCTRINE_REACH[event.level] * 100)} % vers ${axis.minus} ou ${axis.plus}.`);
+        }
+        break;
+      case 'doctrineNamed':
+        if (event.nation === me) this.notify(`Ta doctrine devient : ${(ARCHETYPES[event.archetype] ?? BALANCED_ARCHETYPE).name}.`);
         break;
     }
   }
@@ -712,6 +724,49 @@ export class GameClient {
       capacity: this.economy?.capacity[nation] ?? 0,
       effort: this.economy?.effort[nation] ?? 0,
     };
+  }
+
+  /** Doctrine d'une nation, axe par axe, de −1 à +1 : la sienne pour le joueur, le relevé mondial sinon. */
+  doctrineOf(nation: number): number[] {
+    const live = this.snapshot?.nations.find((entry) => entry.id === nation);
+    if (live && live.doctrine.length === DOCTRINE_AXIS_COUNT) return live.doctrine;
+    const all = this.economy?.doctrine;
+    if (!all || all.length < (nation + 1) * DOCTRINE_AXIS_COUNT) return Array(DOCTRINE_AXIS_COUNT).fill(0);
+    return Array.from(all.subarray(nation * DOCTRINE_AXIS_COUNT, (nation + 1) * DOCTRINE_AXIS_COUNT));
+  }
+
+  /** Doctrine visée par le joueur sur un axe : celle qu'affiche le curseur. */
+  doctrineTarget(axis: number): number {
+    return this.doctrineOrders[axis] ?? this.playerStats?.doctrineTarget[axis] ?? 0;
+  }
+
+  /** Niveau de recherche du joueur sur un axe, et ce qui en est déjà en file. */
+  researchOf(axis: number): { level: number; queued: number } {
+    const stats = this.playerStats;
+    return {
+      level: stats?.research[axis] ?? 0,
+      queued: stats?.builds.filter((order) => order.kind === 'research' && order.axis === axis).length ?? 0,
+    };
+  }
+
+  setDoctrine(axis: number, value: number): void {
+    if (!this.canCommand) return;
+    const reach = DOCTRINE_REACH[this.researchOf(axis).level];
+    const clamped = Math.max(-reach, Math.min(reach, value));
+    this.doctrineOrders[axis] = clamped;
+    this.command({ type: 'setDoctrine', nation: this.player, axis, value: clamped });
+    this.onChange();
+  }
+
+  research(axis: number): void {
+    if (!this.canCommand) return;
+    const { level, queued } = this.researchOf(axis);
+    if (level + queued >= MAX_RESEARCH_LEVEL) {
+      this.notify(`${DOCTRINE_AXES[axis].name} : recherche complète.`);
+      return;
+    }
+    this.command({ type: 'research', nation: this.player, axis });
+    this.notify(`Recherche mise en chantier : ${DOCTRINE_AXES[axis].name}, niveau ${level + queued + 1}. Elle apparaît dans ta file.`);
   }
 
   /** Effort de guerre visé : celui qu'affiche le curseur. */

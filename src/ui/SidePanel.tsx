@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact';
 import { useState } from 'preact/hooks';
 import { type GameClient, LOW_SUPPLY } from '../game/GameClient.ts';
 import { BUILD_EFFECTS, BUILD_NAMES } from '../game/buildings.ts';
+import { POLE_EFFECTS, axisEffects, poleName } from '../game/doctrines.ts';
 import { effortEffect } from '../game/economy.ts';
 import { formatShortDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
@@ -19,11 +20,21 @@ import {
   TRADE_DEPENDENCE,
   MAX_PRIORITY_ZONES,
 } from '../sim/balance.ts';
+import {
+  ARCHETYPES,
+  BALANCED_ARCHETYPE,
+  DOCTRINE_AXES,
+  DOCTRINE_REACH,
+  DOCTRINE_SPEED_PER_WEEK,
+  MAX_RESEARCH_LEVEL,
+  RESEARCH_COST,
+  archetypeOf,
+} from '../sim/doctrine.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { Art, Blason } from './Art.tsx';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
-type Tab = 'fronts' | 'economy' | 'defense' | 'diplomacy';
+type Tab = 'fronts' | 'economy' | 'defense' | 'doctrine' | 'diplomacy';
 
 const STANCES: { id: Stance; label: string }[] = [
   { id: 'attack', label: 'Attaquer' },
@@ -348,7 +359,9 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
                       ·{' '}
                       {order.kind === 'fort' || order.kind === 'axis'
                         ? `${integer.format(order.cellCount)} cellules`
-                        : order.kind === 'investment'
+                        : order.kind === 'research'
+                          ? DOCTRINE_AXES[order.axis].name
+                          : order.kind === 'investment'
                           ? game.worldData.nations[order.region - 1].name
                           : provinces[order.province - 1].name}
                     </small>
@@ -365,6 +378,95 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
           </ol>
         )}
       </section>
+    </>
+  );
+}
+
+// ——— Doctrine ———
+
+const archetypeOfIndex = (index: number) => (index < 0 ? BALANCED_ARCHETYPE : ARCHETYPES[index]);
+const unsignedPercent = (value: number) => `${Math.round(Math.abs(value) * 100)} %`;
+
+function DoctrineAxis({ game, axis, current }: { game: GameClient; axis: number; current: number }) {
+  const { name, plus, minus } = DOCTRINE_AXES[axis];
+  const { level, queued } = game.researchOf(axis);
+  const reach = DOCTRINE_REACH[level];
+  const target = game.doctrineTarget(axis);
+  const next = level + queued;
+  const moving = Math.abs(target - current) > 0.005;
+  const pole = poleName(axis, current);
+  // Position sur la barre : −1 à gauche, +1 à droite.
+  const at = (value: number) => `${(value + 1) * 50}%`;
+  return (
+    <section class="doctrine-axis">
+      <h3>
+        {name} <small>· recherche {level} / {MAX_RESEARCH_LEVEL}</small>
+      </h3>
+      <div class="poles">
+        <span title={POLE_EFFECTS[axis][0]}>{minus}</span>
+        <b>
+          {pole === 'centre' ? 'centre' : `${pole} ${unsignedPercent(current)}`}
+          {moving ? ` → ${poleName(axis, target) === 'centre' ? 'centre' : `${poleName(axis, target)} ${unsignedPercent(target)}`}` : ''}
+        </b>
+        <span title={POLE_EFFECTS[axis][1]}>{plus}</span>
+      </div>
+      <div class="reach-bar" aria-hidden="true">
+        <div class="reach" style={{ left: at(-reach), width: `${reach * 100}%` }} />
+        <div class="mid" />
+        <div class="current" style={{ left: at(current) }} />
+      </div>
+      <input
+        class="doctrine-range"
+        type="range"
+        min={-100}
+        max={100}
+        step={5}
+        value={Math.round(target * 100)}
+        aria-label={`${name} : de ${minus} à ${plus}`}
+        onInput={(event) => {
+          game.setDoctrine(axis, Number(event.currentTarget.value) / 100);
+          // Hors des bornes, le curseur revient à la borne.
+          event.currentTarget.value = String(Math.round(game.doctrineTarget(axis) * 100));
+        }}
+      />
+      <Note lines={2}>{axisEffects(axis, current)}</Note>
+      <button class="action quiet" disabled={next >= MAX_RESEARCH_LEVEL} onClick={() => game.research(axis)}>
+        {next >= MAX_RESEARCH_LEVEL
+          ? queued > 0
+            ? 'Dernière recherche en file'
+            : 'Recherche complète'
+          : `Rechercher le niveau ${next + 1} (jusqu'à ${Math.round(DOCTRINE_REACH[next + 1] * 100)} %) · ${integer.format(RESEARCH_COST * (next + 1))} pts`}
+      </button>
+    </section>
+  );
+}
+
+function DoctrineTab({ game }: { game: GameClient }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
+  const doctrine = game.doctrineOf(game.player);
+  const current = archetypeOfIndex(archetypeOf(doctrine));
+  const aimed = archetypeOfIndex(archetypeOf(DOCTRINE_AXES.map((_, axis) => game.doctrineTarget(axis))));
+  const weeks = Math.round(1 / DOCTRINE_SPEED_PER_WEEK);
+  return (
+    <>
+      <section>
+        <div class="doctrine-head">
+          <Art id={`doctrines/${current.id}`} class="doctrine-art" />
+          <div>
+            <h3>{current.name}</h3>
+            <small>{aimed.id !== current.id ? `En route vers : ${aimed.name}` : 'Ta doctrine'}</small>
+          </div>
+        </div>
+        <Note lines={4}>
+          {`Chaque axe va d'un pôle à l'autre : chacun apporte un gain et coûte quelque chose, le centre ne fait rien. ` +
+            `Ta doctrine glisse vers ta cible, du centre à un bout en ${weeks} semaines (deux fois plus en guerre). ` +
+            `La recherche repousse les bornes de chaque axe ; elle prend sur tes chantiers.`}
+        </Note>
+      </section>
+      {DOCTRINE_AXES.map((_, axis) => (
+        <DoctrineAxis key={axis} game={game} axis={axis} current={doctrine[axis] ?? 0} />
+      ))}
     </>
   );
 }
@@ -598,6 +700,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
     { id: 'fronts', label: 'Fronts', badge: fronts ? String(fronts) : '', alert: enemyOffensives > 0 },
     { id: 'economy', label: 'Économie', badge: stats?.builds.length ? String(stats.builds.length) : '', alert: false },
     { id: 'defense', label: 'Défense', badge: stats?.pocketCells ? '!' : '', alert: (stats?.pocketCells ?? 0) > 0 },
+    { id: 'doctrine', label: 'Doctrine', badge: '', alert: false },
     {
       id: 'diplomacy',
       label: 'Diplomatie',
@@ -620,6 +723,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
         {tab === 'fronts' && <FrontsTab game={game} nations={nations} view={view} tool={tool} />}
         {tab === 'economy' && <EconomyTab game={game} nation={nation} view={view} tool={tool} />}
         {tab === 'defense' && <DefenseTab game={game} view={view} tool={tool} />}
+        {tab === 'doctrine' && <DoctrineTab game={game} />}
         {tab === 'diplomacy' && <DiplomacyTab game={game} nations={nations} />}
       </div>
     </section>

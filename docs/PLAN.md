@@ -40,7 +40,7 @@ Choix par défaut, à confirmer :
 | 7 | Défense planifiée : lignes fortifiées, réserve de contre-attaque, priorités par secteur | Une défense préparée arrête une attaque qui aurait percé sans elle |
 | 8 | Diplomatie : trêves et paix, pactes de non-agression, séparatismes et soulèvements | Une région à bout fait sécession ; ses voisines annexées se soulèvent avec elle |
 | 9 | Commerce : échanges entre pays et entre régions, axes commerciaux | Un axe tracé enrichit les régions qu'il traverse ; couper une route commerciale affaiblit l'ennemi |
-| 10 | Technologies et doctrines | Deux doctrines donnent deux styles de jeu différents |
+| 10 | Technologies et doctrines : un spectre sur cinq axes, et la recherche qui en repousse les bornes | Chaque position du spectre se joue différemment, et aucune ne domine les autres |
 | 11 | Illustrations, générées avec ComfyUI (Qwen Image) | Chaque écran, événement, bâtiment et doctrine a son illustration, et le premier chargement reste léger |
 | 12 | Nucléaire, classement, finitions, mise en ligne | Le jeu est accessible par une URL |
 
@@ -80,6 +80,77 @@ Corrections ajoutées au jalon 6, à la demande du joueur : une IA qui n'attaque
 les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauvegardes mises à
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
+
+## État du jalon 10
+
+Le plan prévoyait deux doctrines. Le joueur a demandé **un spectre complet** : la doctrine d'un pays
+est sa position sur cinq axes, de −1 à +1 (`src/sim/doctrine.ts`). Chaque pôle apporte un gain et
+coûte quelque chose ; le centre ne fait rien. Les effets ci-dessous sont ceux d'un pôle à fond, et
+proportionnels en deçà.
+
+| Axe | Pôle moins | Pôle plus |
+|---|---|---|
+| Manœuvre | **Position** : défense +28 %, forts 50 % plus forts et 40 % moins chers ; attaque −18 %, offensives 30 % plus lentes | **Mouvement** : attaque +28 %, offensives 50 % plus rapides ; défense −14 % |
+| Recrutement | **Qualité** : chaque homme pèse 30 % de plus et tombe 35 % moins ; armée −25 %, réservoir −20 %, acier +30 % | **Masse** : armée +30 %, réservoir +40 % ; chaque homme pèse 20 % de moins et tombe 40 % plus |
+| Armes | **Sol** : armée +10 %, pétrole −25 % ; rien contre l'aviation adverse | **Air** : jusqu'à +35 % au combat face à qui a moins d'avions, en attaque comme en défense ; armée −15 %, pétrole +60 % |
+| Échanges | **Autarcie** : embargos et guerres coûtent 60 % de moins, gisements +40 % ; accords −60 % | **Libre-échange** : accords +100 %, axes +50 %, importations +15 % ; embargos et guerres coûtent 60 % de plus |
+| État | **Autonomie** : régions 50 % plus calmes, lassitude −20 %, conquêtes intégrées deux fois plus vite ; effort de guerre −15 %, chantiers −10 % | **Centralisation** : effort de guerre +15 %, armée +10 %, chantiers +15 % ; régions 50 % plus agitées, lassitude +30 % |
+
+**Glissement.** On choisit une cible sur chaque axe (onglet Doctrine) ; la doctrine y va à 5 % par
+semaine, du centre à un bout en 20 semaines, deux fois moins vite en guerre. On peut pivoter en
+pleine partie, pas d'un clic.
+
+**Recherche.** Les bornes de chaque axe sont de 25 % vers chaque pôle au départ, puis 50, 75 et
+100 %. Chaque niveau est un chantier de la file (60 points × le niveau visé) : la recherche prend
+sur les usines et les forts, et sur l'effort de guerre, qui ralentit les chantiers.
+
+**Grandes doctrines.** La position prend le nom de la direction dont elle s'approche le plus, ou
+reste « équilibrée » près du centre : Guerre éclair (mouvement, qualité, air), Vague humaine
+(mouvement, masse, sol), Défense en profondeur (position, sol), Nation en armes (position, masse,
+autonomie), Forteresse autarcique (position, autarcie), Puissance aérienne (position, air), Guerre
+totale (masse, autarcie, centralisation), Arsenal industriel (qualité, autarcie, centralisation),
+République marchande (libre-échange, autonomie), Empire marchand (air, libre-échange,
+centralisation). Chacune a son illustration, et le joueur est prévenu quand la sienne change.
+
+**L'IA** vise une position tirée de son tempérament (le belliqueux penche vers le mouvement, la
+masse et la centralisation ; le commerçant vers le libre-échange et l'autonomie ; le bâtisseur vers
+la position, la qualité et la centralisation ; le prudent vers la position et le sol), plus un
+écart propre à chaque pays (±0,7 par axe) : elle couvre tout le spectre. Elle recherche l'axe où sa
+cible dépasse le plus ses bornes. La fiche d'un pays montre sa doctrine, et ses penchants au survol.
+
+**Interface.** Onglet **Doctrine** : la grande doctrine et son illustration, puis un curseur par
+axe, sous une barre qui montre les bornes de la recherche et la position atteinte ; l'effet chiffré
+de la position ; un bouton de recherche avec son coût.
+
+**Équilibrage.** Le banc d'essai (`node tools/bench-sim.ts world 120 <graine>`) donne un bilan par
+grande doctrine et pôle par pôle ; `DOCTRINES=hasard` détache les doctrines de l'IA de son
+tempérament, pour mesurer chaque position sans le biais des belliqueux.
+
+Quatre parties au hasard et deux avec les tempéraments, de 120 semaines :
+
+- **Aucun pôle ne domine son opposé.** Les écarts de terres et de PIB entre deux pôles changent de
+  sens d'une graine à l'autre, dans le bruit d'échantillons de 15 à 30 pays.
+- **Le libre-échange enrichit, l'autarcie protège** : PIB +64 à +76 % contre +47 à +69 %, mais des
+  libre-échangistes qui survivent moins aux guerres.
+- **La centralisation sortait un peu devant** partout (terres et PIB) : ses chantiers rapportent
+  maintenant 15 % au lieu de 20, sa lassitude coûte 30 % au lieu de 20, et l'autonomie ne retire
+  plus que 10 % aux chantiers.
+- **Avec les tempéraments**, les doctrines couvrent tout le spectre. Les guerres (139 à 167
+  déclarées) et les capitulations (57 à 66) restent dans les fourchettes du jalon 9.
+- Après 120 semaines, un pays sur deux reste encore « équilibré » : les petits pays bâtissent
+  lentement, et leurs premières bornes (25 %) restent près du centre.
+
+**Correctif au passage.** Une cellule reprise dans une poche restait dans la liste de la poche :
+au chargement d'une partie, elle redevenait encerclée, et la suite divergeait. La sauvegarde ne
+garde plus que les cellules encore encerclées.
+
+**Tests.** 10 tests (`tests/doctrine.test.ts`) : départ au centre, glissement et bornes, moitié
+moins vite en guerre, noms des grandes doctrines, recherche (coût, niveaux, plafond), recherche de
+l'IA, effets de la masse et de la qualité au front, un coût en face de chaque gain, sauvegarde. Les
+tests qui mesurent autre chose gardent l'IA au centre (`doctrines: false`, ou sans IA).
+
+**Non vérifié :** le ressenti en partie de deux positions opposées (une guerre éclair contre une
+défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a fini ses recherches.
 
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 

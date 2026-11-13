@@ -4,6 +4,7 @@
   "formats": {
     "ecran": { "width": 1344, "height": 768, "outWidth": 1152, "outHeight": 658, "rules": "Off-center composition, cropped figures, no faces in close-up, no real national flags, no text, no letters, no logos." },
     "evenement": { "width": 1024, "height": 640, "outWidth": 768, "outHeight": 480, "rules": "Off-center composition, cropped figures, no faces in close-up, no real national flags, no text, no letters, no logos." },
+    "doctrine": { "width": 1024, "height": 1024, "outWidth": 384, "outHeight": 384, "rules": "One strong central motif, readable at a small size, no faces in close-up, no real national flags, no text, no letters, no logos." },
     "batiment": { "width": 1024, "height": 640, "outWidth": 512, "outHeight": 320, "rules": "Seen from a slight distance, simple readable silhouette, no people in close-up, no text, no letters, no logos." },
     "paysage": { "width": 1024, "height": 512, "outWidth": 640, "outHeight": 320, "rules": "Wide landscape view, low horizon, no people in close-up, no text, no letters, no logos." },
     "blason": { "width": 1024, "height": 1024, "outWidth": 192, "outHeight": 192, "rules": "A single heraldic shield centered on a plain off-white background, bold simple charges, invented design that does not reproduce any official coat of arms or flag, no text, no letters, no motto, no scroll." }
@@ -100,6 +101,18 @@
     { "id": "paysages/jungle-industriel-2", "format": "paysage", "subject": "A jungle palm oil plantation and a processing mill." },
     { "id": "paysages/jungle-industriel-3", "format": "paysage", "subject": "A river port city with cranes and timber stacks." },
     { "id": "paysages/jungle-ravage-2", "format": "paysage", "subject": "A jungle airstrip with wrecked planes." },
-    { "id": "paysages/jungle-ravage-3", "format": "paysage", "subject": "A flooded jungle village after shelling." }
+    { "id": "paysages/jungle-ravage-3", "format": "paysage", "subject": "A flooded jungle village after shelling." },
+    { "id": "batiments/research", "format": "batiment", "subject": "A military research laboratory: engineers around drafting tables covered with blueprints of vehicles and aircraft, a scale model in a small wind tunnel." },
+    { "id": "doctrines/equilibree", "format": "doctrine", "subject": "A general staff desk seen from above, evenly shared between a field map with pins, a ledger of trade figures, a small model aircraft and a toy tank." },
+    { "id": "doctrines/guerre-eclair", "format": "doctrine", "subject": "Tanks charging diagonally across a wheat field toward the horizon, dive bombers overhead, under a plain pale sky of a single color." },
+    { "id": "doctrines/vague-humaine", "format": "doctrine", "subject": "Endless lines of infantry advancing across a snowy field, wave after wave, horse-drawn guns behind them." },
+    { "id": "doctrines/defense-profondeur", "format": "doctrine", "subject": "Successive lines of trenches, concrete bunkers and anti-tank obstacles stretching deep into the distance, guns dug in behind." },
+    { "id": "doctrines/nation-en-armes", "format": "doctrine", "subject": "Villagers of every age taking rifles from a cart in a small town square, farmers and workers turned militia." },
+    { "id": "doctrines/forteresse", "format": "doctrine", "subject": "A massive concrete fortress line along a ridge, with mines, grain silos and factories sheltered behind it." },
+    { "id": "doctrines/puissance-aerienne", "format": "doctrine", "subject": "Squadrons of heavy bombers and fighters flying over a large airfield with long runways and hangars." },
+    { "id": "doctrines/guerre-totale", "format": "doctrine", "subject": "A huge armaments factory at full output: rows of tanks and shells, workers in shifts, tall smoking chimneys." },
+    { "id": "doctrines/arsenal", "format": "doctrine", "subject": "Engineers inspecting a few finely built tanks in a clean, orderly factory hall, crates of precision parts stacked neatly." },
+    { "id": "doctrines/republique-marchande", "format": "doctrine", "subject": "A harbor quay seen at an angle: a merchant ship unloaded by cranes, warehouses and a modest town hall behind it, under a plain pale sky of a single color." },
+    { "id": "doctrines/empire-marchand", "format": "doctrine", "subject": "One wide view of a grand port at dusk: a large cargo ship at the quay, warehouses, a palace on the hill above, one cargo plane in the sky." }
   ]
 }

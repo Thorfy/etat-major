@@ -8,7 +8,7 @@ export type Stance = 'attack' | 'hold' | 'retreat';
  * Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement),
  * fortifications (une bande de cellules, sans province).
  */
-export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | 'axis' | ProvinceBuilding;
+export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | 'axis' | 'research' | ProvinceBuilding;
 
 export interface BuildOrder {
   province: number;
@@ -22,6 +22,8 @@ export interface BuildOrder {
   /** Investissements : la région (pays d'origine annexé) qui les a demandés, et leur coût. */
   region?: number;
   cost?: number;
+  /** Recherche : l'axe de doctrine dont elle repousse les bornes. */
+  axis?: number;
 }
 
 /** Axe commercial tracé entre deux provinces d'un pays. */
@@ -109,7 +111,11 @@ export type SimCommand =
   | { type: 'endTradeDeal'; nation: number; other: number }
   | { type: 'setEmbargo'; nation: number; other: number; on: boolean }
   | { type: 'buildAxis'; nation: number; fromX: number; fromY: number; toX: number; toY: number }
-  | { type: 'removeAxis'; nation: number; id: number };
+  | { type: 'removeAxis'; nation: number; id: number }
+  /** Doctrine visée sur un axe, de −1 à +1 : la doctrine y glisse peu à peu, dans les bornes de la recherche. */
+  | { type: 'setDoctrine'; nation: number; axis: number; value: number }
+  /** Ajoute à la file de chantiers la recherche du niveau suivant d'un axe de doctrine. */
+  | { type: 'research'; nation: number; axis: number };
 
 export interface FrontSnapshot {
   a: number;
@@ -167,7 +173,12 @@ export interface NationSnapshot {
   /** Points de construction par minute. */
   construction: number;
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
-  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number }[];
+  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number; axis: number }[];
+  /** Doctrine atteinte sur chaque axe, de −1 à +1. */
+  doctrine: number[];
+  /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
+  doctrineTarget: number[];
+  research: number[];
   /** Régions annexées qui s'agitent dans ce pays. */
   movements: {
     origin: number;
@@ -220,6 +231,8 @@ export interface EconomySnapshot {
   coalitionAgainst: Uint16Array;
   /** Alliances, à plat : a, b, sorte (1 traité, 2 coalition), a, b, sorte… */
   alliances: Uint16Array;
+  /** Doctrine de chaque nation, à plat : ses cinq axes à la suite (indice = nation × 5 + axe). */
+  doctrine: Float32Array;
 }
 
 export interface OffensiveSnapshot {
@@ -279,7 +292,10 @@ export type SimEvent =
   | { type: 'embargoLifted'; tick: number; from: number; to: number }
   | { type: 'axisBuilt'; tick: number; nation: number }
   | { type: 'axisCut'; tick: number; nation: number; by: number }
-  | { type: 'axisRestored'; tick: number; nation: number };
+  | { type: 'axisRestored'; tick: number; nation: number }
+  | { type: 'researchDone'; tick: number; nation: number; axis: number; level: number }
+  /** La doctrine du joueur change de nom (−1 : équilibrée). */
+  | { type: 'doctrineNamed'; tick: number; nation: number; archetype: number };
 
 export interface NationLabel {
   id: number;
@@ -458,5 +474,9 @@ export interface SimSaveState {
   coastSeas?: number[];
   axes?: TradeAxis[];
   nextAxisId?: number;
+  /** Doctrines (jalon 10) : atteinte, visée, et niveaux de recherche, cinq axes par nation. */
+  doctrine?: number[];
+  doctrineTarget?: number[];
+  research?: number[];
   movements: MovementState[];
 }
