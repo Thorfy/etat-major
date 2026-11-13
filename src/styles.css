@@ -907,13 +907,23 @@ canvas {
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  width: 300px;
+  width: 380px;
   padding: 6px;
 }
 
 .map-mode .speeds {
-  grid-template-columns: 0.8fr 1fr 1.3fr;
+  grid-template-columns: 0.7fr 1fr 1fr 1.4fr;
   margin-bottom: 0;
+}
+
+.map-mode .speeds.sub-modes {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 6px;
+}
+
+/* Les sous-cartes, en partie : trois boutons de même largeur. */
+.sub-modes {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .legend {
@@ -1507,4 +1517,47 @@ canvas {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Sous-cartes d'une famille, en tête du panneau de légende. */
+.sub-modes {
+  margin: 0 0 6px;
+  pointer-events: auto;
+}
+
+.legend .ramp.growth {
+  background: linear-gradient(90deg, #ab231b, #e2dbc7 50%, #2e7a3f);
+}
+
+/* Fiche d'une région : impôts et levée, d'un cran à l'autre. */
+.region-card {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 3px;
+}
+
+.region-card h3 {
+  margin-top: 0;
+}
+
+.stepper {
+  display: grid;
+  grid-template-columns: 1fr 28px 92px 28px;
+  gap: 4px;
+  align-items: center;
+  margin: 4px 0;
+  color: var(--ink-soft);
+}
+
+.stepper b {
+  color: var(--ink);
+  font-weight: 400;
+  text-align: center;
+}
+
+.stepper .action {
+  min-height: 26px;
+  margin: 0;
+  padding: 0;
 }

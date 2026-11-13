@@ -375,6 +375,25 @@ export const AXIS_MAX_PER_PROVINCE = 2;
  * On limite les extrémités du réseau, pas le nombre d'axes (MAX_AXES n'est qu'un garde-fou).
  */
 export const MAX_AXIS_TERMINALS = 6;
+
+/**
+ * Réseau commercial automatique : chaque pays relie ses villes principales, les départements les
+ * plus riches de son sol national (PIB × développement × usines). On les prend du plus riche au
+ * moins riche ; un département que le réseau traverse déjà est sauté (le suivant prend sa place)
+ * mais compte comme ville principale. Les villes principales gagnent HUB_BONUS, les départements
+ * traversés AXIS_BONUS.
+ */
+export const AUTO_HUBS_BASE = 6;
+/** Une ville principale de plus par tranche de départements tenus sur son sol, jusqu'à un plafond. */
+export const AUTO_HUBS_PER_PROVINCES = 20;
+export const AUTO_HUBS_TERRITORY_MAX = 6;
+/** Et deux par niveau de recherche sur l'axe Échanges de la doctrine. */
+export const AUTO_HUBS_PER_RESEARCH = 2;
+export const HUB_BONUS = 0.2;
+/** Un département hors réseau détrône la plus petite ville principale s'il la dépasse d'autant. */
+export const HUB_SWAP_MARGIN = 1.1;
+/** Chaque pays vérifie son réseau une passe d'économie sur ce nombre. */
+export const NETWORK_CHECK_GROUPS = 10;
 export const MAX_AXES = 30;
 export const MAX_AXIS_CELLS = 400;
 export const AXIS_COST_BASE = 80;
@@ -606,6 +625,21 @@ export const REGION_IDENTITY = [0, 0.6, 0.7, 0.8, 0.9];
  * coalitions du jeu.
  */
 export const REBEL_JOIN_UNREST = 0.5;
+
+/**
+ * Politique régionale : le joueur règle, pour chaque région historique ou pays annexé qu'il tient,
+ * ses impôts et sa levée d'hommes, de −2 (allégés) à +2 (alourdis). Chaque niveau :
+ * - impôts : ±10 % de PIB et de capacité tirés de la région, ±0,12 au plafond de son agitation ;
+ * - levée : ±25 % d'hommes mobilisables dans la région, ±0,1 au plafond de son agitation ;
+ * - et la stabilité du pays bouge de REGION_POLICY_STABILITY par minute, par point de part du pays
+ *   que pèse la région : elle baisse quand on alourdit, remonte quand on allège.
+ */
+export const REGION_POLICY_MAX = 2;
+export const REGION_TAX_STEP = 0.1;
+export const REGION_TAX_UNREST = 0.12;
+export const REGION_LEVY_STEP = 0.25;
+export const REGION_LEVY_UNREST = 0.1;
+export const REGION_POLICY_STABILITY = 0.05;
 export const MAX_REBEL_COALITION = 4;
 export const REBEL_STABILITY = 0.7;
 export const REBEL_EFFORT = 0.65;

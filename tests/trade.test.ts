@@ -41,6 +41,8 @@ function config(owner: (x: number, y: number) => number, nations: number, option
     seed: 5,
     player: A,
     ai: false,
+    // Ces tests tracent leurs axes à la main.
+    autoTrade: false,
     ...options,
   };
 }

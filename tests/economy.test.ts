@@ -51,6 +51,8 @@ function economyConfig(options: { richFirst?: boolean; ai?: boolean; seed?: numb
     seed: options.seed ?? 3,
     player: A,
     ai: options.ai ?? false,
+    // Ces tests mesurent l'effort et l'industrie, sans le bonus du réseau commercial.
+    autoTrade: false,
   };
 }
 

@@ -14,7 +14,8 @@ import {
   DEMAND_INVESTMENT_AT,
   AXIS_BONUS,
   INVESTMENT_WEEKS,
-  MAX_AXIS_TERMINALS,
+  AUTO_HUBS_PER_PROVINCES,
+  HUB_BONUS,
   MAX_COUNTER_SHARE,
   MAX_TRADE_DEALS,
   TRADE_DEPENDENCE,
@@ -30,7 +31,7 @@ import {
   RESEARCH_COST,
   archetypeOf,
 } from '../sim/doctrine.ts';
-import type { AxisSnapshot, FrontSnapshot, Stance } from '../sim/protocol.ts';
+import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { Art, Blason } from './Art.tsx';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
@@ -226,12 +227,10 @@ function FrontsTab({ game, nations, view, tool }: { game: GameClient; nations: N
 /**
  * Commerce : accès aux partenaires, accords et embargos, et axes commerciaux tracés sur la carte.
  */
-function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; tool: MapTool | null }) {
+function TradeSection({ game }: { game: GameClient }) {
   const stats = game.playerStats;
   if (!stats) return null;
   const names = (ids: number[]) => (ids.length > 0 ? ids.map((id) => game.nameOf(id)).join(', ') : 'aucun');
-  const axes = game.playerAxes;
-  const queued = stats.builds.filter((order) => order.kind === 'axis').length;
   return (
     <section>
       <h3>Commerce</h3>
@@ -254,87 +253,70 @@ function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; t
           `blocus coupent ces échanges : coupé de tous, tu perdrais ${formatPercent(TRADE_DEPENDENCE)} de ton PIB et tes ` +
           `importations. Un accord (fiche d'un pays) en rapporte un peu plus.`}
       </Note>
-      <h3>Axes commerciaux</h3>
-      <button class={`action ${tool === 'axis' ? 'armed' : ''}`} aria-pressed={tool === 'axis'} onClick={() => view.setTool(tool === 'axis' ? null : 'axis')}>
-        {tool === 'axis' ? "Glisse d'une de tes provinces à une autre, ou chez un partenaire" : 'Tracer un axe commercial'}
-      </button>
-      <Note lines={2}>
-        {`Chaque province traversée gagne ${formatPercent(AXIS_BONUS)} de PIB et de capacité, chez toi comme chez un ` +
-          `partenaire commercial. L'ennemi qui en prend une province le coupe. Ton réseau a ${MAX_AXIS_TERMINALS} terminus ` +
-          `au plus : prolonger une route ou relier deux de ses villes n'en ajoute pas, une branche en ajoute un.`}
-      </Note>
-      <AxisNetwork game={game} axes={axes} queued={queued} />
+      <AutoNetwork game={game} />
     </section>
   );
 }
 
 /**
- * Le réseau commercial en un coup d'œil : combien d'axes, de villes reliées, de tronçons coupés, et
- * les routes de ses accords ; la liste des axes, d'une ville à l'autre, se replie dès qu'elle
- * s'allonge, les axes coupés en tête.
+ * Le réseau commercial automatique : ses villes principales (les départements les plus riches,
+ * reliés au plus riche), d'où vient leur nombre, et les villes qu'il traverse.
  */
-function AxisNetwork({ game, axes, queued }: { game: GameClient; axes: AxisSnapshot[]; queued: number }) {
+function AutoNetwork({ game }: { game: GameClient }) {
   const [open, setOpen] = useState(false);
+  const network = game.playerStats?.network;
+  if (!network) return null;
   const { provinces } = game.worldData;
-  const routes = game.axes.filter((axis) => axis.partner !== 0 && (axis.nation === game.player || axis.partner === game.player));
-  const cities = new Set([...axes, ...routes].flatMap((axis) => axis.path));
-  const cut = axes.filter((axis) => !axis.active);
-  const partners = routes.map((axis) => (axis.nation === game.player ? axis.partner : axis.nation));
-  const sorted = [...cut, ...axes.filter((axis) => axis.active)];
-  const folded = sorted.length > 4 && !open;
-  const shown = folded ? sorted.slice(0, 3) : sorted;
   const city = (province: number) => provinces[province - 1]?.name ?? '?';
-  const terminals = game.playerStats?.axisTerminals ?? 0;
+  const own = game.axes.filter((axis) => axis.auto && axis.nation === game.player);
+  const crossed = new Set(own.flatMap((axis) => axis.path));
+  const routes = game.axes.filter((axis) => axis.partner !== 0 && (axis.nation === game.player || axis.partner === game.player));
+  const partners = routes.map((axis) => (axis.nation === game.player ? axis.partner : axis.nation));
+  const sources = [`${network.base} de base`];
+  if (network.territory > 0) sources.push(`${network.territory} par le territoire`);
+  if (network.research > 0) sources.push(`${network.research} par la recherche`);
+  const shown = open ? network.principal : network.principal.slice(0, 6);
   return (
     <>
+      <h3>Réseau commercial</h3>
       <dl>
-        <dt>Terminus</dt>
-        <dd class={terminals >= MAX_AXIS_TERMINALS ? 'behind' : ''}>
-          {terminals} / {MAX_AXIS_TERMINALS}
-        </dd>
-        <dt>Axes</dt>
+        <dt>Villes principales</dt>
         <dd>
-          {axes.length + queued}
-          {queued > 0 ? ` · ${queued} en chantier` : ''}
+          {network.hubs.length} / {network.capacity}
         </dd>
-        <dt>Villes reliées</dt>
-        <dd>{integer.format(cities.size)}</dd>
-        <dt>Coupés</dt>
-        <dd class={cut.length > 0 ? 'behind' : ''}>{cut.length > 0 ? `${cut.length} sur ${axes.length}` : 'aucun'}</dd>
+        <dt>D'où</dt>
+        <dd>
+          <small>{sources.join(' · ')}</small>
+        </dd>
+        <dt>Villes traversées</dt>
+        <dd>{integer.format(crossed.size)}</dd>
         <dt>Routes d'accords</dt>
         <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
       </dl>
-      {shown.length > 0 && (
+      <Note lines={4}>
+        {`Tes départements les plus riches sont reliés d'eux-mêmes au plus riche : ils gagnent ${formatPercent(HUB_BONUS)} ` +
+          `de PIB et de capacité, et les départements traversés ${formatPercent(AXIS_BONUS)}. Un département déjà sur une route ` +
+          `laisse sa place au suivant, et garde le bonus. Le réseau se redessine quand un département en dépasse un autre. ` +
+          `Plus de villes : un territoire plus grand (une par ${AUTO_HUBS_PER_PROVINCES} départements), ou la recherche sur ` +
+          `les échanges (onglet Doctrine, deux par niveau).`}
+      </Note>
+      {network.principal.length > 0 && (
         <ol class="builds axis-list">
-          {shown.map((axis) => {
-            const bySea = axis.seaLinks.length > 0;
-            return (
-              <li key={axis.id}>
-                <div class="offensive-row">
-                  <span>
-                    {city(axis.path[0])} → {city(axis.path[axis.path.length - 1])}{' '}
-                    <small>
-                      {bySea ? '· par la mer ' : ''}· {axis.provinces} villes
-                      {!axis.active && (
-                        <>
-                          {' '}
-                          · <b class="behind">coupé</b>
-                        </>
-                      )}
-                    </small>
-                  </span>
-                  <button class="close-inline" aria-label="Supprimer cet axe" onClick={() => game.removeAxis(axis.id)}>
-                    ×
-                  </button>
-                </div>
-              </li>
-            );
-          })}
+          {shown.map((province, index) => (
+            <li key={province}>
+              <div class="offensive-row">
+                <span>
+                  {index + 1}. {city(province)}{' '}
+                  <small>{network.hubs.includes(province) ? (index === 0 ? '· centre du réseau' : '· reliée') : '· déjà sur la route'}</small>
+                </span>
+              </div>
+            </li>
+          ))}
         </ol>
       )}
-      {sorted.length > 4 && (
+      {network.principal.length > 6 && (
         <button class="link-button" onClick={() => setOpen(!open)}>
-          {open ? 'Replier la liste' : `Voir les ${sorted.length} axes`}
+          {open ? 'Replier la liste' : `Voir les ${network.principal.length} villes`}
         </button>
       )}
     </>
@@ -458,7 +440,7 @@ function BuildQueues({ game, military: showMilitary }: { game: GameClient; milit
   );
 }
 
-function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: NationData; view: MapView; tool: MapTool | null }) {
+function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) {
   const stats = game.playerStats;
   if (!stats) return null;
   const target = game.effortTarget;
@@ -493,7 +475,7 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
           <dd class={stats.steel < 0.8 ? 'behind' : ''}>{formatPercent(stats.steel)}</dd>
         </dl>
       </section>
-      <TradeSection game={game} view={view} tool={tool} />
+      <TradeSection game={game} />
       <section>
         <h3>Effort de guerre</h3>
         <Slider
@@ -868,7 +850,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
       </div>
       <div class="tab-body" role="tabpanel">
         {tab === 'fronts' && <FrontsTab game={game} nations={nations} view={view} tool={tool} />}
-        {tab === 'economy' && <EconomyTab game={game} nation={nation} view={view} tool={tool} />}
+        {tab === 'economy' && <EconomyTab game={game} nation={nation} />}
         {tab === 'defense' && <DefenseTab game={game} view={view} tool={tool} />}
         {tab === 'doctrine' && <DoctrineTab game={game} />}
         {tab === 'diplomacy' && <DiplomacyTab game={game} nations={nations} />}

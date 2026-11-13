@@ -378,6 +378,15 @@ export class GameClient {
       case 'axisBuilt':
         if (event.nation === me) this.notify('Axe commercial ouvert : les provinces traversées s\'enrichissent.');
         break;
+      case 'networkChanged':
+        if (event.nation === me) {
+          const city = (p: number) => this.world.data.provinces[p - 1]?.name ?? '?';
+          const parts: string[] = [];
+          if (event.added.length > 0) parts.push(`${event.added.map(city).join(', ')} rejoint tes villes principales`);
+          if (event.removed.length > 0) parts.push(`${event.removed.map(city).join(', ')} en sort`);
+          this.notify(`Réseau commercial redessiné : ${parts.join(' ; ')}.`);
+        }
+        break;
       case 'axisRefused':
         if (event.nation === me) {
           this.notify(
@@ -423,16 +432,45 @@ export class GameClient {
    */
   refreshMapTints(): void {
     const mode = this.view.mapMode;
-    if (mode !== 'relations' && mode !== 'interior') return;
     const count = this.world.data.nations.length;
     if (mode === 'relations') {
       const subject = this.highlighted !== 0 ? this.highlighted : this.player;
       const wars = (this.snapshot?.fronts ?? []).map((front) => [front.a, front.b] as [number, number]);
       this.view.setNationTint(relationTint(subject, count, this.economy, wars));
-    } else {
+    } else if (mode === 'stability') {
       this.view.setNationTint(stabilityTint(count, this.economy));
       if (this.economy) this.view.setUnrest(this.economy.provinceUnrest);
+    } else if (mode === 'regions') {
+      this.view.setProvinceTint(this.regionTint());
+      if (this.economy) this.view.setUnrest(this.economy.provinceUnrest);
     }
+  }
+
+  /**
+   * Région d'une province, telle que la carte des régions la montre : son pays d'origine s'il n'est
+   * pas celui qui la tient (un pays annexé ou occupé), sinon sa région historique ; 0 pour le cœur.
+   */
+  regionOfProvince(province: number): number {
+    const data = this.world.data.provinces[province - 1];
+    if (!data) return 0;
+    const holder = this.controllers[province];
+    const origin = data.nation + 1;
+    if (holder !== 0 && holder !== origin) return origin;
+    return data.region !== undefined ? data.region + 1 : 0;
+  }
+
+  /** Couleur de chaque province sur la carte des régions : celle de sa région, ou rien pour le cœur. */
+  private regionTint(): Uint8Array {
+    const { provinces, nations } = this.world.data;
+    const tint = new Uint8Array((provinces.length + 1) * 4);
+    for (let p = 1; p <= provinces.length; p++) {
+      const region = this.regionOfProvince(p);
+      if (region === 0) continue;
+      const hex = nations[region - 1].color;
+      const value = Number.parseInt(hex.slice(1), 16);
+      tint.set([(value >> 16) & 255, (value >> 8) & 255, value & 255, 255], p * 4);
+    }
+    return tint;
   }
 
   /** Pays dont la carte des relations montre les liens : le sélectionné, sinon le joueur. */
@@ -506,6 +544,37 @@ export class GameClient {
     if (!this.canCommand) return;
     this.command({ type: 'answerPeace', nation: this.player, enemy, accept });
     this.dropPopups((popup) => popup.kind === 'peaceOffer' && popup.nations[0] === enemy);
+  }
+
+  /** Impôts et levée d'une de ses régions, en attendant que l'état les confirme. */
+  private policyOrders = new Map<number, { tax: number; levy: number }>();
+
+  regionPolicyOf(origin: number): { tax: number; levy: number } {
+    const order = this.policyOrders.get(origin);
+    if (order) return order;
+    const policy = this.playerStats?.regionPolicies.find((entry) => entry.origin === origin);
+    return policy ? { tax: policy.tax, levy: policy.levy } : { tax: 0, levy: 0 };
+  }
+
+  setRegionPolicy(origin: number, tax: number, levy: number): void {
+    if (!this.canCommand) return;
+    const policy = { tax: Math.max(-2, Math.min(2, tax)), levy: Math.max(-2, Math.min(2, levy)) };
+    this.policyOrders.set(origin, policy);
+    this.command({ type: 'setRegionPolicy', nation: this.player, origin, ...policy });
+    this.onChange();
+  }
+
+  /** Rendre son indépendance à une région : elle renaît en paix, avec une trêve d'un an. */
+  grantIndependence(origin: number): void {
+    if (!this.canCommand) return;
+    this.policyOrders.delete(origin);
+    this.command({ type: 'grantIndependence', nation: this.player, origin });
+    this.dropPopups((popup) => popup.kind === 'demand' && popup.nations[0] === origin);
+  }
+
+  /** Mouvement d'une région du joueur, s'il y en a un (agitation, part du pays, équipement). */
+  playerMovement(origin: number) {
+    return this.playerStats?.movements.find((movement) => movement.origin === origin) ?? null;
   }
 
   /** Répondre à la demande d'une région agitée de son pays. */

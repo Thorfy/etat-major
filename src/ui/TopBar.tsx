@@ -10,13 +10,7 @@ import { compact, formatChange, formatGdp, formatPercent, integer } from './form
 /** Les petites armées en entier, les grandes en abrégé : la largeur reste contenue. */
 const troops = (value: number) => (value < 1e5 ? integer.format(value) : compact.format(value));
 
-export const MAP_MODES: { id: MapMode; label: string }[] = [
-  { id: 'political', label: 'Pays' },
-  { id: 'economic', label: 'Économie' },
-  { id: 'relations', label: 'Relations' },
-  { id: 'interior', label: 'Intérieur' },
-  { id: 'supply', label: 'Ravitaillement' },
-];
+import { MAP_GROUPS, groupOf } from './mapModes.ts';
 
 /** Un indicateur : un libellé court au-dessus d'une valeur, d'une largeur fixe. */
 function Indicator({ label, value, tone = '', title }: { label: string; value: string; tone?: string; title?: string }) {
@@ -133,12 +127,15 @@ export function TopBar({ game, nation, mapMode, onMapMode }: TopBarProps) {
         <Indicators game={game} nation={nation} />
       </div>
       <div class="topbar-group actions">
-        <div class="speeds map-modes" role="group" aria-label="Carte affichée (touches E et R)">
-          {MAP_MODES.map(({ id, label }) => (
-            <button key={id} class={mapMode === id ? 'on' : ''} aria-pressed={mapMode === id} onClick={() => onMapMode(id)}>
-              {label}
-            </button>
-          ))}
+        <div class="speeds map-modes" role="group" aria-label="Cartes (touches P, E, T et R)">
+          {MAP_GROUPS.map((group) => {
+            const on = groupOf(mapMode).id === group.id;
+            return (
+              <button key={group.id} class={on ? 'on' : ''} aria-pressed={on} onClick={() => !on && onMapMode(group.modes[0].id)}>
+                {group.label}
+              </button>
+            );
+          })}
         </div>
         <div class="game-menu">
           <button disabled={game.saving} onClick={() => void game.save('manual')}>

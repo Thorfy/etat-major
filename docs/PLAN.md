@@ -204,6 +204,32 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   fortifications le long de la frontière avec ce pays, dans la file militaire. L'IA ne fortifie
   toujours que ses fronts.
 
+## Réseau automatique, cartes en familles, politique régionale (essai)
+
+- **Réseau commercial automatique.** On ne trace plus d'axes : chaque pays relie ses villes
+  principales, ses départements les plus riches (PIB × développement × usines), chacune au plus
+  riche par le plus court chemin, en reprenant les routes tracées. Un département déjà traversé est
+  sauté (le suivant prend sa place) mais compte comme ville principale. Villes principales : +20 %
+  de PIB et de capacité ; départements traversés : +10 %. 6 villes au départ, +1 par tranche de
+  20 départements tenus (jusqu'à +6), +2 par niveau de recherche sur l'axe Échanges. Chaque pays
+  revérifie son réseau toutes les dix passes d'économie, et le redessine si un département hors
+  réseau dépasse de 10 % la plus petite ville principale, si une ville est perdue, une route coupée,
+  ou si le nombre permis change.
+- **Cartes en familles**, chacune avec ses sous-cartes (touches P, E, T, R ; appuyer encore passe à
+  la sous-carte suivante) :
+  - Pays : Pays, Régions, Stabilité ;
+  - Économie : Richesse, Évolution (une teinte franche par province, du rouge au vert, au lieu des
+    hachures illisibles), Routes (toutes les routes du monde, sur des pays pâlis) ;
+  - Relations ; Ravitaillement.
+- **Carte des régions** : chaque région historique et chaque pays annexé dans sa couleur, un trait
+  net entre deux régions, le cœur des pays pâli, rayé de rouge s'il s'agite.
+- **Fiche d'une région** (clic sur une de ses provinces) : agitation et plafond, part du pays,
+  équipement ; **impôts** et **levée d'hommes** de −2 à +2. Chaque cran d'impôts : ±10 % de PIB et
+  de capacité tirés de la région, ±0,12 au plafond d'agitation ; chaque cran de levée : ±25 %
+  d'hommes, ±0,1 d'agitation ; la stabilité du pays bouge de 0,05 par semaine et par point de part
+  du pays (elle baisse quand on alourdit, remonte quand on allège). **Proposer l'indépendance** :
+  la région renaît en paix, avec une trêve d'un an.
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

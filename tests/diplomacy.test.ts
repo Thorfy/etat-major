@@ -518,3 +518,53 @@ describe('régions historiques', () => {
     expect(sim.movementsOf(A).some((entry) => entry.origin === R)).toBe(true);
   });
 });
+
+describe('politique régionale', () => {
+  /** A annexe B : B devient une région annexée de A. */
+  const annexed = () => {
+    const sim = duel(4e5);
+    sim.declareWars([[A, B]]);
+    for (let t = 0; t < 600 * 60 && sim.isAlive(B); t++) fight(sim, 1, 'attack', 'hold');
+    expect(sim.isAlive(B)).toBe(false);
+    for (let t = 0; t < 600 * 4; t++) sim.step();
+    return sim;
+  };
+
+  it("les impôts rapportent, la levée donne des hommes, et tous deux agitent la région et usent la stabilité", () => {
+    const base = annexed();
+    const taxed = annexed();
+    taxed.setRegionPolicy(A, B, 2, 2);
+    expect(taxed.capacityOf(A)).toBeGreaterThan(base.capacityOf(A));
+    expect(taxed.manpowerMaxOf(A)).toBeGreaterThan(base.manpowerMaxOf(A));
+    for (let t = 0; t < 600 * 10; t++) {
+      base.step();
+      taxed.step();
+    }
+    expect(taxed.stabilityOf(A)).toBeLessThan(base.stabilityOf(A));
+    expect(taxed.movementsOf(A)[0].ceiling).toBeGreaterThan(base.movementsOf(A)[0].ceiling);
+    // Alléger calme la région.
+    const eased = annexed();
+    eased.setRegionPolicy(A, B, -2, -2);
+    for (let t = 0; t < 600 * 10; t++) eased.step();
+    expect(eased.movementsOf(A)[0].ceiling).toBeLessThan(base.movementsOf(A)[0].ceiling);
+  });
+
+  it("se bornent de −2 à +2, et se sauvegardent", () => {
+    const sim = annexed();
+    sim.setRegionPolicy(A, B, 7, -9);
+    expect(sim.regionPolicyOf(A, B)).toEqual({ tax: 2, levy: -2 });
+    const save = sim.save();
+    const resumed = new Simulation({ ...config((x) => (x < 100 ? A : B), (n) => (n === A ? 2e6 : 4e5), 2), saved: { owners: save.owners, supply: save.supply, forts: save.forts, state: JSON.parse(JSON.stringify(save.state)) } });
+    expect(resumed.regionPolicyOf(A, B)).toEqual({ tax: 2, levy: -2 });
+    expect(resumed.stateHash()).toBe(sim.stateHash());
+  });
+
+  it("rendent son indépendance à une région, sans combat", () => {
+    const sim = annexed();
+    sim.grantIndependence(A, B);
+    expect(sim.isAlive(B)).toBe(true);
+    expect(sim.owners[40 * W + 190]).toBe(B);
+    expect(sim.fronts.some((front) => front.a === B || front.b === B)).toBe(false);
+    expect(sim.hasTruce(A, B)).toBe(true);
+  });
+});

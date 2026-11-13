@@ -5,6 +5,7 @@ import { type SaveSlot, readSave } from './game/saves.ts';
 import { loadWorld } from './map/loadWorld.ts';
 import { provinceWealth } from './game/economy.ts';
 import { type MapMode, MapView } from './render/MapView.ts';
+import { nextModeForKey } from './ui/mapModes.ts';
 import { App, type UiState } from './ui/App.tsx';
 
 const ui = document.getElementById('ui')!;
@@ -127,10 +128,9 @@ async function start(): Promise<void> {
     const { target } = event;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
     const key = event.key.toLowerCase();
-    const modeKeys: Record<string, MapMode> = { e: 'economic', r: 'supply', t: 'relations', i: 'interior' };
-    if (modeKeys[key] && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const mode = modeKeys[key];
-      setMapMode(state.mapMode === mode ? 'political' : mode);
+    const next = event.ctrlKey || event.metaKey || event.altKey ? null : nextModeForKey(state.mapMode, key);
+    if (next) {
+      setMapMode(next);
       return;
     }
     const game = state.game;

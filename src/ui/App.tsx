@@ -7,8 +7,10 @@ import { TERRAIN_NAMES } from '../map/terrain.ts';
 import type { CellInfo, MapMode, MapTool, MapView } from '../render/MapView.ts';
 import type { BuildKind, SimEvent } from '../sim/protocol.ts';
 import { Art, Blason, landscapeOf } from './Art.tsx';
+import { RegionCard } from './RegionCard.tsx';
 import { SidePanel } from './SidePanel.tsx';
-import { MAP_MODES, TopBar } from './TopBar.tsx';
+import { TopBar } from './TopBar.tsx';
+import { MAP_GROUPS, groupOf } from './mapModes.ts';
 import { SetupPanel } from './SetupPanel.tsx';
 import { describeEvent, eventKey, eventNations } from '../game/events.ts';
 import { formatDuration, formatShortDate } from '../game/time.ts';
@@ -262,8 +264,44 @@ function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) 
         <span>Rural</span>
         <span>Industriel</span>
         <small>PIB par km², usines comprises · goutte : pétrole · carré : acier</small>
+      </div>
+    );
+  }
+  if (mode === 'growth') {
+    return (
+      <div class="legend">
+        <div class="ramp growth" role="img" aria-label="Du recul à la croissance depuis le début de la partie" />
+        <span>En recul</span>
+        <span>En croissance</span>
+        <small>Depuis le début de la partie : les combats et l'usure de la guerre font reculer, la paix fait grandir.</small>
+      </div>
+    );
+  }
+  if (mode === 'routes') {
+    return (
+      <div class="legend relations">
+        <span>
+          <i class="swatch" style={{ background: 'rgb(247, 236, 205)' }} /> Tes routes
+        </span>
+        <span>
+          <i class="swatch" style={{ background: 'rgb(168, 216, 190)' }} /> Tes partenaires
+        </span>
+        <span>
+          <i class="swatch" style={{ background: 'rgb(204, 41, 26)' }} /> Tes ennemis
+        </span>
+        <span>
+          <i class="swatch" style={{ background: 'rgb(196, 182, 150)' }} /> Les autres pays
+        </span>
+        <small>Toutes les routes commerciales du monde ; plus larges là où plusieurs se rejoignent, pointillées en mer.</small>
+      </div>
+    );
+  }
+  if (mode === 'regions') {
+    return (
+      <div class="legend">
         <small>
-          <i class="swatch hatch up" /> en croissance · <i class="swatch hatch down" /> en recul depuis le départ
+          Chaque région historique et chaque pays annexé dans sa couleur ; le cœur des pays reste pâle. Rayée de rouge :
+          une région qui s'agite. Clique une de tes régions pour lui proposer l'indépendance, ou régler impôts et levées.
         </small>
       </div>
     );
@@ -293,7 +331,7 @@ function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) 
       </div>
     );
   }
-  if (mode === 'interior') {
+  if (mode === 'stability') {
     return (
       <div class="legend">
         <div class="ramp interior" role="img" aria-label="De la stabilité au pays à bout" />
@@ -318,17 +356,33 @@ function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) 
   return null;
 }
 
+/** Les sous-cartes de la famille affichée, s'il y en a plusieurs. */
+function MapSubModes({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: MapMode): void }) {
+  const group = groupOf(mode);
+  if (group.modes.length < 2) return null;
+  return (
+    <div class="speeds sub-modes" role="group" aria-label={`${group.label} : sous-cartes (touche ${group.key.toUpperCase()})`}>
+      {group.modes.map(({ id, label }) => (
+        <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Choix de la carte avant la partie ; en partie, il passe dans la barre du haut. */
 function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: MapMode): void }) {
   return (
     <div class="panel map-mode">
-      <div class="speeds" role="group" aria-label="Carte affichée (touches E, T, I et R)">
-        {MAP_MODES.map(({ id, label }) => (
-          <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
-            {label}
+      <div class="speeds" role="group" aria-label="Cartes (touches P, E, T et R)">
+        {MAP_GROUPS.map((group) => (
+          <button key={group.id} class={groupOf(mode).id === group.id ? 'on' : ''} onClick={() => onMapMode(group.modes[0].id)}>
+            {group.label}
           </button>
         ))}
       </div>
+      <MapSubModes mode={mode} onMapMode={onMapMode} />
       <MapLegend mode={mode} />
     </div>
   );
@@ -496,11 +550,10 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game ? (
         <>
           <TopBar game={game} nation={nations[game.player - 1]} mapMode={state.mapMode} onMapMode={onMapMode} />
-          {state.mapMode !== 'political' && (
-            <div class="panel map-legend">
-              <MapLegend mode={state.mapMode} subject={game.nameOf(game.relationSubject)} />
-            </div>
-          )}
+          <div class="panel map-legend">
+            <MapSubModes mode={state.mapMode} onMapMode={onMapMode} />
+            <MapLegend mode={state.mapMode} subject={game.nameOf(game.relationSubject)} />
+          </div>
           <SidePanel game={game} nations={nations} view={view} tool={state.tool} />
         </>
       ) : (
@@ -528,8 +581,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game && <Journal game={game} nameOf={nameOf} />}
       <div class="panel hints">
         {game
-          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, T, I, R : cartes'
-          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, T, I, R : cartes · F3 : mesures'}
+          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · P, E, T, R : cartes'
+          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · P, E, T, R : cartes · F3 : mesures'}
       </div>
       {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">
@@ -542,6 +595,9 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
             {holder.name}
           </h2>
           <p class="province">{selected.name}</p>
+          {owner === game.player && game.regionOfProvince(provinceId) !== 0 && (
+            <RegionCard key={game.regionOfProvince(provinceId)} game={game} origin={game.regionOfProvince(provinceId)} nameOf={nameOf} />
+          )}
           <dl>
             <dt>PIB</dt>
             <dd>{economy ? formatGdp(game.nationEconomy(owner).output) : formatGdp(holder.gdpMusd)}</dd>

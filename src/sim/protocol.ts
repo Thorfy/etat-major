@@ -54,6 +54,16 @@ export interface TradeAxis {
    * provinces (l'accord rapporte déjà), ni compter parmi les axes du pays.
    */
   partner?: number;
+  /** Route du réseau automatique (villes principales). */
+  auto?: boolean;
+}
+
+/** Réseau automatique d'un pays : ses villes principales, reliées, et celles que le réseau traversait déjà. */
+export interface NetworkState {
+  hubs: number[];
+  principal: number[];
+  /** Villes principales permises au dernier calcul. */
+  capacity: number;
 }
 
 export interface AxisSnapshot {
@@ -70,6 +80,8 @@ export interface AxisSnapshot {
   held: boolean[];
   /** Route d'un accord commercial : le partenaire relié (0 : un axe ordinaire). */
   partner: number;
+  /** Route du réseau automatique. */
+  auto: boolean;
   /** Tronçons pris par la mer : i relie le point i au point i + 1. */
   seaLinks: number[];
 }
@@ -133,6 +145,10 @@ export type SimCommand =
   | { type: 'answerPeace'; nation: number; enemy: number; accept: boolean }
   /** Répondre à la demande d'une région agitée. */
   | { type: 'answerDemand'; nation: number; origin: number; accept: boolean }
+  /** Impôts et levée d'hommes d'une région (−2 à +2 chacun). */
+  | { type: 'setRegionPolicy'; nation: number; origin: number; tax: number; levy: number }
+  /** Rendre son indépendance à une région, sans attendre qu'elle la demande. */
+  | { type: 'grantIndependence'; nation: number; origin: number }
   | { type: 'proposeAlliance'; nation: number; other: number }
   | { type: 'breakAlliance'; nation: number; other: number }
   | { type: 'proposeTradeDeal'; nation: number; other: number }
@@ -208,6 +224,8 @@ export interface NationSnapshot {
   doctrine: number[];
   /** Joueur seulement : terminus de son réseau commercial (axes en chantier compris). */
   axisTerminals: number;
+  /** Joueur seulement : réseau automatique, et d'où vient le nombre de ses villes principales. */
+  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number } | null;
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
   doctrineTarget: number[];
   research: number[];
@@ -224,6 +242,8 @@ export interface NationSnapshot {
   }[];
   /** Part de l'armée gardée pour les contre-attaques. */
   counterShare: number;
+  /** Joueur seulement : impôts et levée d'hommes de ses régions. */
+  regionPolicies: { origin: number; tax: number; levy: number }[];
   /** Secteurs prioritaires (joueur seulement). */
   priorityZones: PriorityZone[];
   /** Agressivité : au-delà d'un seuil, les voisins se coalisent. */
@@ -333,6 +353,8 @@ export type SimEvent =
   | { type: 'axisRestored'; tick: number; nation: number }
   /** Axe refusé : il porterait le réseau au-delà de ses terminus. */
   | { type: 'axisRefused'; tick: number; nation: number; terminals: number }
+  /** Le réseau automatique du joueur change de villes principales. */
+  | { type: 'networkChanged'; tick: number; nation: number; added: number[]; removed: number[] }
   | { type: 'researchDone'; tick: number; nation: number; axis: number; level: number }
   /** La doctrine du joueur change de nom (−1 : équilibrée). */
   | { type: 'doctrineNamed'; tick: number; nation: number; archetype: number };
@@ -518,10 +540,15 @@ export interface SimSaveState {
   tradeFactor?: number[];
   coastSeas?: number[];
   axes?: TradeAxis[];
+  /** Réseaux automatiques, par nation (indice = nation). */
+  networks?: NetworkState[];
+  networkPhase?: number;
   nextAxisId?: number;
   /** Doctrines (jalon 10) : atteinte, visée, et niveaux de recherche, cinq axes par nation. */
   doctrine?: number[];
   doctrineTarget?: number[];
   research?: number[];
   movements: MovementState[];
+  /** Politiques régionales : pays, région, impôts, levée. */
+  regionPolicies?: [number, number, number, number][];
 }

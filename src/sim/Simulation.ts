@@ -237,6 +237,19 @@ import {
   AXIS_MAX_PER_PROVINCE,
   MAX_AXES,
   MAX_AXIS_TERMINALS,
+  REGION_LEVY_STEP,
+  REGION_LEVY_UNREST,
+  REGION_POLICY_MAX,
+  REGION_POLICY_STABILITY,
+  REGION_TAX_STEP,
+  REGION_TAX_UNREST,
+  AUTO_HUBS_BASE,
+  AUTO_HUBS_PER_PROVINCES,
+  AUTO_HUBS_PER_RESEARCH,
+  AUTO_HUBS_TERRITORY_MAX,
+  HUB_BONUS,
+  HUB_SWAP_MARGIN,
+  NETWORK_CHECK_GROUPS,
   MAX_AXIS_CELLS,
   AXIS_COST_BASE,
   AXIS_COST_PER_CELL,
@@ -267,6 +280,7 @@ import type {
   SimSnapshot,
   Stance,
   TradeAxis,
+  NetworkState,
   AxisSnapshot,
 } from './protocol.ts';
 import { isMilitaryBuild } from './protocol.ts';
@@ -323,6 +337,8 @@ export interface SimConfig {
   logistics?: boolean;
   /** Faux : le commerce ne compte pas (accès toujours entier), pour les tests qui l'isolent. */
   trade?: boolean;
+  /** Faux : pas de réseau automatique, les axes se tracent à la main (tests des axes). */
+  autoTrade?: boolean;
   /** Faux : les demandes des régions du joueur ne sont plus espacées, pour les tests de l'agitation. */
   demandPacing?: boolean;
   /** Faux : l'IA garde une doctrine au centre, pour les tests qui ne mesurent pas les doctrines. */
@@ -551,6 +567,15 @@ export class Simulation {
   private coastSeas: Uint32Array;
   private axes: TradeAxis[] = [];
   private nextAxisId = 1;
+  /** Réseau commercial automatique de chaque nation. */
+  private networks: NetworkState[] = [];
+  private readonly autoTrade: boolean;
+  private networkPhase = 0;
+  /** Politiques régionales, par (pays × stride + région) : impôts et levée, de −2 à +2. */
+  private regionPolicies = new Map<number, { tax: number; levy: number }>();
+  /** Par province : niveaux d'impôts et de levée qui s'y appliquent (ceux de sa région chez qui la tient). */
+  private provinceTax: Float64Array = new Float64Array(0);
+  private provinceLevy: Float64Array = new Float64Array(0);
   /** Bonus des axes actifs par province, et leur nombre. */
   private readonly axisBonus: Float64Array;
   private readonly axisCount: Uint8Array;
@@ -639,6 +664,8 @@ export class Simulation {
     this.aiEnabled = config.ai ?? true;
     this.logisticsEnabled = config.logistics ?? true;
     this.tradeEnabled = config.trade ?? true;
+    // Sans commerce, pas de réseau ; sinon il est automatique, sauf demande contraire.
+    this.autoTrade = this.tradeEnabled && (config.autoTrade ?? true);
     this.demandPacing = config.demandPacing ?? true;
     this.rngState = config.seed >>> 0 || 1;
     this.provinces = config.provinces;
@@ -1075,6 +1102,12 @@ export class Simulation {
         break;
       case 'answerDemand':
         this.answerDemand(command.nation, command.origin, command.accept);
+        break;
+      case 'setRegionPolicy':
+        this.setRegionPolicy(command.nation, command.origin, command.tax, command.levy);
+        break;
+      case 'grantIndependence':
+        this.grantIndependence(command.nation, command.origin);
         break;
       case 'proposeAlliance':
         this.proposeAlliance(command.nation, command.other);
@@ -2010,6 +2043,7 @@ export class Simulation {
    * l'agitation maximale, elle se soulève, avec les régions agitées qui la touchent.
    */
   private updateMovements(): void {
+    this.refreshProvincePolicies();
     // Revendications : valeur d'origine, par (pays qui tient, pays disparu ou région en sommeil).
     const claims = new Map<number, number>();
     // Équipement, pondéré par la valeur d'origine de chaque province de la région.
@@ -2077,8 +2111,10 @@ export class Simulation {
             UNREST_INSTABILITY * instability +
             (atWar[parent] ? UNREST_WAR : 0) +
             UNREST_DEFEAT * lost +
-            REFUSAL_CEILING * (movement.refused ?? 0)),
+            REFUSAL_CEILING * (movement.refused ?? 0) +
+            this.policyUnrest(parent, movement.origin)),
       );
+      movement.ceiling = Math.max(0, movement.ceiling);
       // Vers le plafond, à vitesse fixe ; des investissements en chantier l'empêchent de monter.
       const gap = movement.ceiling - movement.unrest;
       let step = Math.sign(gap) * Math.min(Math.abs(gap), UNREST_SPEED_PER_WEEK * weeks);
@@ -2132,6 +2168,84 @@ export class Simulation {
     const small = movement.share < AI_INDEPENDENCE_MAX_SHARE;
     const accept = kind === 'investment' ? !atWar : small && (!historic || atWar);
     this.resolveDemand(movement, kind, accept);
+  }
+
+  // -------------------------------------------------------------------------
+  // Politique régionale : impôts, levées, indépendance accordée
+  // -------------------------------------------------------------------------
+
+  regionPolicyOf(nation: number, origin: number): { tax: number; levy: number } {
+    return this.regionPolicies.get(nation * this.stride + origin) ?? { tax: 0, levy: 0 };
+  }
+
+  setRegionPolicy(nation: number, origin: number, tax: number, levy: number): void {
+    if (nation <= 0 || nation >= this.stride || origin <= 0 || origin >= this.stride || nation === origin) return;
+    if (!Number.isFinite(tax) || !Number.isFinite(levy)) return;
+    const clamp = (value: number) => Math.max(-REGION_POLICY_MAX, Math.min(REGION_POLICY_MAX, Math.round(value)));
+    const policy = { tax: clamp(tax), levy: clamp(levy) };
+    const key = nation * this.stride + origin;
+    if (policy.tax === 0 && policy.levy === 0) this.regionPolicies.delete(key);
+    else this.regionPolicies.set(key, policy);
+    this.refreshProvincePolicies();
+    this.recomputeCapacity();
+    this.recomputeManpower();
+  }
+
+  /** Niveaux d'impôts et de levée de chaque province, d'après la région qu'elle forme chez qui la tient. */
+  private refreshProvincePolicies(): void {
+    const count = this.controller.length;
+    if (this.provinceTax.length !== count) {
+      this.provinceTax = new Float64Array(count);
+      this.provinceLevy = new Float64Array(count);
+    } else {
+      this.provinceTax.fill(0);
+      this.provinceLevy.fill(0);
+    }
+    if (this.regionPolicies.size === 0) return;
+    for (let p = 1; p < count; p++) {
+      const holder = this.controller[p];
+      if (holder === 0) continue;
+      const origin = this.claimantOf(p, holder);
+      if (origin === 0) continue;
+      const policy = this.regionPolicies.get(holder * this.stride + origin);
+      if (!policy) continue;
+      this.provinceTax[p] = policy.tax;
+      this.provinceLevy[p] = policy.levy;
+    }
+  }
+
+  private policyUnrest(nation: number, origin: number): number {
+    const { tax, levy } = this.regionPolicyOf(nation, origin);
+    return REGION_TAX_UNREST * tax + REGION_LEVY_UNREST * levy;
+  }
+
+  /** Poids des impôts et levées alourdis (ou allégés) d'un pays : la part de chaque région × ses niveaux. */
+  private policyPressure(nation: number): number {
+    if (this.regionPolicies.size === 0) return 0;
+    let pressure = 0;
+    for (const movement of this.movements) {
+      if (movement.parent !== nation) continue;
+      const { tax, levy } = this.regionPolicyOf(nation, movement.origin);
+      pressure += movement.share * (tax + levy);
+    }
+    return pressure;
+  }
+
+  /** Rendre son indépendance à une région : elle renaît en paix, avec une trêve. */
+  grantIndependence(nation: number, origin: number): void {
+    if (nation <= 0 || nation >= this.stride || origin <= 0 || origin >= this.stride || nation === origin) return;
+    if (!this.alive[nation] || this.alive[origin]) return;
+    const movement = this.movements.find((entry) => entry.parent === nation && entry.origin === origin);
+    if (movement) {
+      this.movements = this.movements.filter((entry) => entry !== movement);
+    } else {
+      let held = false;
+      for (let p = 1; p < this.controller.length && !held; p++) held = this.controller[p] === nation && this.claimantOf(p, nation) === origin;
+      if (!held) return;
+    }
+    this.regionPolicies.delete(nation * this.stride + origin);
+    this.revive(origin, nation, true);
+    this.refreshProvincePolicies();
   }
 
   answerDemand(nation: number, origin: number, accept: boolean): void {
@@ -2438,7 +2552,8 @@ export class Simulation {
       const value = this.provinceValue[p];
       const home = this.provinceHome[p];
       const holder = this.controller[p];
-      const developed = development[p] * (1 + FACTORY_BONUS * this.factories[p]) * (1 + this.axisBonus[p] * this.mods[holder].axisBonus);
+      const taxed = holder === home && this.provinceTax.length > p ? 1 + REGION_TAX_STEP * this.provinceTax[p] : 1;
+      const developed = development[p] * (1 + FACTORY_BONUS * this.factories[p]) * (1 + this.axisBonus[p] * this.mods[holder].axisBonus) * taxed;
       this.totalHome[home] += value;
       if (holder === home) {
         this.heldHome[home] += value;
@@ -2468,7 +2583,8 @@ export class Simulation {
     manpowerMax.fill(0);
     for (let p = 1; p < this.controller.length; p++) {
       const holder = this.controller[p];
-      const recruited = 1 + RECRUITMENT_BONUS * this.buildings.recruitment[p];
+      const levied = holder === this.provinceHome[p] && this.provinceLevy.length > p ? 1 + REGION_LEVY_STEP * this.provinceLevy[p] : 1;
+      const recruited = (1 + RECRUITMENT_BONUS * this.buildings.recruitment[p]) * levied;
       manpowerMax[holder] += this.provinceManpower[p] * recruited * (holder === this.provinceHome[p] ? 1 : OCCUPIED_MANPOWER);
     }
     for (let n = 1; n < this.stride; n++) manpowerMax[n] *= this.mods[n].manpower;
@@ -2952,6 +3068,7 @@ export class Simulation {
 
   buildAxisBetween(nation: number, from: number, to: number): number {
     if (nation <= 0 || nation >= this.stride || !this.alive[nation]) return 0;
+    if (this.autoTrade) return 0;
     if (this.axesOf(nation) >= MAX_AXES) return 0;
     const plan = this.planAxis(nation, from, to);
     if (!plan) return 0;
@@ -2998,7 +3115,7 @@ export class Simulation {
       if (active === axis.active) continue;
       axis.active = active;
       changed = true;
-      if (axis.partner) continue;
+      if (axis.partner || axis.auto) continue;
       this.pendingEvents.push(
         active ? { type: 'axisRestored', tick: this.tick, nation: axis.nation } : { type: 'axisCut', tick: this.tick, nation: axis.nation, by: Math.max(0, by) },
       );
@@ -3011,12 +3128,138 @@ export class Simulation {
 
   private recomputeAxisBonus(): void {
     this.axisCount.fill(0);
+    if (this.autoTrade) {
+      // Un département traversé par une route active gagne AXIS_BONUS ; une ville principale, HUB_BONUS.
+      for (const axis of this.axes) {
+        if (!axis.active || axis.partner) continue;
+        for (const p of axis.provinces) this.axisCount[p] = 1;
+      }
+      for (const network of this.networks) {
+        for (const p of network?.principal ?? []) if (this.axisCount[p] > 0) this.axisCount[p] = 2;
+      }
+      for (let p = 1; p < this.axisBonus.length; p++) this.axisBonus[p] = this.axisCount[p] === 2 ? HUB_BONUS : this.axisCount[p] === 1 ? AXIS_BONUS : 0;
+      this.capacityDirty = true;
+      return;
+    }
     for (const axis of this.axes) {
       if (!axis.active || axis.partner) continue;
       for (const p of axis.provinces) if (this.axisCount[p] < 255) this.axisCount[p]++;
     }
     for (let p = 1; p < this.axisBonus.length; p++) this.axisBonus[p] = AXIS_BONUS * Math.min(AXIS_MAX_PER_PROVINCE, this.axisCount[p]);
     this.capacityDirty = true;
+  }
+
+  // -------------------------------------------------------------------------
+  // Réseau commercial automatique
+  // -------------------------------------------------------------------------
+
+  /** Richesse d'un département pour le choix des villes principales (sans le bonus du réseau). */
+  private hubWealth(p: number): number {
+    return this.provinceGdp[p] * this.development[p] * (1 + FACTORY_BONUS * this.factories[p]);
+  }
+
+  /** Villes principales permises : la base, le territoire, la recherche (axe Échanges). */
+  hubCapacityOf(nation: number): { base: number; territory: number; research: number; total: number } {
+    let held = 0;
+    for (let p = 1; p < this.controller.length; p++) if (this.controller[p] === nation && this.provinceHome[p] === nation) held++;
+    const territory = Math.min(AUTO_HUBS_TERRITORY_MAX, Math.floor(held / AUTO_HUBS_PER_PROVINCES));
+    const research = AUTO_HUBS_PER_RESEARCH * this.research[nation * DOCTRINE_AXIS_COUNT + 3];
+    return { base: AUTO_HUBS_BASE, territory, research, total: AUTO_HUBS_BASE + territory + research };
+  }
+
+  networkOf(nation: number): NetworkState {
+    return this.networks[nation] ?? { hubs: [], principal: [], capacity: 0 };
+  }
+
+  /** Faut-il redessiner le réseau : capacité changée, ville perdue, route coupée, ou un département qui détrône une ville principale. */
+  private networkNeedsRebuild(nation: number): boolean {
+    const network = this.networks[nation];
+    if (!network) return true;
+    if (network.capacity !== this.hubCapacityOf(nation).total) return true;
+    if (network.principal.some((p) => this.controller[p] !== nation)) return true;
+    const own = this.axes.filter((axis) => axis.auto && axis.nation === nation);
+    if (own.some((axis) => !axis.active)) return true;
+    if (network.hubs.length === 0) return false;
+    const onNetwork = new Set(own.flatMap((axis) => axis.provinces));
+    for (const p of network.hubs) onNetwork.add(p);
+    const weakest = Math.min(...network.hubs.map((p) => this.hubWealth(p)));
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] !== nation || this.provinceHome[p] !== nation || onNetwork.has(p)) continue;
+      if (this.hubWealth(p) > weakest * HUB_SWAP_MARGIN) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Redessine le réseau d'une nation : du département le plus riche au moins riche, chacun relié au
+   * plus riche par le plus court chemin (qui reprend volontiers les routes tracées). Un département
+   * déjà traversé est sauté, mais compte comme ville principale.
+   */
+  private rebuildNetwork(nation: number): void {
+    const before = this.networks[nation]?.hubs ?? [];
+    this.axes = this.axes.filter((axis) => !(axis.auto && axis.nation === nation));
+    const capacity = this.hubCapacityOf(nation).total;
+    const hubs: number[] = [];
+    const principal: number[] = [];
+    if (this.alive[nation]) {
+      const candidates: number[] = [];
+      for (let p = 1; p < this.controller.length; p++) if (this.controller[p] === nation && this.provinceHome[p] === nation) candidates.push(p);
+      candidates.sort((a, b) => this.hubWealth(b) - this.hubWealth(a) || a - b);
+      const onNetwork = new Set<number>();
+      const root = candidates[0];
+      if (root !== undefined) {
+        hubs.push(root);
+        principal.push(root);
+        onNetwork.add(root);
+      }
+      for (let i = 1; i < candidates.length && hubs.length < capacity; i++) {
+        const p = candidates[i];
+        if (onNetwork.has(p)) {
+          principal.push(p);
+          continue;
+        }
+        const plan = this.planAxis(nation, p, root);
+        if (!plan) continue;
+        this.axes.push({ id: this.nextAxisId++, nation, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, seaLinks: plan.seaLinks, auto: true });
+        for (const q of plan.path) onNetwork.add(q);
+        hubs.push(p);
+        principal.push(p);
+      }
+    }
+    this.networks[nation] = { hubs, principal, capacity };
+    this.axesVersion++;
+    if (nation === this.player) {
+      const added = hubs.filter((p) => !before.includes(p));
+      const removed = before.filter((p) => !hubs.includes(p));
+      if (before.length > 0 && (added.length > 0 || removed.length > 0)) {
+        this.pendingEvents.push({ type: 'networkChanged', tick: this.tick, nation, added, removed });
+      }
+    }
+  }
+
+  /** Une passe d'économie sur NETWORK_CHECK_GROUPS : chaque pays vérifie son réseau à tour de rôle. */
+  private updateNetworks(): void {
+    if (!this.autoTrade) return;
+    const phase = this.networkPhase;
+    this.networkPhase = (phase + 1) % NETWORK_CHECK_GROUPS;
+    let changed = false;
+    for (let n = 1 + phase; n < this.stride; n += NETWORK_CHECK_GROUPS) {
+      if (!this.alive[n]) {
+        if (this.networks[n] && this.axes.some((axis) => axis.auto && axis.nation === n)) {
+          this.axes = this.axes.filter((axis) => !(axis.auto && axis.nation === n));
+          this.networks[n] = { hubs: [], principal: [], capacity: 0 };
+          changed = true;
+        }
+        continue;
+      }
+      if (!this.networkNeedsRebuild(n)) continue;
+      this.rebuildNetwork(n);
+      changed = true;
+    }
+    if (changed) {
+      this.axesVersion++;
+      this.recomputeAxisBonus();
+    }
   }
 
   /** L'IA trace, en paix, un axe entre deux de ses provinces riches et éloignées. */
@@ -3089,6 +3332,7 @@ export class Simulation {
 
     this.updateResources();
     this.refreshAxes();
+    this.updateNetworks();
     this.recomputeCapacity();
     this.recomputeManpower();
     // Niveau moyen des services publics sur le sol national tenu, pondéré par la valeur.
@@ -3107,6 +3351,9 @@ export class Simulation {
       // Le réservoir se reconstitue lentement.
       this.manpower[n] = Math.min(this.manpowerMax[n], this.manpower[n] + this.manpowerMax[n] * MANPOWER_REGEN_PER_MINUTE * minutes);
       this.updateStability(n, atWar[n] === 1, minutes, services[n]);
+      // Alourdir impôts et levées use la stabilité ; les alléger la rétablit.
+      const pressure = this.policyPressure(n);
+      if (pressure !== 0) this.stability[n] = Math.max(0, Math.min(1, this.stability[n] - REGION_POLICY_STABILITY * pressure * minutes));
       this.advanceConstruction(n, minutes);
     }
   }
@@ -3617,7 +3864,7 @@ export class Simulation {
           continue;
         }
       }
-      if (!atWar[n] && this.axesOf(n) < Math.min(AI_MAX_AXES * 2, AI_PROFILES[this.profile[n]].maxAxes) && this.random() < AI_AXIS_CHANCE && this.aiPlanAxis(n, provinces)) continue;
+      if (!this.autoTrade && !atWar[n] && this.axesOf(n) < Math.min(AI_MAX_AXES * 2, AI_PROFILES[this.profile[n]].maxAxes) && this.random() < AI_AXIS_CHANCE && this.aiPlanAxis(n, provinces)) continue;
       // Une usine dans l'une des provinces les plus riches, sinon de l'infrastructure en territoire conquis.
       const rich = provinces
         .filter((p) => this.canBuild(n, p, 'factory', 0))
@@ -4638,6 +4885,14 @@ export class Simulation {
             : [],
         doctrine: this.doctrineOf(id),
         axisTerminals: id === this.player ? this.axisTerminals(id) : 0,
+        network:
+          id === this.player && this.autoTrade
+            ? (() => {
+                const { base, territory, research, total } = this.hubCapacityOf(id);
+                const network = this.networkOf(id);
+                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research };
+              })()
+            : null,
         doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
         research: id === this.player ? Array.from(this.research.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
         movements: this.movements
@@ -4653,6 +4908,12 @@ export class Simulation {
             ceiling: ceiling ?? 0,
           })),
         counterShare: this.counterShare[id],
+        regionPolicies:
+          id === this.player
+            ? [...this.regionPolicies]
+                .filter(([key]) => Math.floor(key / this.stride) === id)
+                .map(([key, policy]) => ({ origin: key % this.stride, tax: policy.tax, levy: policy.levy }))
+            : [],
         priorityZones: id === this.player ? this.priorityZones[id].map((zone) => ({ ...zone })) : [],
         aggression: this.aggression[id],
         profile: this.profile[id],
@@ -4704,6 +4965,7 @@ export class Simulation {
         path: axis.provinces.slice(),
         held: axis.provinces.map((p) => this.axisAllows(axis.nation, this.controller[p])),
         partner: axis.partner ?? 0,
+        auto: axis.auto === true,
         seaLinks: this.seaLinksOf(axis),
       };
     });
@@ -4799,10 +5061,16 @@ export class Simulation {
         coastSeas: Array.from(this.coastSeas),
         axes: this.axes.map((axis) => ({ ...axis, provinces: axis.provinces.slice() })),
         nextAxisId: this.nextAxisId,
+        networkPhase: this.networkPhase,
+        networks: Array.from({ length: this.stride }, (_, n) => {
+          const network = this.networks[n];
+          return network ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity } : { hubs: [], principal: [], capacity: -1 };
+        }),
         doctrine: Array.from(this.doctrine),
         doctrineTarget: Array.from(this.doctrineTarget),
         research: Array.from(this.research),
         movements: this.movements.map((movement) => ({ ...movement })),
+        regionPolicies: [...this.regionPolicies].map(([key, policy]) => [Math.floor(key / this.stride), key % this.stride, policy.tax, policy.levy] as [number, number, number, number]),
       },
     };
   }
@@ -4896,6 +5164,12 @@ export class Simulation {
     if (legacy.coastSeas) this.coastSeas = Uint32Array.from(legacy.coastSeas);
     this.axes = (legacy.axes ?? []).map((axis) => ({ ...axis, provinces: axis.provinces.slice() }));
     this.nextAxisId = legacy.nextAxisId ?? 1;
+    // Un réseau jamais calculé (capacité -1) le sera à son tour.
+    this.networks = [];
+    (legacy.networks ?? []).forEach((network, n) => {
+      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity };
+    });
+    this.networkPhase = legacy.networkPhase ?? 0;
     if (this.tradeDeals.length > 0 && !this.axes.some((axis) => axis.partner)) {
       for (const [a, b] of this.tradeDeals) this.buildDealRoute(a, b);
     }
@@ -4906,7 +5180,9 @@ export class Simulation {
     if (legacy.research) this.research.set(legacy.research.slice(0, this.research.length));
     for (let n = 1; n < this.stride; n++) this.mods[n] = doctrineModifiers(this.doctrineOf(n));
     if (this.player) this.playerArchetype = archetypeOf(this.doctrineOf(this.player));
+    for (const [nation, origin, tax, levy] of legacy.regionPolicies ?? []) this.regionPolicies.set(nation * this.stride + origin, { tax, levy });
     this.movements = (legacy.movements ?? []).map((movement) => ({ ...movement, invested: movement.invested ?? 0, refused: movement.refused ?? 0, care: movement.care ?? 0, ceiling: movement.ceiling ?? 0 }));
+    this.refreshProvincePolicies();
     if (saved.forts) {
       this.forts.set(saved.forts);
       for (let k = 0; k < this.landCells.length; k++) {
@@ -4982,6 +5258,9 @@ export class Simulation {
     for (const [a, b] of this.embargoes) mix(a * 65536 + b + 7);
     for (const axis of this.axes) mix(axis.id * 1024 + axis.nation * 2 + (axis.active ? 1 : 0));
     for (let n = 1; n < this.stride; n++) mix(Math.round(this.tradeFactor[n] * 1e6));
+    mix(this.networkPhase);
+    for (const [key, policy] of this.regionPolicies) mix(key * 25 + (policy.tax + 2) * 5 + (policy.levy + 2));
+    for (const network of this.networks) if (network) mix(network.hubs.length * 4096 + network.principal.length);
     for (let i = DOCTRINE_AXIS_COUNT; i < this.doctrine.length; i++) {
       mix(Math.round(this.doctrine[i] * 1e6) + this.research[i]);
       mix(Math.round(this.doctrineTarget[i] * 1e6));

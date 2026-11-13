@@ -18,9 +18,9 @@ const MAX_DPR = 2;
 export type MapTool = 'offensive' | 'fort' | 'priority' | 'axis';
 
 /** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
-export type MapMode = 'political' | 'economic' | 'supply' | 'relations' | 'interior';
+export type MapMode = 'political' | 'regions' | 'stability' | 'economic' | 'growth' | 'routes' | 'relations' | 'supply';
 
-const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2, relations: 3, interior: 4 };
+const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2, relations: 3, stability: 4, regions: 5, growth: 6, routes: 7 };
 
 export interface CellInfo {
   province: number;
@@ -146,19 +146,25 @@ export class MapView {
   /** Richesse de chaque province, pour la carte économique. */
   setEconomy(wealth: Uint8Array, trend?: Uint8Array): void {
     this.renderer.updateEconomy(wealth, trend);
-    if (this.mode === 'economic') this.dirty = true;
+    if (this.mode === 'economic' || this.mode === 'growth') this.dirty = true;
+  }
+
+  /** Couleur de la région de chaque province, pour la carte des régions. */
+  setProvinceTint(tint: Uint8Array): void {
+    this.renderer.setProvinceTint(tint);
+    if (this.mode === 'regions') this.dirty = true;
   }
 
   /** Teinte de chaque nation, pour les cartes des relations et de l'intérieur. */
   setNationTint(tint: Uint8Array): void {
     this.renderer.setNationTint(tint);
-    if (this.mode === 'relations' || this.mode === 'interior') this.dirty = true;
+    if (this.mode === 'relations' || this.mode === 'stability') this.dirty = true;
   }
 
   /** Agitation de chaque province, pour la carte de l'intérieur. */
   setUnrest(unrest: Uint8Array): void {
     this.renderer.setUnrest(unrest);
-    if (this.mode === 'interior') this.dirty = true;
+    if (this.mode === 'stability' || this.mode === 'regions') this.dirty = true;
   }
 
   /** Pays sélectionné, pour mettre ses alliés en évidence. */
@@ -531,7 +537,8 @@ export class MapView {
       this.labels.draw(this.camera);
       if (this.mode === 'economic') drawResources(this.labels.context, this.camera, this.resourceMarkers);
       if (this.player !== 0) {
-        drawAxes(this.labels.context, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes);
+        // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
+        drawAxes(this.labels.context, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
         drawPriorityZones(this.labels.context, this.camera, this.priorityZones, PRIORITY_RADIUS);
         drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
       }

@@ -126,6 +126,8 @@ function drawFortLine(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1:
 
 const AXIS_COLOR = '247, 236, 205';
 const PARTNER_AXIS_COLOR = '168, 216, 190';
+/** Sur la carte des routes, celles des pays sans lien avec le joueur. */
+const FOREIGN_AXIS_COLOR = '196, 182, 150';
 const AXIS_CASING = '52, 40, 28';
 
 interface RoadEdge {
@@ -166,6 +168,7 @@ export function drawAxes(
   atWar: (nation: number) => boolean,
   partner: (nation: number) => boolean,
   axes: readonly AxisSnapshot[],
+  all = false,
 ): void {
   const { viewWidth, viewHeight, zoom } = camera;
   const edges = new Map<string, RoadEdge>();
@@ -173,10 +176,10 @@ export function drawAxes(
   for (const axis of axes) {
     const own = axis.nation === player || axis.partner === player;
     const enemy = !own && atWar(axis.nation);
-    if (!own && !enemy && !partner(axis.nation)) continue;
-    const color = own ? AXIS_COLOR : enemy ? ENEMY_COLOR : PARTNER_AXIS_COLOR;
+    if (!all && !own && !enemy && !partner(axis.nation)) continue;
+    const color = own ? AXIS_COLOR : enemy ? ENEMY_COLOR : partner(axis.nation) ? PARTNER_AXIS_COLOR : FOREIGN_AXIS_COLOR;
     // Une route partagée prend la teinte la plus proche du joueur : la sienne, puis celle d'un partenaire.
-    const rank = own ? 3 : enemy ? 1 : 2;
+    const rank = own ? 3 : enemy ? 1 : partner(axis.nation) ? 2 : 0;
     const raw = axis.points;
     if (raw.length < 4) continue;
     // Points à l'écran, déroulés depuis le premier sans couper la carte au raccord.

@@ -77,7 +77,7 @@ export class MapRenderer {
     for (const name of [
       'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
       'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply', 'uFort', 'uAllies',
-      'uNationTint', 'uUnrest',
+      'uNationTint', 'uUnrest', 'uProvinceTint',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
@@ -115,6 +115,7 @@ export class MapRenderer {
     // Cartes des relations et de l'intérieur : une teinte par nation, et l'agitation de chaque province.
     this.bindDataTexture(11, 'uNationTint', gl.RGBA8, nations.length + 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array((nations.length + 1) * 4));
     this.bindDataTexture(12, 'uUnrest', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
+    this.bindDataTexture(13, 'uProvinceTint', gl.RGBA8, this.homes.length, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length * 4));
   }
 
   /** Nations à mettre en évidence comme alliées du pays sélectionné. */
@@ -168,6 +169,13 @@ export class MapRenderer {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.world.data.nations.length + 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, tint);
   }
 
+  /** Couleur de la région de chaque province (RGBA, alpha 0 : le cœur d'un pays). */
+  setProvinceTint(tint: Uint8Array): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE13);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Math.min(tint.length / 4, this.homes.length), 1, gl.RGBA, gl.UNSIGNED_BYTE, tint);
+  }
+
   /** Agitation de chaque province (0 : aucune région ; 1 à 255 : de calme à soulevée). */
   setUnrest(unrest: Uint8Array): void {
     const { gl } = this;
@@ -175,7 +183,7 @@ export class MapRenderer {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Math.min(unrest.length, this.homes.length), 1, gl.RED, gl.UNSIGNED_BYTE, unrest);
   }
 
-  /** 0 : pays, 1 : économie, 2 : ravitaillement, 3 : relations, 4 : intérieur. */
+  /** 0 pays, 1 richesse, 2 ravitaillement, 3 relations, 4 stabilité, 5 régions, 6 évolution, 7 routes. */
   setMapMode(mode: number): void {
     this.mapMode = mode;
   }
