@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Atelier des sprites</title>
+  <style>
+    body { margin: 0; background: #3a5a6a; color: #eee; font: 13px system-ui, sans-serif; }
+    canvas { display: block; image-rendering: pixelated; }
+    #out { padding: 8px; }
+  </style>
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <div id="out">Atelier des sprites : window.bake(id, options) rend une planche.</div>
+  <script type="module">
+    // Atelier des sprites : photographie un modèle 3D (assets3d/<id>.glb, tools/units3d.ts) sous
+    // 16 directions, en vue isométrique, et sur quelques images d'animation. La planche : une
+    // colonne par direction (0 : vers l'Est, puis dans le sens des aiguilles d'une montre à l'écran),
+    // une ligne par image d'animation.
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+    import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/loaders/GLTFLoader.js';
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    document.body.appendChild(renderer.domElement);
+
+    const loader = new GLTFLoader();
+    const cache = new Map();
+    async function load(id) {
+      if (!cache.has(id)) cache.set(id, loader.loadAsync(`/assets3d/${id}.glb`).then((gltf) => gltf.scene));
+      return cache.get(id);
+    }
+
+    /** Le modèle, centré, posé au sol, ramené à une taille de 1, tourné de `yaw` (radians) pour regarder l'Est. */
+    function normalize(scene, yaw, shading, gamma) {
+      const root = new THREE.Group();
+      const model = scene.clone(true);
+      model.traverse((node) => {
+        if (node.isMesh) {
+          // Les couleurs de TRELLIS.2 sortent trop sombres : on les relève (gamma < 1 éclaircit).
+          const colors = node.geometry.attributes.color;
+          if (colors && gamma !== 1) {
+            node.geometry = node.geometry.clone();
+            const attribute = node.geometry.attributes.color;
+            for (let i = 0; i < attribute.count; i++) {
+              for (let c = 0; c < Math.min(3, attribute.itemSize); c++) {
+                const value = attribute.getComponent(i, c);
+                attribute.setComponent(i, c, Math.pow(Math.max(0, value), gamma));
+              }
+            }
+            attribute.needsUpdate = true;
+          }
+          const source = node.material;
+          // La texture cuite par TRELLIS.2 est en valeurs linéaires : la lire en sRGB l'assombrit.
+          if (source.map) {
+            source.map.colorSpace = THREE.LinearSRGBColorSpace;
+            source.map.needsUpdate = true;
+          }
+          const params = {
+            map: source.map ?? null,
+            color: source.map ? 0xffffff : (source.color ?? 0xffffff),
+            vertexColors: !!node.geometry.attributes.color,
+            // Le maillage de TRELLIS.2 a des faces retournées : on les montre des deux côtés.
+            side: THREE.DoubleSide,
+          };
+          // 'toon' : les couleurs de la référence, à peine modelées ; 'lit' : un éclairage plus réaliste.
+          node.material = shading === 'lit' ? new THREE.MeshStandardMaterial({ ...params, roughness: 0.85, metalness: 0.05 }) : new THREE.MeshLambertMaterial(params);
+        }
+      });
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.sub(center);
+      model.position.y += size.y / 2;
+      const holder = new THREE.Group();
+      holder.add(model);
+      holder.rotation.y = yaw;
+      const scale = 1 / Math.max(size.x, size.z, size.y);
+      holder.scale.setScalar(scale);
+      root.add(holder);
+      return root;
+    }
+
+    /**
+     * Rend la planche d'une unité.
+     * options : yaw (radians, pour que le modèle regarde l'Est), frames (images d'animation),
+     * size (pixels par image), elevation (degrés), motion ('roll' navire, 'bob' camion ou soldat,
+     * 'bank' avion, 'none'), zoom (marge autour du modèle).
+     */
+    window.bake = async (id, options = {}) => {
+      const { yaw = 0, frames = 4, size = 128, elevation = 38, motion = 'none', zoom = 1.25, directions = 16, shading = 'toon', light = 1, gamma = 0.45, supersample = 3 } = options;
+      const scene = new THREE.Scene();
+      // Une lumière du ciel généreuse et un soleil venu du Nord-Ouest, comme sur une carte d'état-major.
+      scene.add(new THREE.AmbientLight(0xffffff, 1.2 * light));
+      scene.add(new THREE.HemisphereLight(0xfff4e0, 0x5a6470, 1.2 * light));
+      const sun = new THREE.DirectionalLight(0xfff2dc, 1.6 * light);
+      sun.position.set(-2, 4, -1);
+      scene.add(sun);
+      const unit = normalize(await load(id), yaw, shading, gamma);
+      scene.add(unit);
+      // Caméra orthographique, regardant vers le Nord depuis le Sud, plongée de `elevation`.
+      const half = 0.5 * zoom;
+      const camera = new THREE.OrthographicCamera(-half, half, half, -half, 0.01, 50);
+      const pitch = THREE.MathUtils.degToRad(elevation);
+      camera.position.set(0, 0.3 + Math.sin(pitch) * 5, Math.cos(pitch) * 5);
+      camera.lookAt(0, 0.3, 0);
+      // Rendu plus grand, réduit ensuite par étapes : des contours nets et lisses.
+      const cell = size * supersample;
+      renderer.setSize(cell * directions, cell * frames, false);
+      renderer.setScissorTest(true);
+      renderer.clear();
+      for (let f = 0; f < frames; f++) {
+        const phase = (f / frames) * Math.PI * 2;
+        for (let d = 0; d < directions; d++) {
+          // Direction à l'écran : 0 vers l'Est, puis dans le sens des aiguilles d'une montre (y vers le bas).
+          const heading = (d / directions) * Math.PI * 2;
+          unit.rotation.set(0, -heading, 0);
+          const inner = unit.children[0];
+          inner.position.set(0, 0, 0);
+          inner.rotation.x = 0;
+          inner.rotation.z = 0;
+          if (motion === 'roll') inner.rotation.z = Math.sin(phase) * 0.06;
+          if (motion === 'bob') inner.position.y = Math.abs(Math.sin(phase)) * 0.025;
+          if (motion === 'bank') inner.position.y = Math.sin(phase) * 0.03;
+          const x = d * cell;
+          const y = (frames - 1 - f) * cell;
+          renderer.setViewport(x, y, cell, cell);
+          renderer.setScissor(x, y, cell, cell);
+          renderer.render(scene, camera);
+        }
+      }
+      renderer.setScissorTest(false);
+      let source = renderer.domElement;
+      let width = source.width;
+      let height = source.height;
+      const target = size * directions;
+      while (width > target) {
+        width = Math.max(target, Math.round(width / 2));
+        height = Math.round((width / target) * size * frames);
+        const step = document.createElement('canvas');
+        step.width = width;
+        step.height = height;
+        const context = step.getContext('2d');
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = 'high';
+        context.drawImage(source, 0, 0, width, height);
+        source = step;
+      }
+      return source.toDataURL('image/png');
+    };
+  </script>
+</body>
+</html>

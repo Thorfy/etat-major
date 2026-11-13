@@ -531,15 +531,19 @@ export class MapView {
 
   private drawOverlay(time: number): void {
     this.lastOverlay = time;
-    this.labels.draw(this.camera);
     const ctx = this.labels.context;
+    this.labels.clear(this.camera);
+    // Du dessous au-dessus : routes, trafic, puis les noms des pays.
+    if (this.player !== 0) {
+      // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
+      this.flowEdges = drawAxes(ctx, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
+    }
+    if (this.player !== 0) drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
+    this.labels.draw(this.camera, false);
     if (this.mode === 'economic') drawResources(ctx, this.camera, this.resourceMarkers);
     if (this.player === 0) return;
-    // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
-    this.flowEdges = drawAxes(ctx, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
-    drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
     drawPriorityZones(ctx, this.camera, this.priorityZones, PRIORITY_RADIUS);
-    drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts);
+    drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts, time / 1000);
   }
 
   private tick(time: number): void {
@@ -550,7 +554,9 @@ export class MapView {
     this.applyKeys(dt);
     this.applyZoom(dt);
 
-    const animate = this.player !== 0 && this.flowEdges.length > 0 && time - this.lastOverlay >= 33;
+    // Trafic, troupes au front ou offensives : la couche du dessus s'anime, 30 images par seconde.
+    const lively = this.flowEdges.length > 0 || this.offensives.length > 0 || this.fronts.some((front) => front.marks.length > 0);
+    const animate = this.player !== 0 && lively && time - this.lastOverlay >= 33;
     if (this.dirty || this.continuous) {
       if (this.lastPointer && this.pointers.size === 0) {
         this.hoverAt(this.lastPointer.x, this.lastPointer.y);

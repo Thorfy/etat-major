@@ -2,7 +2,7 @@
 import { wrapDeltaX } from '../map/projection.ts';
 import type { AxisSnapshot, FrontSnapshot, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import type { Camera } from './Camera.ts';
-import { type FlowEdge, drawBadge, drawSprite } from './Sprites.ts';
+import { type FlowEdge, drawBadge, drawUnit } from './Sprites.ts';
 
 export interface ArrowDraft {
   /** Flèche d'offensive, ligne fortifiée ou axe commercial en projet. */
@@ -313,6 +313,7 @@ export function drawCampaign(
   pockets: readonly PocketSnapshot[],
   draft: ArrowDraft | null,
   fronts: readonly FrontSnapshot[] = [],
+  time = 0,
 ): void {
   const { viewWidth, viewHeight, zoom } = camera;
   const toScreenX = (x: number) => wrapDeltaX(camera.x, x) * zoom + viewWidth / 2;
@@ -320,7 +321,11 @@ export function drawCampaign(
   const troopSize = Math.min(64, 22 + zoom * 8);
 
   // Les troupes de ses fronts : de l'infanterie de chaque côté de la ligne.
-  if (zoom >= 0.9) {
+  // Elles apparaissent en fondu quand on zoome, au lieu de surgir d'un coup.
+  const troopFade = Math.max(0, Math.min(1, (zoom - 0.7) / 0.4));
+  if (troopFade > 0) {
+    ctx.save();
+    ctx.globalAlpha = troopFade;
     for (const front of fronts) {
       const marks = front.marks;
       // Les deux camps d'un même secteur se font face : chacun recule de son côté de la ligne.
@@ -348,12 +353,16 @@ export function drawCampaign(
           const x = toScreenX(cell[0]) - side * dx * gap;
           const y = toScreenY(cell[1]) - side * dy * gap;
           if (x < -troopSize || x > viewWidth + troopSize || y < -troopSize || y > viewHeight + troopSize) continue;
-          drawBadge(ctx, x, y + troopSize * 0.18, troopSize * 0.42, side === 1 ? OWN_COLOR : ENEMY_COLOR);
-          // Chaque camp regarde l'autre.
-          drawSprite(ctx, 'infanterie', x, y, troopSize, side * (dx === 0 ? 1 : dx), 0);
+          drawBadge(ctx, x, y + troopSize * 0.05, troopSize * 0.5, side === 1 ? OWN_COLOR : ENEMY_COLOR);
+          // Un petit groupe de soldats, chacun tourné vers l'ennemi, qui ne bougent pas en même temps.
+          const seed = (cell[0] * 0.37 + cell[1] * 0.71) % 1;
+          for (const [ox, oy, k] of [[-0.22, -0.08, 0], [0.2, -0.12, 1], [0, 0.1, 2]] as const) {
+            drawUnit(ctx, 'infanterie', x + ox * troopSize, y + oy * troopSize, troopSize * 0.62, side * dx, side * dy, time, 1, seed + k * 0.33);
+          }
         }
       }
     }
+    ctx.restore();
   }
 
   for (const pocket of pockets) {
@@ -400,7 +409,7 @@ export function drawCampaign(
     if (own || enemy) {
       const lead = 0.55;
       const size = troopSize * 1.15;
-      drawSprite(ctx, offensive.inTransit ? 'navire-guerre' : 'blinde', x0 + dx * lead, y0 + dy * lead, size, dx, dy);
+      drawUnit(ctx, offensive.inTransit ? 'navire-guerre' : 'blinde', x0 + dx * lead, y0 + dy * lead, size, dx, dy, time);
     }
   }
 

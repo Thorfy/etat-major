@@ -266,6 +266,44 @@ d'avant (réseau tracé à la main), graines 1 et 2.
   et quelques avions sur les traversées ; plus nombreux sur les tronçons partagés. Seule la couche
   du dessus se redessine (30 images par seconde), pas la carte ; rien à trop petit zoom.
 
+## Unités en 3D isométrique
+
+Les sprites plats, tournés sur la carte, faisaient pauvre. Les unités sont maintenant des planches
+tirées de vrais modèles 3D :
+
+1. **Référence** (`node tools/units3d.ts --ref`) : Qwen Image dessine chaque unité en miniature, vue
+   de trois quarts, sur un vert uni retiré ensuite. Six unités : camion, cargo, avion, blindé,
+   fantassin, navire de guerre (liste dans `tools/units3d.ts` ; `retry` change de graine).
+2. **Modèle 3D** (`node tools/units3d.ts`) : TRELLIS.2 dans le ComfyUI local (poids dans
+   `ComfyUI-Shared/models` : UNet int8, deux VAE, DINOv3 ; 8,5 Go), d'après le graphe de démonstration
+   de ComfyUI : maillage refait en un solide fermé (plus de trous), réduit à 120 000 faces, puis une
+   vraie texture cuite (2048 px) ; un GLB de 5 à 8 Mo par unité, dans `assets3d/` (hors du dépôt), en
+   1 à 3 minutes.
+3. **Planches** : `node tools/sprite-sink.ts` (récepteur sur le port 5199), puis la page
+   `/tools/sprite-baker.html` du serveur de développement, dans le navigateur : `window.bake(id,
+   options)` photographie le modèle en vue isométrique (caméra orthographique, plongée de 38°), rendu
+   trois fois plus grand puis réduit par étapes (contours nets), sous 16 directions et 4 images d'animation (roulis, cahots, balancement), et l'envoie au récepteur, qui
+   l'enregistre dans `public/art/unites/` en WebP détouré (100 à 190 Ko). Réglages par unité : `yaw`
+   (un quart de tour pour la plupart, pour regarder l'Est) ; la texture cuite se lit en valeurs
+   linéaires (en sRGB, elle sort trop sombre).
+
+**En jeu** (`src/render/Sprites.ts`) : chaque unité prend la colonne de sa direction et l'image de
+son animation ; le sprite plat ne sert plus que si la planche manque. Autour :
+
+- convois de un à trois camions, chacun à son allure, qui entrent et sortent en fondu, avec leur
+  ombre et des bouffées de poussière ;
+- cargos avec un sillage d'écume, avions plus rapides, au-dessus de leur ombre ;
+- au front, des groupes de trois soldats de chaque camp, tournés vers l'ennemi, qui ne bougent pas
+  en même temps ; un blindé en tête de chaque offensive.
+
+**Calme et zoom.** Les véhicules avancent à vitesse fixe sur la carte (en cellules par seconde, pas en
+pixels) : zoomer ne les fait plus sauter. Leur nombre se compte sur la carte, eux et les troupes
+apparaissent en fondu avec le zoom ; animations et trafic ralentis.
+
+**Villes : essayées, abandonnées.** Des miniatures de villes sur la carte (d'abord par style de
+région, puis une par ville, enfin bâties sur la forme de leur département) : jamais assez belles, on
+n'en garde aucune. Les noms des pays restent dessinés par-dessus les routes et le trafic.
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

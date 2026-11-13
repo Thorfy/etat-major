@@ -66,10 +66,15 @@ export class Labels {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  draw(camera: Camera): void {
+  /** Vide la couche : on y dessine ensuite villes et routes, puis les noms par-dessus. */
+  clear(camera: Camera): void {
+    this.ctx.clearRect(0, 0, camera.viewWidth, camera.viewHeight);
+  }
+
+  draw(camera: Camera, clear = true): void {
     const { ctx } = this;
     const { viewWidth, viewHeight, zoom, mapWidth } = camera;
-    ctx.clearRect(0, 0, viewWidth, viewHeight);
+    if (clear) ctx.clearRect(0, 0, viewWidth, viewHeight);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';

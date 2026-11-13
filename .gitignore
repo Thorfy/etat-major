@@ -6,3 +6,6 @@ dist/
 # Données sources téléchargées par `npm run map:fetch` (~60 Mo).
 # La carte générée dans public/map/ reste versionnée.
 data/raw/
+
+# Modèles 3D des unités (tools/units3d.ts) : lourds, hors du dépôt.
+assets3d/
