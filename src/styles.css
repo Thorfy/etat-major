@@ -1400,3 +1400,53 @@ canvas {
   margin: 2px 0 0;
   accent-color: var(--accent);
 }
+
+/* Files de chantiers : un titre par file, et le glisser-déposer. */
+.queue-title {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.queue-title small {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.builds li[draggable='true'] {
+  cursor: grab;
+}
+
+.builds li.dragging {
+  opacity: 0.4;
+}
+
+.builds li.drop-target {
+  box-shadow: 0 -2px 0 var(--accent);
+}
+
+.builds .grip {
+  margin-right: 4px;
+  color: var(--ink-soft);
+  cursor: grab;
+}
+
+/* Régions agitées : des lignes compactes, comme les fronts. */
+.region .offensive-row {
+  font-size: 13px;
+}
+
+.region .offensive-row small {
+  font-size: 11px;
+}
+
+.region .blason.small {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  vertical-align: -3px;
+}

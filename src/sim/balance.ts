@@ -396,6 +396,8 @@ export const STEEL_SHORTAGE_FLOOR = 0.4;
 // Chantiers : la part civile de l'économie bâtit, province par province.
 /** Points de construction par minute : ce réglage × racine du PIB en Md$ × (1 − effort). */
 export const CONSTRUCTION_PER_MINUTE = 2;
+/** Part des points qui va à la file militaire quand les deux files ont des chantiers (réglable). */
+export const DEFAULT_MILITARY_SHARE = 0.5;
 export const MAX_FACTORY_LEVEL = 3;
 export const MAX_INFRASTRUCTURE_LEVEL = 3;
 /** Coût d'un chantier, multiplié par le niveau visé pour les usines et l'infrastructure. */
@@ -560,6 +562,12 @@ export const REVOLT_AT = 1;
 export const UNREST_CALM = 0.15;
 /** Une demande sans réponse est refusée au bout de ce délai. */
 export const DEMAND_TICKS = 8 * WEEK;
+/**
+ * Le joueur reçoit une demande à la fois, au plus une toutes les 12 semaines, et aucune pendant le
+ * répit du début de partie (PLAYER_GRACE_TICKS) : il garde le temps de gérer son pays. Une de ses
+ * régions ne se soulève qu'après avoir demandé son indépendance. L'IA n'a pas ces limites.
+ */
+export const PLAYER_DEMAND_COOLDOWN_TICKS = 12 * WEEK;
 /** Un refus fait monter l'agitation d'autant. */
 export const REFUSAL_UNREST = 0.15;
 /** Accepter les investissements calme aussitôt, puis encore à leur achèvement. */

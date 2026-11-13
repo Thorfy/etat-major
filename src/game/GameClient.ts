@@ -943,6 +943,26 @@ export class GameClient {
     this.command({ type: 'cancelBuild', nation: this.player, index });
   }
 
+  /** Déplace un chantier dans la file (indices de la file entière, les deux files mêlées). */
+  moveBuild(from: number, to: number): void {
+    if (!this.canCommand || from === to) return;
+    this.command({ type: 'moveBuild', nation: this.player, from, to });
+  }
+
+  private militaryShareOrder: number | null = null;
+
+  /** Part des points de construction qui va à la file militaire : celle qu'affiche le curseur. */
+  get militaryShare(): number {
+    return this.militaryShareOrder ?? this.playerStats?.militaryShare ?? 0.5;
+  }
+
+  setMilitaryShare(share: number): void {
+    if (!this.canCommand) return;
+    this.militaryShareOrder = share;
+    this.command({ type: 'setMilitaryShare', nation: this.player, share });
+    this.onChange();
+  }
+
   setOffensiveShare(share: number): void {
     this.offensiveShare = share;
     this.onChange();

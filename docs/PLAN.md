@@ -152,6 +152,20 @@ tests qui mesurent autre chose gardent l'IA au centre (`doctrines: false`, ou sa
 **Non vérifié :** le ressenti en partie de deux positions opposées (une guerre éclair contre une
 défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a fini ses recherches.
 
+## Corrections demandées après le jalon 10
+
+- **Noms des régions.** Une région historique qui n'est pas indépendante porte son nom de région
+  (« Bretagne », « Corse », « Aquitaine ») dans les fiches, le journal et les demandes ; son nom
+  d'État (« Duché de Bretagne ») n'apparaît qu'à sa naissance (`src/game/regionNames.ts`).
+- **Rythme des demandes.** Le joueur reçoit une demande à la fois, au plus une toutes les 12
+  semaines, et aucune pendant les 26 premières ; une de ses régions ne se soulève qu'après avoir
+  demandé son indépendance. L'IA garde ses règles : ses empires se fissurent toujours.
+- **Deux files de chantiers**, qui avancent en même temps : la militaire (fortifications, dépôts,
+  infrastructure du territoire conquis, recherche) et la civile (tout le reste). Un curseur partage
+  les points (moitié-moitié au départ) ; une file vide laisse tout à l'autre. On glisse un chantier
+  pour changer son rang ; les points accumulés vont au nouveau premier.
+- **Onglet Diplomatie :** lignes des régions agitées plus compactes (blason de 16 px).
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

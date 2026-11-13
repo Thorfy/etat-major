@@ -85,6 +85,7 @@ import {
   SHIPYARD_NAVY,
   CASUALTY_WEARINESS,
   CONSTRUCTION_PER_MINUTE,
+  DEFAULT_MILITARY_SHARE,
   DEPOT_MIN_CONSOLIDATION,
   FACTORY_BONUS,
   GARRISON_COST,
@@ -199,6 +200,7 @@ import {
   OFFENSIVE_SPEED,
   OFFENSIVE_STALL_TICKS,
   PLAYER_GRACE_TICKS,
+  PLAYER_DEMAND_COOLDOWN_TICKS,
   POCKET_DRAIN,
   POCKET_EDGE,
   POCKET_MIN_CELLS_SHOWN,
@@ -264,6 +266,7 @@ import type {
   TradeAxis,
   AxisSnapshot,
 } from './protocol.ts';
+import { isMilitaryBuild } from './protocol.ts';
 import {
   AI_DOCTRINE_LEANING,
   AI_DOCTRINE_SPREAD,
@@ -317,6 +320,8 @@ export interface SimConfig {
   logistics?: boolean;
   /** Faux : le commerce ne compte pas (accès toujours entier), pour les tests qui l'isolent. */
   trade?: boolean;
+  /** Faux : les demandes des régions du joueur ne sont plus espacées, pour les tests de l'agitation. */
+  demandPacing?: boolean;
   /** Faux : l'IA garde une doctrine au centre, pour les tests qui ne mesurent pas les doctrines. */
   doctrines?: boolean;
   /** Partie à reprendre. */
@@ -495,7 +500,11 @@ export class Simulation {
   readonly depots: Uint8Array;
   /** Chantiers en file, par nation ; le premier avance. */
   private queues: BuildOrder[][];
+  /** Points accumulés sur le premier chantier de la file civile, et de la militaire. */
   private readonly buildProgress: Float64Array;
+  private readonly militaryProgress: Float64Array;
+  /** Part des points de construction qui va à la file militaire, quand les deux ont des chantiers. */
+  private readonly militaryShare: Float64Array;
   /** Points de construction par minute, pour l'affichage. */
   private readonly constructionRate: Float64Array;
 
@@ -524,6 +533,9 @@ export class Simulation {
   private lastPeaceOffer: Float64Array;
   /** Tick de la dernière guerre déclarée au joueur par une IA (très loin dans le passé : aucune). */
   private lastWarOnPlayer = -1e12;
+  /** Tick à partir duquel une région du joueur peut de nouveau lui adresser une demande. */
+  private nextPlayerDemand = PLAYER_GRACE_TICKS;
+  private readonly demandPacing: boolean;
   /** Commerce : accords (symétriques) et embargos (le premier refuse de commercer avec le second). */
   private readonly tradeDeal: Uint8Array;
   private readonly embargo: Uint8Array;
@@ -622,6 +634,7 @@ export class Simulation {
     this.aiEnabled = config.ai ?? true;
     this.logisticsEnabled = config.logistics ?? true;
     this.tradeEnabled = config.trade ?? true;
+    this.demandPacing = config.demandPacing ?? true;
     this.rngState = config.seed >>> 0 || 1;
     this.provinces = config.provinces;
 
@@ -725,6 +738,8 @@ export class Simulation {
     this.depots = new Uint8Array(provinceCount);
     this.queues = Array.from({ length: this.stride }, () => []);
     this.buildProgress = new Float64Array(this.stride);
+    this.militaryProgress = new Float64Array(this.stride);
+    this.militaryShare = new Float64Array(this.stride).fill(DEFAULT_MILITARY_SHARE);
     this.constructionRate = new Float64Array(this.stride);
     this.counterShare = new Float64Array(this.stride);
     this.aggression = new Float64Array(this.stride);
@@ -1025,6 +1040,12 @@ export class Simulation {
         break;
       case 'cancelBuild':
         this.cancelBuild(command.nation, command.index);
+        break;
+      case 'moveBuild':
+        this.moveBuild(command.nation, command.from, command.to);
+        break;
+      case 'setMilitaryShare':
+        this.setMilitaryShare(command.nation, command.share);
         break;
       case 'fortifyLine':
         this.fortifyLine(command.nation, command.fromX, command.fromY, command.toX, command.toY);
@@ -2064,11 +2085,16 @@ export class Simulation {
         movement.asked = 0;
         movement.refused = 0;
       }
+      // Le joueur reçoit ses demandes une à une, espacées : les autres régions attendent leur tour.
+      if (movement.parent === this.player && !this.playerMayReceiveDemand()) continue;
       if (movement.asked < 1 && !movement.investing && movement.unrest >= DEMAND_INVESTMENT_AT) this.makeDemand(movement, 'investment');
       else if (movement.asked < 2 && movement.unrest >= DEMAND_INDEPENDENCE_AT) this.makeDemand(movement, 'independence');
     }
     // Un soulèvement par passe : il parcourt toute la terre.
-    const rebel = this.movements.find((movement) => movement.demand === '' && movement.unrest >= REVOLT_AT);
+    // Une région du joueur ne se soulève qu'après avoir demandé son indépendance : il est prévenu.
+    const rebel = this.movements.find(
+      (movement) => movement.demand === '' && movement.unrest >= REVOLT_AT && (movement.parent !== this.player || movement.asked >= 2),
+    );
     if (rebel) this.revolt(rebel);
   }
 
@@ -2078,9 +2104,16 @@ export class Simulation {
   }
 
   /** La région demande ; l'IA répond aussitôt, le joueur a DEMAND_TICKS pour le faire. */
+  private playerMayReceiveDemand(): boolean {
+    if (!this.demandPacing) return true;
+    if (this.tick < this.nextPlayerDemand) return false;
+    return !this.movements.some((movement) => movement.parent === this.player && movement.demand !== '');
+  }
+
   private makeDemand(movement: MovementState, kind: DemandKind): void {
     movement.asked = kind === 'investment' ? 1 : 2;
     if (movement.parent === this.player) {
+      this.nextPlayerDemand = this.tick + PLAYER_DEMAND_COOLDOWN_TICKS;
       movement.demand = kind;
       movement.until = this.tick + DEMAND_TICKS;
       this.pendingEvents.push({ type: 'demand', tick: this.tick, parent: movement.parent, origin: movement.origin, kind });
@@ -3061,45 +3094,65 @@ export class Simulation {
     this.stability[n] = Math.max(0, Math.min(1, stability));
   }
 
-  /** La part civile de l'économie fait avancer le premier chantier de la file. */
+  /**
+   * La part civile de l'économie fait avancer le premier chantier de chaque file, civile et
+   * militaire : elles se partagent les points quand toutes deux ont des chantiers.
+   */
   private advanceConstruction(n: number, minutes: number): void {
     const rate = CONSTRUCTION_PER_MINUTE * Math.sqrt(Math.max(0, this.output[n]) / 1000) * (1 - this.effort[n]) * this.steelFactor(n) * this.mods[n].construction;
     this.constructionRate[n] = rate;
     const queue = this.queues[n];
-    if (queue.length === 0) {
-      this.buildProgress[n] = 0;
-      return;
-    }
-    this.buildProgress[n] += rate * minutes;
-    while (queue.length > 0) {
-      const order = queue[0];
+    const hasMilitary = queue.some((order) => isMilitaryBuild(order.kind));
+    const hasCivil = queue.some((order) => !isMilitaryBuild(order.kind));
+    const share = hasMilitary && hasCivil ? this.militaryShare[n] : hasMilitary ? 1 : 0;
+    this.buildProgress[n] = hasCivil ? this.buildProgress[n] + rate * minutes * (1 - share) : 0;
+    this.militaryProgress[n] = hasMilitary ? this.militaryProgress[n] + rate * minutes * share : 0;
+    if (hasCivil) this.completeOrders(n, false);
+    if (hasMilitary) this.completeOrders(n, true);
+    if (this.capacityDirty) this.recomputeCapacity();
+  }
+
+  /** Achève, dans l'ordre, les chantiers d'une file que ses points accumulés paient. */
+  private completeOrders(n: number, military: boolean): void {
+    const queue = this.queues[n];
+    const progress = military ? this.militaryProgress : this.buildProgress;
+    for (;;) {
+      const index = queue.findIndex((entry) => isMilitaryBuild(entry.kind) === military);
+      if (index < 0) {
+        progress[n] = 0;
+        return;
+      }
+      const order = queue[index];
       // Un chantier devenu impossible (province perdue, niveau atteint) est abandonné.
       if (!this.orderValid(n, order)) {
-        queue.shift();
+        queue.splice(index, 1);
         continue;
       }
       const cost = this.orderCost(order);
-      if (this.buildProgress[n] < cost) break;
-      this.buildProgress[n] -= cost;
-      queue.shift();
-      if (order.kind === 'factory') this.factories[order.province]++;
-      else if (order.kind === 'infrastructure') this.infrastructure[order.province]++;
-      else if (order.kind === 'depot') this.depots[order.province] = 1;
-      else if (order.kind === 'investment') this.completeInvestment(n, order.region ?? 0);
-      else if (order.kind === 'axis') this.completeAxis(n, order);
-      else if (order.kind === 'research') this.completeResearch(n, order.axis ?? 0);
-      else if (isProvinceBuilding(order.kind)) {
-        this.buildings[order.kind][order.province]++;
-        // Le chantier naval lance ses navires à l'achèvement.
-        if (order.kind === 'shipyard') this.navy[n] += SHIPYARD_NAVY * baseNavy(this.nationGdp[n - 1]);
-      }
-      // Seules les cellules encore tenues à l'achèvement sont fortifiées.
-      else for (const cell of order.cells ?? []) if (this.owners[cell] === n) this.setFort(cell, 255);
-      this.capacityDirty = true;
-      this.supplyDirty = ALL_SUPPLY_GROUPS;
+      if (progress[n] < cost) return;
+      progress[n] -= cost;
+      queue.splice(index, 1);
+      this.finishOrder(n, order);
     }
-    if (queue.length === 0) this.buildProgress[n] = 0;
-    if (this.capacityDirty) this.recomputeCapacity();
+  }
+
+  /** Un chantier achevé prend effet. */
+  private finishOrder(n: number, order: BuildOrder): void {
+    if (order.kind === 'factory') this.factories[order.province]++;
+    else if (order.kind === 'infrastructure') this.infrastructure[order.province]++;
+    else if (order.kind === 'depot') this.depots[order.province] = 1;
+    else if (order.kind === 'investment') this.completeInvestment(n, order.region ?? 0);
+    else if (order.kind === 'axis') this.completeAxis(n, order);
+    else if (order.kind === 'research') this.completeResearch(n, order.axis ?? 0);
+    else if (isProvinceBuilding(order.kind)) {
+      this.buildings[order.kind][order.province]++;
+      // Le chantier naval lance ses navires à l'achèvement.
+      if (order.kind === 'shipyard') this.navy[n] += SHIPYARD_NAVY * baseNavy(this.nationGdp[n - 1]);
+    }
+    // Seules les cellules encore tenues à l'achèvement sont fortifiées.
+    else for (const cell of order.cells ?? []) if (this.owners[cell] === n) this.setFort(cell, 255);
+    this.capacityDirty = true;
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
   }
 
   private orderValid(nation: number, order: BuildOrder): boolean {
@@ -3137,7 +3190,6 @@ export class Simulation {
     if (urgent) {
       // Une urgence passe en tête de la file, qui n'a pas de limite.
       queue.unshift(order);
-      this.buildProgress[nation] = 0;
     } else {
       queue.push(order);
     }
@@ -3362,7 +3414,25 @@ export class Simulation {
         movement.refused = (movement.refused ?? 0) + 1;
       }
     }
-    if (index === 0) this.buildProgress[nation] = 0;
+    // Ce qui était accumulé sur le premier chantier d'une file est perdu avec lui.
+    const military = isMilitaryBuild(order.kind);
+    if (!queue.slice(0, index).some((entry) => isMilitaryBuild(entry.kind) === military)) {
+      (military ? this.militaryProgress : this.buildProgress)[nation] = 0;
+    }
+  }
+
+  /** Change l'ordre de la file : les points déjà accumulés vont au nouveau premier chantier. */
+  moveBuild(nation: number, from: number, to: number): void {
+    const queue = this.queues[nation];
+    if (!queue || !Number.isInteger(from) || !Number.isInteger(to)) return;
+    if (from < 0 || from >= queue.length || to < 0 || to >= queue.length || from === to) return;
+    const [order] = queue.splice(from, 1);
+    queue.splice(to, 0, order);
+  }
+
+  setMilitaryShare(nation: number, share: number): void {
+    if (nation <= 0 || nation >= this.stride || !Number.isFinite(share)) return;
+    this.militaryShare[nation] = Math.max(0, Math.min(1, share));
   }
 
   /** L'IA bâtit des usines en paix, des dépôts derrière ses conquêtes en guerre. */
@@ -4378,6 +4448,7 @@ export class Simulation {
         embargoes: id === this.player ? this.embargoes.filter(([from]) => from === id).map(([, to]) => to) : [],
         embargoedBy: id === this.player ? this.embargoes.filter(([, to]) => to === id).map(([from]) => from) : [],
         construction: this.constructionRate[id],
+        militaryShare: this.militaryShare[id],
         // La file de chantiers ne sert qu'au joueur.
         builds:
           id === this.player
@@ -4386,7 +4457,11 @@ export class Simulation {
                 kind: order.kind,
                 cellCount: order.kind === 'axis' ? Math.round(order.length ?? 0) : (order.cells?.length ?? 0),
                 cost: this.orderCost(order),
-                progress: index === 0 ? this.buildProgress[id] : 0,
+                progress:
+                  this.queues[id].findIndex((entry) => isMilitaryBuild(entry.kind) === isMilitaryBuild(order.kind)) === index
+                    ? (isMilitaryBuild(order.kind) ? this.militaryProgress : this.buildProgress)[id]
+                    : 0,
+                military: isMilitaryBuild(order.kind),
                 region: order.region ?? 0,
                 axis: order.axis ?? 0,
               }))
@@ -4517,6 +4592,8 @@ export class Simulation {
         depots: Array.from(this.depots),
         queues: this.queues.map((queue) => queue.map((order) => ({ ...order }))),
         buildProgress: Array.from(this.buildProgress),
+        militaryProgress: Array.from(this.militaryProgress),
+        militaryShare: Array.from(this.militaryShare),
         constructionRate: Array.from(this.constructionRate),
         counterShare: Array.from(this.counterShare),
         counterAttempts: [...this.counterAttempts].map(([key, attempts]) => {
@@ -4531,6 +4608,7 @@ export class Simulation {
         peaceOffers: this.peaceOffers.map((offer) => ({ ...offer })),
         lastPeaceOffer: Array.from(this.lastPeaceOffer),
         lastWarOnPlayer: this.lastWarOnPlayer,
+        nextPlayerDemand: this.nextPlayerDemand,
         profiles: Array.from(this.profile),
         tradeDeals: this.tradeDeals.map(([a, b]) => [a, b] as [number, number]),
         embargoes: this.embargoes.map(([a, b]) => [a, b] as [number, number]),
@@ -4611,6 +4689,8 @@ export class Simulation {
     restoreArray(this.depots, legacy.depots);
     if (legacy.queues) this.queues = legacy.queues.map((queue) => queue.map((order) => ({ ...order })));
     restoreArray(this.buildProgress, legacy.buildProgress);
+    restoreArray(this.militaryProgress, legacy.militaryProgress);
+    restoreArray(this.militaryShare, legacy.militaryShare);
     restoreArray(this.constructionRate, legacy.constructionRate);
     restoreArray(this.counterShare, legacy.counterShare);
     if (legacy.counterAttempts) this.counterAttempts = new Map(legacy.counterAttempts.map(([nation, id, attempts]) => [`${nation}:${id}`, attempts]));
@@ -4625,6 +4705,7 @@ export class Simulation {
     this.peaceOffers = (legacy.peaceOffers ?? []).map((offer) => ({ ...offer }));
     restoreArray(this.lastPeaceOffer, legacy.lastPeaceOffer);
     if (typeof legacy.lastWarOnPlayer === 'number') this.lastWarOnPlayer = legacy.lastWarOnPlayer;
+    if (typeof legacy.nextPlayerDemand === 'number') this.nextPlayerDemand = legacy.nextPlayerDemand;
     if (legacy.profiles) this.profile.set(legacy.profiles.slice(0, this.stride));
     for (const [a, b] of legacy.tradeDeals ?? []) this.setTradeDeal(a, b, true);
     for (const [a, b] of legacy.embargoes ?? []) this.setEmbargoFlag(a, b, true);
@@ -4698,6 +4779,7 @@ export class Simulation {
       mix(Math.round(this.manpower[n] * 1000));
       mix(Math.round(this.stability[n] * 1e6));
       mix(Math.round(this.buildProgress[n] * 1000));
+      mix(Math.round(this.militaryProgress[n] * 1000) + Math.round(this.militaryShare[n] * 100));
       mix(this.queues[n].length);
       mix(Math.round(this.counterShare[n] * 1000));
       mix(this.priorityZones[n].length);
@@ -4710,6 +4792,7 @@ export class Simulation {
     }
     for (let n = 1; n < this.stride; n++) if (this.lastPeaceOffer[n] > 0) mix(this.lastPeaceOffer[n] + n);
     if (this.lastWarOnPlayer > 0) mix(this.lastWarOnPlayer);
+    mix(this.nextPlayerDemand);
     for (const [a, b] of this.tradeDeals) mix(a * 65536 + b);
     for (const [a, b] of this.embargoes) mix(a * 65536 + b + 7);
     for (const axis of this.axes) mix(axis.id * 1024 + axis.nation * 2 + (axis.active ? 1 : 0));

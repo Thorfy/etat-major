@@ -3,6 +3,7 @@ import {
   DEMAND_INDEPENDENCE_AT,
   DEMAND_INVESTMENT_AT,
   MIN_WAR_TICKS_FOR_PEACE,
+  PLAYER_DEMAND_COOLDOWN_TICKS,
   PLAYER_GRACE_TICKS,
   PLAYER_WAR_COOLDOWN_TICKS,
   TRUCE_TICKS,
@@ -48,6 +49,8 @@ function config(owner: (x: number, y: number) => number, gdp: (nation: number) =
     ai: false,
     // Le commerce a ses propres tests : ici, une guerre ne coupe pas les échanges.
     trade: false,
+    // Le rythme des demandes a son propre test : ici, elles viennent dès que l'agitation le veut.
+    demandPacing: false,
   };
 }
 
@@ -58,7 +61,8 @@ const D = 4;
 const E = 5;
 
 /** A à gauche, B à droite : un duel. */
-const duel = (gdpB = 1e6) => new Simulation(config((x) => (x < 100 ? A : B), (n) => (n === A ? 2e6 : gdpB), 2));
+const duel = (gdpB = 1e6, demandPacing = false) =>
+  new Simulation({ ...config((x) => (x < 100 ? A : B), (n) => (n === A ? 2e6 : gdpB), 2), demandPacing });
 
 const fight = (sim: Simulation, ticks: number, a: 'attack' | 'hold', b: 'attack' | 'hold', enemy = B) => {
   for (let t = 0; t < ticks; t++) {
@@ -253,8 +257,8 @@ describe('coalitions', () => {
 
 describe('régions annexées', () => {
   /** A annexe B, puis s'effondre. */
-  const annexed = () => {
-    const sim = duel(4e5);
+  const annexed = (demandPacing = false) => {
+    const sim = duel(4e5, demandPacing);
     sim.declareWars([[A, B]]);
     for (let t = 0; t < 600 * 60 && sim.isAlive(B); t++) fight(sim, 1, 'attack', 'hold');
     expect(sim.isAlive(B)).toBe(false);
@@ -280,6 +284,20 @@ describe('régions annexées', () => {
     expect(sim.tick).toBeGreaterThan(demands[1].tick);
     expect(sim.owners[40 * W + 190]).toBe(B);
     expect(sim.fronts.some((front) => front.a === A && front.b === B)).toBe(true);
+  });
+
+  it('arrivent une à une au joueur, espacées, et jamais pendant le répit du début', () => {
+    const sim = annexed(true);
+    const demands: number[] = [];
+    collapse(sim, 600 * 80, () => sim.isAlive(B), () => {
+      demands.push(sim.tick);
+      return false;
+    });
+    expect(demands.length).toBeGreaterThanOrEqual(2);
+    expect(demands[0]).toBeGreaterThanOrEqual(PLAYER_GRACE_TICKS);
+    expect(demands[1] - demands[0]).toBeGreaterThanOrEqual(PLAYER_DEMAND_COOLDOWN_TICKS);
+    // Elle ne se soulève qu'après avoir demandé son indépendance.
+    expect(sim.isAlive(B)).toBe(true);
   });
 
   it("obtiennent l'indépendance sans combat, si on la leur accorde", () => {

@@ -10,6 +10,12 @@ export type Stance = 'attack' | 'hold' | 'retreat';
  */
 export type BuildKind = 'factory' | 'infrastructure' | 'depot' | 'fort' | 'investment' | 'axis' | 'research' | ProvinceBuilding;
 
+/**
+ * Deux files de chantiers avancent en parallèle : la militaire (fortifications, dépôts,
+ * infrastructure du territoire conquis, recherche) et la civile (tout le reste).
+ */
+export const isMilitaryBuild = (kind: BuildKind): boolean => kind === 'fort' || kind === 'depot' || kind === 'infrastructure' || kind === 'research';
+
 export interface BuildOrder {
   province: number;
   kind: BuildKind;
@@ -94,6 +100,10 @@ export type SimCommand =
   | { type: 'setEffort'; nation: number; effort: number }
   | { type: 'build'; nation: number; province: number; kind: BuildKind }
   | { type: 'cancelBuild'; nation: number; index: number }
+  /** Déplace un chantier dans la file (indices de la file entière). */
+  | { type: 'moveBuild'; nation: number; from: number; to: number }
+  /** Part des points de construction qui va à la file militaire, quand les deux files ont des chantiers. */
+  | { type: 'setMilitaryShare'; nation: number; share: number }
   | { type: 'fortifyLine'; nation: number; fromX: number; fromY: number; toX: number; toY: number }
   | { type: 'fortifyFront'; nation: number; enemy: number }
   | { type: 'setCounterShare'; nation: number; share: number }
@@ -173,7 +183,9 @@ export interface NationSnapshot {
   /** Points de construction par minute. */
   construction: number;
   /** File de chantiers (joueur seulement) ; seul le premier avance. */
-  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number; axis: number }[];
+  builds: { province: number; kind: BuildKind; cellCount: number; cost: number; progress: number; region: number; axis: number; military: boolean }[];
+  /** Part des points de construction qui va à la file militaire, quand les deux files ont des chantiers. */
+  militaryShare: number;
   /** Doctrine atteinte sur chaque axe, de −1 à +1. */
   doctrine: number[];
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
@@ -449,6 +461,9 @@ export interface SimSaveState {
   buildings: Record<ProvinceBuilding, number[]>;
   queues: BuildOrder[][];
   buildProgress: number[];
+  /** File militaire : points accumulés sur son premier chantier, et part des points qu'elle reçoit. */
+  militaryProgress?: number[];
+  militaryShare?: number[];
   constructionRate: number[];
   counterShare: number[];
   /** Tentatives de contre-attaque déjà faites : [nation, offensive ennemie, tentatives]. */
@@ -464,6 +479,8 @@ export interface SimSaveState {
   lastPeaceOffer: number[];
   /** Tick de la dernière guerre déclarée au joueur par une IA. */
   lastWarOnPlayer?: number;
+  /** Première semaine où une région du joueur peut de nouveau lui adresser une demande. */
+  nextPlayerDemand?: number;
   /** Tempérament de chaque IA. */
   profiles?: number[];
   /** Commerce (jalon 9). */

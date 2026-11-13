@@ -285,10 +285,124 @@ function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; t
   );
 }
 
-function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: NationData; view: MapView; tool: MapTool | null }) {
+/**
+ * Les deux files de chantiers, civile et militaire, qui avancent en même temps. On glisse un
+ * chantier pour le remonter ou le descendre dans sa file.
+ */
+function BuildQueues({ game }: { game: GameClient }) {
+  const [dragged, setDragged] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
   const stats = game.playerStats;
   if (!stats) return null;
   const { provinces } = game.worldData;
+  const entries = stats.builds.map((order, index) => ({ order, index }));
+  const military = entries.filter(({ order }) => order.military);
+  const civil = entries.filter(({ order }) => !order.military);
+  const share = game.militaryShare;
+  const both = military.length > 0 && civil.length > 0;
+  const drop = (target: number) => {
+    if (dragged !== null && dragged !== target && stats.builds[dragged]?.military === stats.builds[target]?.military) game.moveBuild(dragged, target);
+    setDragged(null);
+    setOver(null);
+  };
+  const list = (title: string, items: typeof entries, rate: number, empty: string) => (
+    <>
+      <h4 class="queue-title">
+        {title} <small>· +{integer.format(rate)} pts / sem.</small>
+      </h4>
+      {items.length === 0 ? (
+        <Note lines={1}>{empty}</Note>
+      ) : (
+        <ol class="builds">
+          {items.map(({ order, index }) => (
+            <li
+              key={`${order.province}-${order.kind}-${order.axis}-${order.region}-${index}`}
+              title={BUILD_EFFECTS[order.kind]}
+              draggable={items.length > 1}
+              class={`${dragged === index ? 'dragging' : ''} ${over === index && dragged !== index ? 'drop-target' : ''}`}
+              onDragStart={(event) => {
+                setDragged(index);
+                event.dataTransfer?.setData('text/plain', String(index));
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragOver={(event) => {
+                if (dragged === null || stats.builds[dragged]?.military !== order.military) return;
+                event.preventDefault();
+                setOver(index);
+              }}
+              onDragLeave={() => setOver((current) => (current === index ? null : current))}
+              onDrop={(event) => {
+                event.preventDefault();
+                drop(index);
+              }}
+              onDragEnd={() => {
+                setDragged(null);
+                setOver(null);
+              }}
+            >
+              <div class="offensive-row">
+                <span>
+                  {items.length > 1 && <span class="grip" aria-hidden="true">⠿</span>}
+                  <Art id={`batiments/${order.kind}`} class="queue-art" />
+                  {BUILD_NAMES[order.kind]}{' '}
+                  <small>
+                    ·{' '}
+                    {order.kind === 'fort' || order.kind === 'axis'
+                      ? `${integer.format(order.cellCount)} cellules`
+                      : order.kind === 'research'
+                        ? DOCTRINE_AXES[order.axis].name
+                        : order.kind === 'investment'
+                          ? game.nameOf(order.region)
+                          : provinces[order.province - 1].name}
+                  </small>
+                </span>
+                <button class="close-inline" aria-label="Annuler ce chantier" onClick={() => game.cancelBuild(index)}>
+                  ×
+                </button>
+              </div>
+              <div class="gauge">
+                <div style={{ width: `${Math.min(100, (order.progress / order.cost) * 100)}%` }} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </>
+  );
+  const civilRate = stats.construction * (both ? 1 - share : civil.length > 0 ? 1 : 0);
+  const militaryRate = stats.construction * (both ? share : military.length > 0 ? 1 : 0);
+  return (
+    <section>
+      <h3>Chantiers</h3>
+      <dl>
+        <dt>Capacité</dt>
+        <dd>+{integer.format(stats.construction)} pts / sem.</dd>
+      </dl>
+      <Slider
+        label={
+          <>
+            Partage <b>civil {formatPercent(1 - share)} · militaire {formatPercent(share)}</b>
+          </>
+        }
+        value={Math.round(share * 100)}
+        min={0}
+        max={100}
+        step={10}
+        onChange={(value) => game.setMilitaryShare(value / 100)}
+      />
+      <Note lines={2}>
+        Les deux files avancent en même temps ; une file vide laisse tous ses points à l'autre. Glisse un chantier pour changer
+        son rang.
+      </Note>
+      {list('Civil', civil, civilRate, 'Clique sur une de tes provinces pour bâtir.')}
+      {list('Militaire', military, militaryRate, 'Fortifications, dépôts, routes du territoire conquis et recherche.')}
+    </section>
+  );
+}
+
+function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: NationData; view: MapView; tool: MapTool | null }) {
+  const stats = game.playerStats;
+  if (!stats) return null;
   const target = game.effortTarget;
   const converting = Math.abs(stats.effort - target) > 0.005;
   const change = stats.output / Math.max(1, nation.gdpMusd) - 1;
@@ -339,45 +453,7 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
             : effortEffect(target, atWar)}
         </Note>
       </section>
-      <section>
-        <h3>Chantiers</h3>
-        <dl>
-          <dt>Capacité</dt>
-          <dd>+{integer.format(stats.construction)} pts / sem.</dd>
-        </dl>
-        {stats.builds.length === 0 ? (
-          <Note>Aucun chantier. Clique sur une de tes provinces pour bâtir.</Note>
-        ) : (
-          <ol class="builds">
-            {stats.builds.map((order, index) => (
-              <li key={`${order.province}-${order.kind}-${index}`} title={BUILD_EFFECTS[order.kind]}>
-                <div class="offensive-row">
-                  <span>
-                    <Art id={`batiments/${order.kind}`} class="queue-art" />
-                    {BUILD_NAMES[order.kind]}{' '}
-                    <small>
-                      ·{' '}
-                      {order.kind === 'fort' || order.kind === 'axis'
-                        ? `${integer.format(order.cellCount)} cellules`
-                        : order.kind === 'research'
-                          ? DOCTRINE_AXES[order.axis].name
-                          : order.kind === 'investment'
-                          ? game.nameOf(order.region)
-                          : provinces[order.province - 1].name}
-                    </small>
-                  </span>
-                  <button class="close-inline" aria-label="Annuler ce chantier" onClick={() => game.cancelBuild(index)}>
-                    ×
-                  </button>
-                </div>
-                <div class="gauge">
-                  <div style={{ width: `${Math.min(100, (order.progress / order.cost) * 100)}%` }} />
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <BuildQueues game={game} />
     </>
   );
 }
