@@ -84,6 +84,11 @@ export interface AxisSnapshot {
   auto: boolean;
   /** Tronçons pris par la mer : i relie le point i au point i + 1. */
   seaLinks: number[];
+  /**
+   * Pour chaque tronçon pris par la mer, son tracé par l'eau (x, y à la suite) : du point où l'on
+   * quitte la terre à celui où l'on accoste. Vide si l'eau ne relie pas les deux villes.
+   */
+  seaPaths: number[][];
 }
 
 /** Ce qu'une région agitée demande : des investissements, ou l'indépendance sans combat. */
@@ -380,6 +385,8 @@ export interface WorkerInit {
   provinceGrid: Uint16Array;
   ownerGrid: Uint16Array;
   terrainGrid: Uint8Array;
+  /** Grands fleuves : 1 sur les cellules de terre qu'ils traversent. */
+  riverGrid?: Uint8Array;
   seed: number;
   player: number;
   /** Partie à reprendre : `ownerGrid` reste alors la carte de départ. */

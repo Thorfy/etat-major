@@ -396,6 +396,16 @@ qui prend une seule province du tracé le coupe** (une ligne maritime : un port,
 ne rapporte plus rien, jusqu'à ce qu'on la reprenne. L'IA trace, en paix, deux axes au plus entre
 ses provinces riches.
 
+**Lignes maritimes par l'eau.** Une traversée part de l'accès à l'eau de sa région (sa côte, ou
+le grand fleuve qui la traverse), suit l'eau sans couper les terres, et accoste à l'accès à l'eau de
+l'autre : la Guyane rejoint Paris par la Manche puis la Seine. Les grands fleuves viennent de
+Natural Earth (`ne_50m_rivers_lake_centerlines`, `npm run map:rivers` → `public/map/rivers.dat`).
+Les distances se calculent sur un graphe de blocs de 8 × 8 cellules, un nœud par étendue d'eau
+d'un bloc : un isthme (Panama, Suez) ne laisse rien passer. Chaque bout de fleuve se rattache à son
+embouchure, pour que deux fleuves qui se touchent à leur source ne relient pas deux mers. Le tracé
+se reprend cellule par cellule dans le couloir trouvé, puis ne garde que ses coins. Avant, une
+ligne maritime pouvait traverser tout un continent (de Los Angeles aux Grands Lacs).
+
 Le premier rendu, des traits droits et fins pour les axes de tous les pays, ressemblait à des
 rayures sur la carte (« les routes sont vraiment dégueulasses »). Un axe se dessine désormais comme
 une route d'atlas : une courbe douce passant par chaque ville, un trait sombre bordant une bande

@@ -132,8 +132,34 @@ function drawWake(ctx: CanvasRenderingContext2D, x: number, y: number, ux: numbe
 /** Un tronçon de route : sa courbe de Bézier à l'écran, s'il est en mer, et combien de routes le portent. */
 export interface FlowEdge {
   curve: [number, number, number, number, number, number, number, number];
+  /** Une traversée qui suit l'eau : sa ligne brisée à l'écran ; les navires la suivent. */
+  path?: number[];
   sea: boolean;
   count: number;
+}
+
+/**
+ * Où en est un véhicule à la fraction `t` d'un tronçon : position et direction. Sur une ligne brisée,
+ * `t` se compte en longueur parcourue.
+ */
+function pathSampler(path: readonly number[]): { length: number; at(t: number): [number, number, number, number] } {
+  const n = path.length / 2;
+  const cumulative = [0];
+  for (let i = 1; i < n; i++) cumulative.push(cumulative[i - 1] + Math.hypot(path[2 * i] - path[2 * i - 2], path[2 * i + 1] - path[2 * i - 1]));
+  const length = cumulative[n - 1];
+  return {
+    length,
+    at(t: number) {
+      const target = Math.max(0, Math.min(1, t)) * length;
+      let i = 1;
+      while (i < n - 1 && cumulative[i] < target) i++;
+      const span = cumulative[i] - cumulative[i - 1] || 1;
+      const f = (target - cumulative[i - 1]) / span;
+      const dx = path[2 * i] - path[2 * i - 2];
+      const dy = path[2 * i + 1] - path[2 * i - 1];
+      return [path[2 * i - 2] + dx * f, path[2 * i - 1] + dy * f, dx, dy];
+    },
+  };
 }
 
 const bezier = (c: FlowEdge['curve'], t: number): [number, number, number, number] => {
@@ -168,12 +194,12 @@ export function drawFlows(ctx: CanvasRenderingContext2D, camera: Camera, edges: 
   const toWorld = (sx: number, sy: number) => [camera.x + (sx - viewWidth / 2) / zoom, camera.y + (sy - viewHeight / 2) / zoom];
   for (const edge of edges) {
     const c = edge.curve;
-    const minX = Math.min(c[0], c[2], c[4], c[6]);
-    const maxX = Math.max(c[0], c[2], c[4], c[6]);
-    const minY = Math.min(c[1], c[3], c[5], c[7]);
-    const maxY = Math.max(c[1], c[3], c[5], c[7]);
-    if (maxX < -size || minX > viewWidth + size || maxY < -size || minY > viewHeight + size) continue;
-    const screenLength = Math.hypot(c[6] - c[0], c[7] - c[1]);
+    const xs = edge.path ? edge.path.filter((_, i) => i % 2 === 0) : [c[0], c[2], c[4], c[6]];
+    const ys = edge.path ? edge.path.filter((_, i) => i % 2 === 1) : [c[1], c[3], c[5], c[7]];
+    if (Math.max(...xs) < -size || Math.min(...xs) > viewWidth + size || Math.max(...ys) < -size || Math.min(...ys) > viewHeight + size) continue;
+    const sampler = edge.path ? pathSampler(edge.path) : null;
+    const point = (t: number) => (sampler ? sampler.at(t) : bezier(c, t));
+    const screenLength = sampler ? sampler.length : Math.hypot(c[6] - c[0], c[7] - c[1]);
     if (screenLength < size * 1.5) continue;
     const length = screenLength / zoom;
     // La graine vient des deux bouts du tronçon sur la carte : la même quel que soit le cadrage.
@@ -192,7 +218,7 @@ export function drawFlows(ctx: CanvasRenderingContext2D, camera: Camera, edges: 
         const phase = (time * speed) / length + i / convoys + seed - gap;
         let t = phase - Math.floor(phase);
         if (back) t = 1 - t;
-        const [x, y, dx, dy] = bezier(c, t);
+        const [x, y, dx, dy] = point(t);
         const sx = back ? -dx : dx;
         const sy = back ? -dy : dy;
         const norm = Math.hypot(sx, sy) || 1;
@@ -205,7 +231,7 @@ export function drawFlows(ctx: CanvasRenderingContext2D, camera: Camera, edges: 
           if (i % 3 === 2) {
             // Un avion : son ombre au sol, lui plus haut, plus vite.
             const fly = (((time * speed * 2.5) / length + i / convoys + seed) % 1 + 1) % 1;
-            const [ax, ay, adx, ady] = bezier(c, back ? 1 - fly : fly);
+            const [ax, ay, adx, ady] = point(back ? 1 - fly : fly);
             const fadeAir = Math.min(1, fly * 8, (1 - fly) * 8) * appear;
             drawShadow(ctx, ax, ay, size * 0.28, 0.25 * fadeAir);
             drawUnit(ctx, 'avion', ax, ay - size * 0.45, size * 0.95, back ? -adx : adx, back ? -ady : ady, time, fadeAir, own);

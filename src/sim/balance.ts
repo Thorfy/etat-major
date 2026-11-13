@@ -414,6 +414,13 @@ export const AXIS_REUSE_WEIGHT = 0.5;
  */
 export const SEA_LINK_MAX = 220;
 export const SEA_LINK_PENALTY = 25;
+/**
+ * Une traversée suit l'eau, de l'accès à l'eau d'une région (sa côte, ou son fleuve) à celui de
+ * l'autre : son trajet compte au plus SEA_ROUTE_DETOUR fois SEA_LINK_MAX. Faute de route par la
+ * terre, une ligne maritime directe entre deux ports va jusqu'à SEA_ROUTE_MAX cellules d'eau.
+ */
+export const SEA_ROUTE_DETOUR = 1.6;
+export const SEA_ROUTE_MAX = 900;
 /** L'IA trace un axe, en paix, entre deux de ses provinces riches assez éloignées. */
 export const AI_AXIS_MIN_DISTANCE = 25;
 export const AI_MAX_AXES = 2;

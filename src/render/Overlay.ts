@@ -134,6 +134,8 @@ const AXIS_CASING = '52, 40, 28';
 interface RoadEdge {
   /** Courbe de Bézier du tronçon, à l'écran : départ, deux points de contrôle, arrivée. */
   curve: [number, number, number, number, number, number, number, number];
+  /** Une traversée qui suit l'eau : sa ligne brisée à l'écran (x, y à la suite), lissée au tracé. */
+  path?: number[];
   /** Nombre d'axes qui l'empruntent. */
   count: number;
   active: boolean;
@@ -203,43 +205,81 @@ export function drawAxes(
       node.count++;
       nodes.set(key, node);
     }
-    for (let i = 0; i < n - 1; i++) {
-      const [a, b] = [keyOf(i), keyOf(i + 1)];
+    // Le tracé par l'eau de chaque traversée, quand l'eau relie les deux villes.
+    const waterOf = new Map<number, number[]>();
+    (axis.seaLinks ?? []).forEach((link, k) => {
+      const water = axis.seaPaths?.[k];
+      if (water && water.length >= 4) waterOf.set(link, water);
+    });
+    const addEdge = (a: string, b: string, make: () => Omit<RoadEdge, 'count' | 'active' | 'own' | 'color' | 'rank'>) => {
       const key = a < b ? `${a}|${b}` : `${b}|${a}`;
       const existing = edges.get(key);
       if (existing) {
         existing.count++;
         existing.active ||= axis.active;
         if (rank > existing.rank) Object.assign(existing, { own, color, rank });
+        return;
+      }
+      edges.set(key, { ...make(), count: 1, active: axis.active, own, color, rank });
+    };
+    for (let i = 0; i < n - 1; i++) {
+      const [a, b] = [keyOf(i), keyOf(i + 1)];
+      const water = waterOf.get(i);
+      if (water) {
+        // Une traversée : à terre jusqu'à l'accès à l'eau, par l'eau sans couper les terres, puis à
+        // terre jusqu'à la ville d'arrivée.
+        const path: number[] = [];
+        let px = raw[2 * i];
+        let sx = xs[i];
+        for (let j = 0; j < water.length; j += 2) {
+          sx += wrapDeltaX(px, water[j]) * zoom;
+          px = water[j];
+          path.push(sx, (water[j + 1] - camera.y) * zoom + viewHeight / 2);
+        }
+        const m = path.length;
+        const launch = `${water[0]},${water[1]}`;
+        const landing = `${water[water.length - 2]},${water[water.length - 1]}`;
+        const endX = path[m - 2] + wrapDeltaX(px, raw[2 * i + 2]) * zoom;
+        addEdge(a, launch, () => ({ curve: straight(xs[i], ys[i], path[0], path[1]), sea: false }));
+        addEdge(launch, landing, () => ({ curve: straight(path[0], path[1], path[m - 2], path[m - 1]), path, sea: true }));
+        addEdge(landing, b, () => ({ curve: straight(path[m - 2], path[m - 1], endX, ys[i + 1]), sea: false }));
         continue;
       }
-      let curve: RoadEdge['curve'];
       const sea = bySea.has(i);
-      if (sea) {
-        // Une traversée : un arc léger au-dessus de la mer.
-        const bend = 0.18;
-        const qx = (xs[i] + xs[i + 1]) / 2 - (ys[i + 1] - ys[i]) * bend;
-        const qy = (ys[i] + ys[i + 1]) / 2 + (xs[i + 1] - xs[i]) * bend;
-        curve = [xs[i], ys[i], xs[i] + ((qx - xs[i]) * 2) / 3, ys[i] + ((qy - ys[i]) * 2) / 3, xs[i + 1] + ((qx - xs[i + 1]) * 2) / 3, ys[i + 1] + ((qy - ys[i + 1]) * 2) / 3, xs[i + 1], ys[i + 1]];
-      } else {
+      addEdge(a, b, () => {
+        if (sea) {
+          // Une traversée sans tracé par l'eau : un arc léger au-dessus de la mer.
+          const bend = 0.18;
+          const qx = (xs[i] + xs[i + 1]) / 2 - (ys[i + 1] - ys[i]) * bend;
+          const qy = (ys[i] + ys[i + 1]) / 2 + (xs[i + 1] - xs[i]) * bend;
+          return {
+            curve: [xs[i], ys[i], xs[i] + ((qx - xs[i]) * 2) / 3, ys[i] + ((qy - ys[i]) * 2) / 3, xs[i + 1] + ((qx - xs[i + 1]) * 2) / 3, ys[i + 1] + ((qy - ys[i + 1]) * 2) / 3, xs[i + 1], ys[i + 1]],
+            sea,
+          };
+        }
         // Catmull-Rom : la courbe passe par chaque ville sans angle.
         const x0 = xs[Math.max(0, i - 1)];
         const y0 = ys[Math.max(0, i - 1)];
         const x3 = xs[Math.min(n - 1, i + 2)];
         const y3 = ys[Math.min(n - 1, i + 2)];
-        curve = [xs[i], ys[i], xs[i] + (xs[i + 1] - x0) / 6, ys[i] + (ys[i + 1] - y0) / 6, xs[i + 1] - (x3 - xs[i]) / 6, ys[i + 1] - (y3 - ys[i]) / 6, xs[i + 1], ys[i + 1]];
-      }
-      edges.set(key, { curve, count: 1, active: axis.active, sea, own, color, rank });
+        return {
+          curve: [xs[i], ys[i], xs[i] + (xs[i + 1] - x0) / 6, ys[i] + (ys[i + 1] - y0) / 6, xs[i + 1] - (x3 - xs[i]) / 6, ys[i + 1] - (y3 - ys[i]) / 6, xs[i + 1], ys[i + 1]],
+          sea,
+        };
+      });
     }
   }
   if (edges.size === 0) return [];
 
   const widthOf = (edge: { own: boolean; count: number }) => (edge.own ? 3.5 : 3) + 1.6 * (Math.min(4, edge.count) - 1);
   const stroke = (edge: RoadEdge) => {
-    const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = edge.curve;
     ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x1, y1);
+    if (edge.path) tracePath(ctx, edge.path);
+    else {
+      const [x0, y0, c1x, c1y, c2x, c2y, x1, y1] = edge.curve;
+      ctx.moveTo(x0, y0);
+      ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x1, y1);
+    }
     ctx.stroke();
   };
   ctx.lineCap = 'round';
@@ -273,7 +313,27 @@ export function drawAxes(
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
   // Le trafic ne circule que sur ses routes et celles de ses partenaires.
-  return [...edges.values()].filter((edge) => edge.rank >= 2).map((edge) => ({ curve: edge.curve, sea: edge.sea, count: edge.count }));
+  return [...edges.values()].filter((edge) => edge.rank >= 2).map((edge) => ({ curve: edge.curve, path: edge.path, sea: edge.sea, count: edge.count }));
+}
+
+/** Un tronçon droit, en courbe de Bézier. */
+function straight(x0: number, y0: number, x1: number, y1: number): RoadEdge['curve'] {
+  return [x0, y0, x0 + (x1 - x0) / 3, y0 + (y1 - y0) / 3, x0 + ((x1 - x0) * 2) / 3, y0 + ((y1 - y0) * 2) / 3, x1, y1];
+}
+
+/** Une ligne brisée adoucie : chaque coin devient une courbe qui passe par le milieu des côtés. */
+function tracePath(ctx: CanvasRenderingContext2D, path: readonly number[]): void {
+  const n = path.length / 2;
+  ctx.moveTo(path[0], path[1]);
+  if (n < 3) {
+    ctx.lineTo(path[2 * n - 2], path[2 * n - 1]);
+    return;
+  }
+  for (let i = 1; i < n - 1; i++) {
+    const mx = (path[2 * i] + path[2 * i + 2]) / 2;
+    const my = (path[2 * i + 1] + path[2 * i + 3]) / 2;
+    ctx.quadraticCurveTo(path[2 * i], path[2 * i + 1], i === n - 2 ? path[2 * n - 2] : mx, i === n - 2 ? path[2 * n - 1] : my);
+  }
 }
 
 /** Secteurs prioritaires du joueur : cercles tiretés. */

@@ -12,6 +12,8 @@ const FILES = [
   'geojson/ne_10m_lakes.geojson',
   'geojson/ne_10m_geography_regions_polys.geojson',
   'geojson/ne_10m_populated_places_simple.geojson',
+  // Les grands fleuves seulement : ceux que suivent les routes maritimes vers l'intérieur.
+  'geojson/ne_50m_rivers_lake_centerlines.geojson',
   'LICENSE.md',
 ];
 

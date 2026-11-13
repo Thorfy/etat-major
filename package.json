@@ -11,6 +11,7 @@
     "test": "vitest run",
     "map:fetch": "node tools/fetch-natural-earth.ts",
     "map:build": "node tools/build-map.ts",
+    "map:rivers": "node tools/build-rivers.ts",
     "bench": "node tools/bench-sim.ts"
   },
   "dependencies": {

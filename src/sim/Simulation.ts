@@ -258,6 +258,8 @@ import {
   AXIS_REUSE_WEIGHT,
   SEA_LINK_MAX,
   SEA_LINK_PENALTY,
+  SEA_ROUTE_DETOUR,
+  SEA_ROUTE_MAX,
   AI_AXIS_MIN_DISTANCE,
   AI_MAX_AXES,
   AI_AXIS_CHANCE,
@@ -301,6 +303,7 @@ import {
   type DoctrineModifiers,
 } from './doctrine.ts';
 import { landingProblem, traceRoute } from './route.ts';
+import { Waterways } from './waterways.ts';
 import { findSeas } from './seas.ts';
 
 export interface SimConfig {
@@ -329,6 +332,8 @@ export interface SimConfig {
   ownerGrid: Uint16Array;
   /** Plaine partout si absente. */
   terrainGrid?: Uint8Array;
+  /** Grands fleuves : les routes maritimes les remontent. Aucun si absente. */
+  riverGrid?: Uint8Array;
   seed: number;
   /** Nation pilotée par le joueur (0 si toutes sont pilotées par l'IA). */
   player: number;
@@ -427,6 +432,7 @@ export class Simulation {
   private readonly tradeEnabled: boolean;
   private rngState: number;
   private readonly terrain: Uint8Array | null;
+  private readonly rivers: Uint8Array | null;
 
   fronts: Front[] = [];
   private readonly frontIndex: Int32Array;
@@ -584,7 +590,7 @@ export class Simulation {
   /** Provinces voisines par la terre, pour tracer les axes. */
   private provinceNeighbors: number[][] | null = null;
   /** Mers que borde chaque province (bits, comme coastSeas), calculées à la première demande. */
-  private provinceSeas: Uint32Array | null = null;
+  private waterwaysCache: Waterways | null = null;
   private sentAxesVersion = 0;
   /** Régions annexées qui s'agitent, par pays qui les tient. */
   private movements: MovementState[] = [];
@@ -661,6 +667,7 @@ export class Simulation {
     this.owners = config.ownerGrid.slice();
     this.provinceGrid = config.provinceGrid;
     this.terrain = config.terrainGrid ?? null;
+    this.rivers = config.riverGrid ?? null;
     this.player = config.saved ? config.saved.state.player : config.player;
     this.aiEnabled = config.ai ?? true;
     this.logisticsEnabled = config.logistics ?? true;
@@ -895,6 +902,8 @@ export class Simulation {
     }
     this.refreshNeighbors();
     if (config.saved) this.restore(config.saved);
+    // Les voies d'eau se calculent au chargement, pas au premier tracé : pas d'à-coup en jeu.
+    if (this.autoTrade) void this.waterways;
   }
 
   private touchesWater(cell: number): boolean {
@@ -2985,34 +2994,34 @@ export class Simulation {
     return this.provinceNeighbors[province];
   }
 
-  /**
-   * Tracé d'un axe, de ville en ville : le plus court chemin entre les centres des provinces, par
-   * des provinces que la nation tient. Faute de chemin par la terre, une ligne maritime entre deux
-   * provinces côtières.
-   */
-  /** Mers que borde chaque province : la géographie ne change pas, on la calcule une fois. */
-  private seasOfProvinces(): Uint32Array {
-    if (!this.provinceSeas) {
-      const { coastCells, provinceGrid, seas, width: W, height: H } = this;
-      const masks = new Uint32Array(this.controller.length);
-      for (let k = 0; k < coastCells.length; k++) {
-        const cell = coastCells[k];
-        const province = provinceGrid[cell];
-        if (province === 0) continue;
-        const x = cell % W;
-        const y = (cell - x) / W;
-        for (let j = 0; j < 4; j++) {
-          if ((j === 2 && y === 0) || (j === 3 && y === H - 1)) continue;
-          const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
-          const sea = seas[next];
-          if (sea !== 0) masks[province] |= 1 << ((sea - 1) % 31);
-        }
-      }
-      this.provinceSeas = masks;
+  /** Voies d'eau de la carte : la géographie ne change pas, on les calcule une fois, au premier besoin. */
+  private get waterways(): Waterways {
+    if (!this.waterwaysCache) {
+      this.waterwaysCache = new Waterways({
+        width: this.width,
+        height: this.height,
+        // L'eau reste l'eau : les propriétaires de la terre ne changent rien aux voies d'eau.
+        owners: this.owners,
+        seas: this.seas,
+        rivers: this.rivers,
+        provinceGrid: this.provinceGrid,
+        centers: [{ x: 0, y: 0 }, ...this.provinces.map(({ x, y }) => ({ x, y }))],
+      });
     }
-    return this.provinceSeas;
+    return this.waterwaysCache;
   }
 
+  /** Longueur d'une traversée entre deux ports, par l'eau ; indéfinie au-delà de `limit`. */
+  private waterCrossing(from: number, to: number, limit = SEA_LINK_MAX * SEA_ROUTE_DETOUR): number | undefined {
+    return this.waterways.reach(from, limit).get(to);
+  }
+
+  /**
+   * Tracé d'un axe, de ville en ville : le plus court chemin entre les centres des provinces, par
+   * des provinces que la nation tient. Une traversée part de l'accès à l'eau d'une province (sa côte,
+   * ou le fleuve qui la traverse) et suit l'eau jusqu'à celui d'une autre. Faute de chemin par la
+   * terre, une ligne maritime directe entre deux ports.
+   */
   planAxis(
     nation: number,
     from: number,
@@ -3030,11 +3039,9 @@ export class Simulation {
       ...this.queues[nation].filter((order) => order.kind === 'axis').map((order) => ({ path: order.path ?? [], sea: this.seaLinksOf(order) })),
     ];
     for (const { path, sea } of routes) for (let i = 0; i + 1 < path.length; i++) if (!sea.includes(i)) built.add(linkKey(path[i], path[i + 1]));
-    // Ports possibles : les provinces côtières qu'elle peut traverser, avec les mers qu'elles bordent.
-    const seasOf = this.seasOfProvinces();
-    const ports: number[] = [];
-    for (let p = 1; p < count; p++) if (seasOf[p] !== 0 && this.axisAllows(nation, this.controller[p])) ports.push(p);
+    const { waterways } = this;
     const bySea = new Set<number>();
+    const crossings = new Map<number, number>();
     // Dijkstra sur les provinces tenues : elles sont au plus quelques centaines par nation.
     const distance = new Map<number, number>([[from, 0]]);
     const previous = new Map<number, number>();
@@ -3054,18 +3061,16 @@ export class Simulation {
           bySea.delete(next);
         }
       }
-      // Par la mer, d'un port à un autre qui borde la même mer.
-      const mask = seasOf[current];
-      if (mask === 0) continue;
-      for (const next of ports) {
-        if (next === current || done.has(next) || (seasOf[next] & mask) === 0) continue;
-        const crossing = this.provinceDistance(current, next);
-        if (crossing > SEA_LINK_MAX) continue;
+      // Par l'eau, d'un port à un autre assez proche qu'elle peut traverser, sans couper les terres.
+      if (!waterways.isPort(current)) continue;
+      for (const [next, crossing] of waterways.reach(current, SEA_LINK_MAX * SEA_ROUTE_DETOUR)) {
+        if (done.has(next) || !this.axisAllows(nation, this.controller[next]) || this.provinceDistance(current, next) > SEA_LINK_MAX) continue;
         const d = best + crossing + SEA_LINK_PENALTY;
         if (d < (distance.get(next) ?? Infinity)) {
           distance.set(next, d);
           previous.set(next, current);
           bySea.add(next);
+          crossings.set(next, crossing);
         }
       }
     }
@@ -3080,14 +3085,14 @@ export class Simulation {
       for (let i = 0; i + 1 < path.length; i++) {
         if (bySea.has(path[i + 1])) {
           seaLinks.push(i);
-          seaLength += this.provinceDistance(path[i], path[i + 1]);
+          seaLength += crossings.get(path[i + 1]) ?? this.provinceDistance(path[i], path[i + 1]);
         } else if (!built.has(linkKey(path[i], path[i + 1]))) length += this.provinceDistance(path[i], path[i + 1]);
       }
       return { path, sea: seaLinks.length > 0, length, seaLinks, seaLength };
     }
-    // Dernier recours : une ligne directe entre deux ports lointains d'une même mer.
-    if (!this.provinceCoastal[from] || !this.provinceCoastal[to] || (seasOf[from] & seasOf[to]) === 0) return null;
-    const crossing = this.provinceDistance(from, to);
+    // Dernier recours : une ligne maritime directe entre deux ports lointains, toujours par l'eau.
+    const crossing = waterways.isPort(from) && waterways.isPort(to) ? this.waterCrossing(from, to, SEA_ROUTE_MAX) : undefined;
+    if (crossing === undefined) return null;
     return { path: [from, to], sea: true, length: 0, seaLinks: [0], seaLength: crossing };
   }
 
@@ -5073,6 +5078,7 @@ export class Simulation {
         partner: axis.partner ?? 0,
         auto: axis.auto === true,
         seaLinks: this.seaLinksOf(axis),
+        seaPaths: this.seaLinksOf(axis).map((i) => this.waterways.path(axis.provinces[i], axis.provinces[i + 1], SEA_ROUTE_MAX) ?? []),
       };
     });
   }

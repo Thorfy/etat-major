@@ -26,6 +26,7 @@ const readGrid = (name: string) => {
 };
 const provinceGrid = readGrid('provinces.dat');
 const terrainGrid = Uint8Array.from(readGrid('terrain.dat'));
+const riverGrid = Uint8Array.from(readGrid('rivers.dat'));
 const ownerGrid = new Uint16Array(provinceGrid.length);
 for (let i = 0; i < provinceGrid.length; i++) {
   if (provinceGrid[i]) ownerGrid[i] = world.provinces[provinceGrid[i] - 1].nation + 1;
@@ -41,6 +42,7 @@ const make = (player: number, seed = 1) =>
     provinceGrid,
     ownerGrid,
     terrainGrid,
+    riverGrid,
     seed,
     player,
   });

@@ -185,6 +185,7 @@ export class GameClient {
     const provinceGrid = world.provinceGrid.slice();
     const ownerGrid = world.ownerGrid.slice();
     const terrainGrid = world.terrainGrid.slice();
+    const riverGrid = world.riverGrid.slice();
     const init: WorkerInit = {
       type: 'init',
       width: world.data.width,
@@ -204,11 +205,12 @@ export class GameClient {
       provinceGrid,
       ownerGrid,
       terrainGrid,
+      riverGrid,
       seed: start.seed,
       player: start.player,
       saved: start.saved?.sim,
     };
-    this.post(init, [provinceGrid.buffer, ownerGrid.buffer, terrainGrid.buffer]);
+    this.post(init, [provinceGrid.buffer, ownerGrid.buffer, terrainGrid.buffer, riverGrid.buffer]);
 
     if (start.saved) this.applySave(start.saved);
     window.setInterval(() => {
