@@ -4,6 +4,26 @@ import type { ProvinceBuilding } from './balance.ts';
 
 export type Stance = 'attack' | 'hold' | 'retreat';
 
+/** Pourquoi une IA refuse la paix : trop tôt, elle gagne, conquérante qui a encore des hommes, ni lasse ni saignée. */
+export type PeaceRefusal = 'early' | 'winning' | 'conqueror' | 'strong';
+
+/**
+ * Pourquoi une IA refuse un pacte ou un accord : ses places sont prises, les tiennes aussi, tu es trop
+ * agressif, hors de portée, commerce coupé (guerre, embargo, blocus), ou elle n'a pas besoin de toi.
+ */
+/** Ce qu'une paix au statu quo changerait pour un camp : provinces et cellules gagnées et rendues. */
+export interface PeaceTerms {
+  provincesGained: number;
+  provincesLost: number;
+  cellsGained: number;
+  cellsLost: number;
+}
+
+export type DealRefusal = 'full' | 'yourFull' | 'aggressive' | 'unreachable' | 'cut' | 'noNeed';
+
+/** Pourquoi une offensive s'arrête : but atteint, à bout de forces, enlisée, ou débarquement impossible. */
+export type OffensiveEnd = 'reached' | 'exhausted' | 'stalled' | 'landing';
+
 /**
  * Chantiers : usine (PIB et capacité), infrastructure (transport), dépôt (ravitaillement),
  * fortifications (une bande de cellules, sans province).
@@ -175,6 +195,8 @@ export interface FrontSnapshot {
   sides: [FrontSideSnapshot, FrontSideSnapshot];
   /** Fronts du joueur : des points répartis le long du front, x, y, camp (0 : a, 1 : b)… pour y poser des troupes. */
   marks: number[];
+  /** Fronts du joueur : ce qu'une paix signée maintenant changerait pour lui. */
+  peace?: PeaceTerms;
 }
 
 export interface FrontSideSnapshot {
@@ -343,21 +365,23 @@ export type SimEvent =
   | { type: 'war'; tick: number; a: number; b: number }
   | { type: 'capitulation'; tick: number; loser: number; winner: number }
   | { type: 'peace'; tick: number; a: number; b: number }
-  | { type: 'peaceRefused'; tick: number; from: number; to: number }
+  | { type: 'peaceRefused'; tick: number; from: number; to: number; reason?: PeaceRefusal }
   | { type: 'peaceOffer'; tick: number; from: number; to: number }
   | { type: 'alliance'; tick: number; a: number; b: number }
-  | { type: 'allianceRefused'; tick: number; from: number; to: number }
+  | { type: 'allianceRefused'; tick: number; from: number; to: number; reason?: DealRefusal }
   | { type: 'allianceBroken'; tick: number; a: number; b: number }
   | { type: 'coalition'; tick: number; target: number; members: number[] }
   | { type: 'secession'; tick: number; parent: number; rebel: number }
   | { type: 'demand'; tick: number; parent: number; origin: number; kind: DemandKind }
   | { type: 'independence'; tick: number; parent: number; rebel: number }
   | { type: 'tradeDeal'; tick: number; a: number; b: number }
-  | { type: 'tradeDealRefused'; tick: number; from: number; to: number }
+  | { type: 'tradeDealRefused'; tick: number; from: number; to: number; reason?: DealRefusal }
   | { type: 'tradeDealEnded'; tick: number; a: number; b: number }
   | { type: 'embargo'; tick: number; from: number; to: number }
   | { type: 'embargoLifted'; tick: number; from: number; to: number }
   | { type: 'axisBuilt'; tick: number; nation: number }
+  /** Une offensive du joueur s'arrête d'elle-même, et pourquoi. */
+  | { type: 'offensiveEnded'; tick: number; nation: number; reason: OffensiveEnd }
   | { type: 'axisCut'; tick: number; nation: number; by: number }
   | { type: 'axisRestored'; tick: number; nation: number }
   /** Axe refusé : il porterait le réseau au-delà de ses terminus. */
@@ -505,6 +529,11 @@ export interface SimSaveState {
   effort: number[];
   effortTarget: number[];
   growth: number[];
+  /** PIB au dernier relevé hebdomadaire (absent des sauvegardes d'avant). */
+  weekOutput?: number[];
+  /** Bonus du premier réseau de chaque province, et pays dont le premier réseau est fait. */
+  axisBaseline?: number[];
+  baselineSet?: number[];
   consolidation: number[];
   rawCapacity: number[];
   provinceManpower: number[];

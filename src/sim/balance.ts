@@ -319,8 +319,17 @@ export const WAR_WEARINESS_PER_MINUTE = 0.005;
 export const CASUALTY_WEARINESS = 0.2;
 /** Usure par minute si tout le territoire national est occupé (au prorata sinon). */
 export const OCCUPATION_WEARINESS_PER_MINUTE = 0.04;
-/** Stabilité gagnée par le vainqueur d'une capitulation. */
+/**
+ * Stabilité gagnée par le vainqueur d'une capitulation, pour un vaincu aussi gros que lui (au prorata
+ * sinon) : avaler un micro-État ne rassure personne. Une victoire ne la porte jamais au-dessus de son
+ * niveau de paix.
+ */
 export const VICTORY_STABILITY = 0.1;
+/**
+ * Les régions agitées pèsent sur le pays : son niveau de paix baisse de tant, pour une agitation
+ * de 100 % sur tout le pays (part × agitation, sommée sur ses régions).
+ */
+export const UNREST_STABILITY_DRAG = 0.6;
 /**
  * Effort de guerre possible au plus : tout tant que la stabilité reste à son niveau de départ,
  * puis de moins en moins, jusqu'à ce réglage à stabilité nulle.

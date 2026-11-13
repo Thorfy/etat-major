@@ -266,6 +266,45 @@ d'avant (réseau tracé à la main), graines 1 et 2.
   et quelques avions sur les traversées ; plus nombreux sur les tronçons partagés. Seule la couche
   du dessus se redessine (30 images par seconde), pas la carte ; rien à trop petit zoom.
 
+## Flotte de testeurs et corrections
+
+**Outil de test.** `node tools/playtest.ts` joue un pays sans navigateur, tour par tour : `new`,
+`state`, `do <ordre>`, `run <semaines>` (il s'arrête là où le jeu se mettrait en pause), la partie
+sauvegardée dans un dossier entre deux appels. Huit agents l'ont utilisé pour jouer deux ans chacun,
+un pays et un style chacun, sans lire le code : les pacifiques ont noté 3 à 4/10 (rien ne se passe),
+les conquérants 6/10 (grisant, mais opaque, et la conquête ne rapporte pas).
+
+**Corrigé d'après leurs rapports :**
+
+- **Stabilité bloquée à 100 % chez les conquérants.** Chaque capitulation donnait +10 %, quelle que
+  soit la taille du vaincu. Désormais au prorata du poids du vaincu, et jamais au-dessus du niveau de
+  paix ; et les régions agitées font baisser ce niveau (60 points pour une agitation de 100 % sur tout
+  le pays).
+- **PIB qui gonfle de 10 à 25 % au premier mois.** Le premier réseau commercial de chaque pays
+  ajoutait son bonus à un PIB réel qui le contenait déjà. Il est maintenant neutre : seuls ses
+  changements ensuite comptent. La croissance affichée est l'évolution réelle du PIB d'une semaine sur
+  l'autre (elle ne mesurait que le développement et restait à 0 en paix).
+- **Guerres fantômes.** Un pays sans plus une cellule ne capitulait pas si aucun ennemi ne tenait ses
+  terres d'origine (une région soulevée, ou des terres prises par un tiers) : il capitule, devant
+  l'ennemi qui le combat le plus. Une IA accepte la paix d'une guerre sans contact.
+- **Fronts sans contact** (un océan entre les deux) : ils ne gardent plus aucune force et ne comptent
+  plus dans les 100 % d'engagement ; la carte du front dit quand l'engagement est plafonné.
+- **Annexions absurdes** (le Venezuela qui avale la Hollande) : à la capitulation, chaque province
+  restante va à l'ennemi en guerre le plus proche, et une cellule d'une province déjà tenue par un
+  ennemi revient à celui-ci.
+- **Paix lisible** : la carte du front et la fenêtre d'offre de paix disent les provinces gardées et
+  rendues. **Refus expliqués** : paix (trop tôt, elle gagne, conquérante, ni lasse ni saignée), pacte
+  et accord (places prises, agressivité, hors de portée, commerce coupé, pas besoin de toi).
+- **Offensives qui disparaissent** : le joueur apprend pourquoi la sienne s'arrête (objectif atteint,
+  à bout de forces, enlisée, débarquement sur une côte qui n'est plus ennemie).
+- **Affichage** : PIB toujours en milliards (« 2 738 Md $ » : « Bn » se lit mille milliards en
+  français) ; agressivité « extrême » au-delà de 100 %, avec les semaines avant de pouvoir signer ;
+  main-d'œuvre épuisée affichée avec ses renforts par semaine.
+
+**Pas encore traité :** la conquête trop facile (un petit pays tombe en quelques jours), un monde qui
+ne menace jamais le joueur pacifique, des systèmes sans effet visible (doctrine, recherche,
+fortifications, marine). Ils relèvent du but et du score.
+
 ## Unités en 3D isométrique
 
 Les sprites plats, tournés sur la carte, faisaient pauvre. Les unités sont maintenant des planches

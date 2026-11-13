@@ -2,13 +2,27 @@ export const integer = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0
 
 export function formatGdp(millions: number): string {
   if (millions <= 0) return 'n.c.';
-  if (millions >= 1e6) return `${(millions / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} Bn $`;
+  // Toujours en milliards : « Bn » se lit mille milliards en français, et mêler les deux unités
+  // empêche de comparer les pays d'un coup d'œil.
   if (millions >= 1e3) return `${integer.format(millions / 1e3)} Md $`;
   return `${integer.format(millions)} M $`;
 }
 
 /** Espace insécable : un pourcentage ne se coupe jamais avant son signe. */
 const NBSP = ' ';
+
+/**
+ * Agressivité : un pourcentage jusqu'à 100 %, puis « extrême ». Au-delà, elle mesure seulement le
+ * temps qu'il faudra au monde pour oublier (un point par semaine).
+ */
+export function formatAggression(value: number): string {
+  return value >= 1 ? 'extrême' : formatPercent(value);
+}
+
+/** Semaines avant que l'agressivité repasse sous un seuil (un point par semaine). */
+export function weeksBelow(value: number, threshold: number, decayPerWeek: number): number {
+  return Math.max(0, Math.ceil((value - threshold) / decayPerWeek));
+}
 
 export function formatPercent(share: number): string {
   return `${integer.format(share * 100)}${NBSP}%`;

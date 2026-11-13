@@ -1,6 +1,6 @@
 // Textes des événements du monde, pour le journal et les messages.
 import { ARCHETYPES, BALANCED_ARCHETYPE, DOCTRINE_AXES } from '../sim/doctrine.ts';
-import type { SimEvent } from '../sim/protocol.ts';
+import type { DealRefusal, OffensiveEnd, PeaceRefusal, SimEvent } from '../sim/protocol.ts';
 
 /** Nations concernées par un événement. */
 export function eventNations(event: SimEvent): number[] {
@@ -17,6 +17,7 @@ export function eventNations(event: SimEvent): number[] {
     case 'embargoLifted':
       return [event.from, event.to];
     case 'axisBuilt':
+    case 'offensiveEnded':
     case 'axisRestored':
     case 'axisRefused':
     case 'networkChanged':
@@ -41,6 +42,32 @@ export function eventNations(event: SimEvent): number[] {
   }
 }
 
+/** Pourquoi une IA refuse la paix, dit au joueur. */
+export const PEACE_REFUSALS: Record<PeaceRefusal, string> = {
+  early: 'la guerre vient de commencer (4 semaines au moins)',
+  winning: 'elle pense gagner',
+  conqueror: 'conquérante, elle a encore des hommes',
+  strong: "ni lasse, ni à court d'hommes, ni en train de perdre",
+};
+
+/** Pourquoi une IA refuse un pacte ou un accord commercial. */
+export const DEAL_REFUSALS: Record<DealRefusal, string> = {
+  full: 'ses places sont toutes prises',
+  yourFull: 'tes places sont toutes prises',
+  aggressive: 'ton agressivité dépasse 45 %',
+  unreachable: 'hors de portée',
+  cut: 'le commerce est coupé entre vous (guerre, embargo ou blocus)',
+  noNeed: "elle ne te craint pas et ne craint personne : elle n'a pas besoin de toi",
+};
+
+/** Pourquoi une offensive du joueur s'arrête. */
+export const OFFENSIVE_ENDS: Record<OffensiveEnd, string> = {
+  reached: 'Offensive terminée : objectif atteint',
+  exhausted: 'Offensive arrêtée : à bout de forces',
+  stalled: "Offensive arrêtée : enlisée, elle n'avançait plus",
+  landing: "Débarquement annulé : la côte visée n'est plus à un ennemi",
+};
+
 /** Une ligne de journal. */
 export function describeEvent(event: SimEvent, nameOf: (id: number) => string): string {
   switch (event.type) {
@@ -51,13 +78,13 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
     case 'peace':
       return `Paix : ${nameOf(event.a)} et ${nameOf(event.b)}`;
     case 'peaceRefused':
-      return `${nameOf(event.to)} refuse la paix à ${nameOf(event.from)}`;
+      return `${nameOf(event.to)} refuse la paix à ${nameOf(event.from)}${event.reason ? ` : ${PEACE_REFUSALS[event.reason]}` : ''}`;
     case 'peaceOffer':
       return `${nameOf(event.from)} propose la paix à ${nameOf(event.to)}`;
     case 'alliance':
       return `Pacte de non-agression : ${nameOf(event.a)} et ${nameOf(event.b)}`;
     case 'allianceRefused':
-      return `${nameOf(event.to)} refuse le pacte de ${nameOf(event.from)}`;
+      return `${nameOf(event.to)} refuse le pacte de ${nameOf(event.from)}${event.reason ? ` : ${DEAL_REFUSALS[event.reason]}` : ''}`;
     case 'allianceBroken':
       return `${nameOf(event.a)} rompt son pacte avec ${nameOf(event.b)}`;
     case 'coalition':
@@ -71,7 +98,7 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
     case 'tradeDeal':
       return `Accord commercial : ${nameOf(event.a)} et ${nameOf(event.b)}`;
     case 'tradeDealRefused':
-      return `${nameOf(event.to)} refuse l'accord commercial de ${nameOf(event.from)}`;
+      return `${nameOf(event.to)} refuse l'accord commercial de ${nameOf(event.from)}${event.reason ? ` : ${DEAL_REFUSALS[event.reason]}` : ''}`;
     case 'tradeDealEnded':
       return `Fin de l'accord commercial entre ${nameOf(event.a)} et ${nameOf(event.b)}`;
     case 'embargo':
@@ -80,6 +107,8 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
       return `${nameOf(event.from)} lève son embargo sur ${nameOf(event.to)}`;
     case 'axisBuilt':
       return `${nameOf(event.nation)} ouvre un axe commercial`;
+    case 'offensiveEnded':
+      return OFFENSIVE_ENDS[event.reason];
     case 'axisCut':
       return event.by ? `${nameOf(event.by)} coupe un axe commercial de ${nameOf(event.nation)}` : `Un axe commercial de ${nameOf(event.nation)} est coupé`;
     case 'axisRestored':

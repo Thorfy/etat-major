@@ -43,7 +43,7 @@ import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
 import { provinceTrend, provinceWealth } from './economy.ts';
 import { relationTint, stabilityTint } from './mapTints.ts';
-import { eventNations } from './events.ts';
+import { DEAL_REFUSALS, OFFENSIVE_ENDS, PEACE_REFUSALS, eventNations } from './events.ts';
 import { regionName } from './regionNames.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
 import { type SaveSlot, writeSave } from './saves.ts';
@@ -334,7 +334,7 @@ export class GameClient {
         }
         break;
       case 'peaceRefused':
-        if (event.from === me) this.notify(`${name(event.to)} refuse la paix : elle se croit encore en mesure de gagner.`);
+        if (event.from === me) this.notify(`${name(event.to)} refuse la paix : ${PEACE_REFUSALS[event.reason ?? 'strong']}.`);
         break;
       case 'peaceOffer':
         if (event.to === me) this.openPopup({ tick: event.tick, kind: 'peaceOffer', nations: [event.from] });
@@ -343,7 +343,7 @@ export class GameClient {
         if (event.a === me || event.b === me) this.notify(`Pacte de non-agression signé avec ${name(event.a === me ? event.b : event.a)}.`);
         break;
       case 'allianceRefused':
-        if (event.from === me) this.notify(`${name(event.to)} refuse le pacte : tu es trop agressif, ou trop faible à ses yeux.`);
+        if (event.from === me) this.notify(`${name(event.to)} refuse le pacte : ${DEAL_REFUSALS[event.reason ?? 'noNeed']}.`);
         break;
       case 'allianceBroken':
         if (event.b === me) this.notify(`${name(event.a)} rompt son pacte de non-agression avec toi.`);
@@ -365,7 +365,7 @@ export class GameClient {
         break;
       case 'tradeDealRefused':
         if (event.from === me) {
-          this.notify(`${name(event.to)} refuse l'accord : tu es trop agressif, vous ne commercez pas (guerre, embargo, ni frontière ni mer commune), ou l'un de vous a déjà ${MAX_TRADE_DEALS} accords.`);
+          this.notify(`${name(event.to)} refuse l'accord : ${DEAL_REFUSALS[event.reason ?? 'cut']}.`);
         }
         break;
       case 'tradeDealEnded':
@@ -376,6 +376,9 @@ export class GameClient {
         break;
       case 'embargoLifted':
         if (event.to === me) this.notify(`${name(event.from)} lève son embargo.`);
+        break;
+      case 'offensiveEnded':
+        if (event.nation === me) this.notify(`${OFFENSIVE_ENDS[event.reason]}.`);
         break;
       case 'axisBuilt':
         if (event.nation === me) this.notify('Axe commercial ouvert : les provinces traversées s\'enrichissent.');

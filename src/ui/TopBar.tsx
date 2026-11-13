@@ -1,6 +1,7 @@
 // Barre du haut : le pays, le temps, les indicateurs clés, les cartes et le menu, toujours au même endroit.
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { GAME_SPEEDS, type GameClient, SPEED_LABELS } from '../game/GameClient.ts';
+import { MANPOWER_REGEN_PER_MINUTE } from '../sim/balance.ts';
 import { formatDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapMode } from '../render/MapView.ts';
@@ -40,7 +41,7 @@ function Indicators({ game, nation }: { game: GameClient; nation: NationData }) 
         label="Main-d'œuvre"
         value={formatPercent(manpower)}
         tone={manpower < 0.25 ? 'behind' : ''}
-        title={`${integer.format(stats.manpower)} hommes mobilisables sur ${integer.format(stats.manpowerMax)}`}
+        title={`${integer.format(stats.manpower)} hommes mobilisables sur ${integer.format(stats.manpowerMax)} ; le réservoir se reconstitue de ${integer.format(stats.manpowerMax * MANPOWER_REGEN_PER_MINUTE)} par semaine, et les renforts y puisent`}
       />
       <Indicator label="Stabilité" value={formatPercent(stats.stability)} tone={stats.stability < 0.5 ? 'behind' : ''} />
       <Indicator

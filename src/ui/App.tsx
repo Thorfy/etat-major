@@ -18,7 +18,7 @@ import { AI_PROFILES, ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/b
 import { DOCTRINE_AXES, archetypeName } from '../sim/doctrine.ts';
 import { poleName } from '../game/doctrines.ts';
 import { RELATION_COLORS, type Relation } from '../game/mapTints.ts';
-import { formatGdp, formatPercent, integer } from './format.ts';
+import { formatAggression, formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
   hover: CellInfo;
@@ -143,7 +143,7 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
           {integer.format(mine)} contre {integer.format(theirs)}
         </dd>
         <dt>Agressivité</dt>
-        <dd class={aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>{formatPercent(aggression)}</dd>
+        <dd class={aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>{formatAggression(aggression)}</dd>
         <dt>Tempérament</dt>
         <dd title={PROFILE_HINTS[profile] ?? ''}>{AI_PROFILES[profile]?.name ?? '—'}</dd>
         <dt>Doctrine</dt>
@@ -459,13 +459,18 @@ function popupContent(game: GameClient, popup: Popup, nameOf: (id: number) => st
             choices: true,
           };
     }
-    case 'peaceOffer':
+    case 'peaceOffer': {
+      const enemy = popup.nations[0];
+      const front = game.snapshot?.fronts.find((entry) => (entry.a === game.player && entry.b === enemy) || (entry.b === game.player && entry.a === enemy));
+      const terms = front?.peace;
+      const plural = (count: number, word: string) => `${count} ${word}${count > 1 ? 's' : ''}`;
       return {
         title: `${who} propose la paix`,
         text: 'Chaque province disputée reviendrait à qui la tient, puis une trêve d\'un an.',
-        note: '',
+        note: terms ? `Pour toi : ${plural(terms.provincesGained, 'province')} gardée${terms.provincesGained > 1 ? 's' : ''}, ${plural(terms.provincesLost, 'province')} rendue${terms.provincesLost > 1 ? 's' : ''}.` : '',
         choices: true,
       };
+    }
   }
 }
 

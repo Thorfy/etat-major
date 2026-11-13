@@ -9,7 +9,9 @@ import { formatShortDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapTool, MapView } from '../render/MapView.ts';
 import {
+  AGGRESSION_DECAY_PER_WEEK,
   ALLIANCE_MAX_AGGRESSION,
+  MANPOWER_REGEN_PER_MINUTE,
   DEMAND_INDEPENDENCE_AT,
   DEMAND_INVESTMENT_AT,
   AUTO_TRANSIT_BONUS,
@@ -33,7 +35,7 @@ import {
 } from '../sim/doctrine.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { Art, Blason, buildingArt } from './Art.tsx';
-import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
+import { formatAggression, formatChange, formatGdp, formatPercent, formatRatio, integer, weeksBelow } from './format.ts';
 
 type Tab = 'fronts' | 'economy' | 'defense' | 'doctrine' | 'diplomacy';
 
@@ -69,6 +71,15 @@ function Slider({ label, value, min, max, step, onChange }: { label: ComponentCh
 }
 
 // ——— Fronts ———
+
+/** Ce que la paix changerait : provinces gardées et rendues. */
+function peaceSummary(peace: FrontSnapshot['peace']): string {
+  if (!peace) return '—';
+  const parts: string[] = [];
+  if (peace.provincesGained > 0 || peace.cellsGained > 0) parts.push(`tu gardes ${peace.provincesGained} province${peace.provincesGained > 1 ? 's' : ''}`);
+  if (peace.provincesLost > 0 || peace.cellsLost > 0) parts.push(`tu en rends ${peace.provincesLost}`);
+  return parts.length > 0 ? parts.join(', ') : 'rien ne change';
+}
 
 function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSnapshot; nations: NationData[] }) {
   const mine = front.a === game.player ? 0 : 1;
@@ -138,7 +149,12 @@ function FrontCard({ game, front, nations }: { game: GameClient; front: FrontSna
         </dd>
         <dt>Ennemi encerclé</dt>
         <dd class={enemyPocket > 0 ? 'ahead' : ''}>{enemyPocket > 0 ? integer.format(enemyPocket) : '—'}</dd>
+        <dt title="Une paix signée maintenant : chaque province disputée revient à qui en tient la majorité.">À la paix</dt>
+        <dd>{peaceSummary(front.peace)}</dd>
       </dl>
+      {!noContact && order.allocation > own.allocation + 0.01 && (
+        <p class="note">Plafonné à {formatPercent(own.allocation)} : le reste de ton armée est engagé sur tes autres fronts.</p>
+      )}
       <div class="front-actions">
         <button class="action quiet" disabled={noContact} onClick={() => game.fortifyFront(enemyId)}>
           Fortifier ce front
@@ -461,8 +477,10 @@ function EconomyTab({ game, nation }: { game: GameClient; nation: NationData }) 
           <dt>{stats.growth < 0 ? 'Usure' : 'Croissance'}</dt>
           <dd class={stats.growth > 0.0005 ? 'ahead' : stats.growth < -0.0005 ? 'behind' : ''}>{formatChange(stats.growth)} / sem.</dd>
           <dt>Main-d'œuvre</dt>
-          <dd class={manpowerShare < 0.25 ? 'behind' : ''}>
-            {integer.format(stats.manpower)} / {integer.format(stats.manpowerMax)}
+          <dd class={manpowerShare < 0.25 ? 'behind' : ''} title="Le réservoir se reconstitue chaque semaine ; les renforts y puisent tant que l'armée reste sous sa capacité.">
+            {manpowerShare < 0.05
+              ? `épuisée · +${integer.format(stats.manpowerMax * MANPOWER_REGEN_PER_MINUTE)} / sem.`
+              : `${integer.format(stats.manpower)} / ${integer.format(stats.manpowerMax)}`}
           </dd>
           <dt>Stabilité</dt>
           <dd class={stats.stability < 0.5 ? 'behind' : ''}>{formatPercent(stats.stability)}</dd>
@@ -672,7 +690,12 @@ function DiplomacyTab({ game, nations }: { game: GameClient; nations: NationData
         <h3>Relations</h3>
         <dl class="wide">
           <dt>Agressivité</dt>
-          <dd class={stats.aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>{formatPercent(stats.aggression)}</dd>
+          <dd class={stats.aggression >= ALLIANCE_MAX_AGGRESSION ? 'behind' : ''}>
+            {formatAggression(stats.aggression)}
+            {stats.aggression >= ALLIANCE_MAX_AGGRESSION && (
+              <small> · pactes et accords dans {weeksBelow(stats.aggression, ALLIANCE_MAX_AGGRESSION, AGGRESSION_DECAY_PER_WEEK)} sem.</small>
+            )}
+          </dd>
           <dt>Pactes</dt>
           <dd>{list(stats.allies, 'aucun')}</dd>
           <dt>Trêves</dt>
