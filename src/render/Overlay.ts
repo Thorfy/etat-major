@@ -1,7 +1,8 @@
 // Flèches d'offensive et poches, dessinées par-dessus les noms de pays.
 import { wrapDeltaX } from '../map/projection.ts';
-import type { AxisSnapshot, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import type { AxisSnapshot, FrontSnapshot, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import type { Camera } from './Camera.ts';
+import { type FlowEdge, drawBadge, drawSprite } from './Sprites.ts';
 
 export interface ArrowDraft {
   /** Flèche d'offensive, ligne fortifiée ou axe commercial en projet. */
@@ -169,7 +170,7 @@ export function drawAxes(
   partner: (nation: number) => boolean,
   axes: readonly AxisSnapshot[],
   all = false,
-): void {
+): FlowEdge[] {
   const { viewWidth, viewHeight, zoom } = camera;
   const edges = new Map<string, RoadEdge>();
   const nodes = new Map<string, RoadNode>();
@@ -231,7 +232,7 @@ export function drawAxes(
       edges.set(key, { curve, count: 1, active: axis.active, sea, own, color, rank });
     }
   }
-  if (edges.size === 0) return;
+  if (edges.size === 0) return [];
 
   const widthOf = (edge: { own: boolean; count: number }) => (edge.own ? 3.5 : 3) + 1.6 * (Math.min(4, edge.count) - 1);
   const stroke = (edge: RoadEdge) => {
@@ -271,6 +272,8 @@ export function drawAxes(
   }
   ctx.lineCap = 'butt';
   ctx.lineJoin = 'miter';
+  // Le trafic ne circule que sur ses routes et celles de ses partenaires.
+  return [...edges.values()].filter((edge) => edge.rank >= 2).map((edge) => ({ curve: edge.curve, sea: edge.sea, count: edge.count }));
 }
 
 /** Secteurs prioritaires du joueur : cercles tiretés. */
@@ -309,10 +312,49 @@ export function drawCampaign(
   offensives: readonly OffensiveSnapshot[],
   pockets: readonly PocketSnapshot[],
   draft: ArrowDraft | null,
+  fronts: readonly FrontSnapshot[] = [],
 ): void {
   const { viewWidth, viewHeight, zoom } = camera;
   const toScreenX = (x: number) => wrapDeltaX(camera.x, x) * zoom + viewWidth / 2;
   const toScreenY = (y: number) => (y - camera.y) * zoom + viewHeight / 2;
+  const troopSize = Math.min(64, 22 + zoom * 8);
+
+  // Les troupes de ses fronts : de l'infanterie de chaque côté de la ligne.
+  if (zoom >= 0.9) {
+    for (const front of fronts) {
+      const marks = front.marks;
+      // Les deux camps d'un même secteur se font face : chacun recule de son côté de la ligne.
+      const sectors = new Map<string, { own?: [number, number]; enemy?: [number, number] }>();
+      for (let i = 0; i + 2 < marks.length; i += 3) {
+        const nation = marks[i + 2] === 0 ? front.a : front.b;
+        const key = `${Math.floor(marks[i] / 24)},${Math.floor(marks[i + 1] / 24)}`;
+        const sector = sectors.get(key) ?? {};
+        sector[nation === player ? 'own' : 'enemy'] = [marks[i], marks[i + 1]];
+        sectors.set(key, sector);
+      }
+      for (const { own, enemy } of sectors.values()) {
+        let dx = 1;
+        let dy = 0;
+        if (own && enemy) {
+          dx = wrapDeltaX(own[0], enemy[0]);
+          dy = enemy[1] - own[1];
+          const length = Math.hypot(dx, dy) || 1;
+          dx /= length;
+          dy /= length;
+        }
+        const gap = troopSize * 0.5;
+        for (const [cell, side] of [[own, 1], [enemy, -1]] as const) {
+          if (!cell) continue;
+          const x = toScreenX(cell[0]) - side * dx * gap;
+          const y = toScreenY(cell[1]) - side * dy * gap;
+          if (x < -troopSize || x > viewWidth + troopSize || y < -troopSize || y > viewHeight + troopSize) continue;
+          drawBadge(ctx, x, y + troopSize * 0.18, troopSize * 0.42, side === 1 ? OWN_COLOR : ENEMY_COLOR);
+          // Chaque camp regarde l'autre.
+          drawSprite(ctx, 'infanterie', x, y, troopSize, side * (dx === 0 ? 1 : dx), 0);
+        }
+      }
+    }
+  }
 
   for (const pocket of pockets) {
     const x = toScreenX(pocket.x);
@@ -354,6 +396,12 @@ export function drawCampaign(
     // En mer, la flèche est pointillée : sa bordure dit qui débarque.
     const fill = offensive.inTransit && (own || enemy) ? SEA_COLOR : color;
     drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, fill, own || enemy ? 0.8 : 0.35, offensive.inTransit);
+    // En tête de l'offensive : des blindés, ou un navire de guerre pendant la traversée.
+    if (own || enemy) {
+      const lead = 0.55;
+      const size = troopSize * 1.15;
+      drawSprite(ctx, offensive.inTransit ? 'navire-guerre' : 'blinde', x0 + dx * lead, y0 + dy * lead, size, dx, dy);
+    }
   }
 
   if (draft && draft.kind === 'axis') {

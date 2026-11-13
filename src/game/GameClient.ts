@@ -283,7 +283,7 @@ export class GameClient {
         this.view.setWars(update.snapshot.fronts.map((front) => [front.a, front.b]));
         this.refreshMapTints();
       }
-      this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets);
+      this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets, update.snapshot.fronts);
       this.watchSupply(update.snapshot);
       this.watchCounters(update.snapshot);
       this.view.setPriorityZones(this.playerStats?.priorityZones ?? []);

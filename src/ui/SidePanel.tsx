@@ -32,7 +32,7 @@ import {
   archetypeOf,
 } from '../sim/doctrine.ts';
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
-import { Art, Blason } from './Art.tsx';
+import { Art, Blason, buildingArt } from './Art.tsx';
 import { formatChange, formatGdp, formatPercent, formatRatio, integer } from './format.ts';
 
 type Tab = 'fronts' | 'economy' | 'defense' | 'doctrine' | 'diplomacy';
@@ -381,7 +381,7 @@ function BuildQueues({ game, military: showMilitary }: { game: GameClient; milit
               <div class="offensive-row">
                 <span>
                   {items.length > 1 && <span class="grip" aria-hidden="true">⠿</span>}
-                  <Art id={`batiments/${order.kind}`} class="queue-art" />
+                  <Art id={buildingArt(order.kind, order.province || order.axis + order.region)} class="queue-art" />
                   {BUILD_NAMES[order.kind]}{' '}
                   <small>
                     ·{' '}

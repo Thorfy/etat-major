@@ -4,7 +4,8 @@
 //   node tools/illustrate.ts --list       le catalogue, sans rien générer
 //   node tools/illustrate.ts --only ecrans/accueil,blasons/FRA --force   régénère ces images
 // Le ComfyUI doit tourner sur http://127.0.0.1:8188 (ou COMFYUI=http://hôte:port).
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,6 +15,10 @@ interface Format {
   outWidth: number;
   outHeight: number;
   rules: string;
+  /** Style propre au format, à la place du style commun (les sprites de la carte). */
+  style?: string;
+  /** Fond vert uni à retirer : l'image sort détourée (sprites de la carte). */
+  chroma?: boolean;
 }
 
 interface Entry {
@@ -86,7 +91,7 @@ function seedOf(id: string): number {
 }
 
 function graph(entry: Entry, format: Format) {
-  const prompt = `${catalog.style} ${entry.subject} ${format.rules}`;
+  const prompt = `${format.style ?? catalog.style} ${entry.subject} ${format.rules}`;
   return {
     12: { class_type: 'UNETLoader', inputs: { unet_name: 'qwen_image_2.1_turbo_int8_convrot.safetensors', weight_dtype: 'default' } },
     13: { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen3vl_8b_int8_convrot.safetensors', type: 'qwen_image', device: 'default' } },
@@ -106,6 +111,15 @@ function graph(entry: Entry, format: Format) {
       inputs: { images: ['24', 0], filename_prefix: `etat-major/${entry.id.replace('/', '-')}`, fps: 1, lossless: false, quality: 80, method: 'default' },
     },
   };
+}
+
+/** Retire le fond vert uni d'un sprite : l'image devient transparente autour de l'objet (ffmpeg). */
+function removeGreen(path: string): void {
+  const ffmpeg = process.env.FFMPEG ?? (existsSync('D:/Labs/ffmpeg/bin/ffmpeg.exe') ? 'D:/Labs/ffmpeg/bin/ffmpeg.exe' : 'ffmpeg');
+  const keyed = path.replace(/.webp$/, '.keyed.webp');
+  execFileSync(ffmpeg, ['-loglevel', 'error', '-y', '-i', path, '-vf', 'colorkey=0x00FF00:0.32:0.12,despill=type=green,format=yuva420p', '-c:v', 'libwebp', '-quality', '90', keyed]);
+  writeFileSync(path, readFileSync(keyed));
+  rmSync(keyed);
 }
 
 async function generate(entry: Entry): Promise<number> {
@@ -133,6 +147,7 @@ async function generate(entry: Entry): Promise<number> {
     const path = join(root, 'public/art', `${entry.id}.webp`);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
+    if (format.chroma) removeGreen(path);
     return bytes.length;
   }
 }

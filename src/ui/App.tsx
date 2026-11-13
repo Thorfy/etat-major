@@ -6,7 +6,7 @@ import type { LoadedWorld } from '../map/loadWorld.ts';
 import { TERRAIN_NAMES } from '../map/terrain.ts';
 import type { CellInfo, MapMode, MapTool, MapView } from '../render/MapView.ts';
 import type { BuildKind, SimEvent } from '../sim/protocol.ts';
-import { Art, Blason, landscapeOf } from './Art.tsx';
+import { Art, Blason, buildingArt, landscapeOf } from './Art.tsx';
 import { RegionCard } from './RegionCard.tsx';
 import { SidePanel } from './SidePanel.tsx';
 import { TopBar } from './TopBar.tsx';
@@ -82,8 +82,9 @@ function Journal({ game, nameOf }: { game: GameClient; nameOf(id: number): strin
   );
 }
 
-/** L'écran d'accueil change d'une visite à l'autre, parmi trois scènes. */
-const WELCOME_ART = ['ecrans/accueil', 'ecrans/accueil-2', 'ecrans/accueil-3'][Math.floor(Math.random() * 3)];
+/** L'écran d'accueil change d'une visite à l'autre, parmi cinq scènes ; la défaite, parmi deux. */
+const WELCOME_ART = ['ecrans/accueil', 'ecrans/accueil-2', 'ecrans/accueil-3', 'ecrans/accueil-4', 'ecrans/accueil-5'][Math.floor(Math.random() * 5)];
+const DEFEAT_ART = Math.random() < 0.5 ? 'ecrans/defaite' : 'ecrans/defaite-2';
 
 const RELATIONS = { war: 'en guerre', ally: 'pacte de non-agression', truce: 'trêve', peace: 'en paix' } as const;
 /** Ce que chaque tempérament de l'IA veut dire, au survol. */
@@ -237,7 +238,7 @@ function BuildOptions({ game, province, options }: { game: GameClient; province:
         </div>
       ))}
       {options.length > 0 && (
-        <Art id={`batiments/${(shown ?? options[0]).kind}`} class="build-art" />
+        <Art id={buildingArt((shown ?? options[0]).kind, province)} class="build-art" />
       )}
       {options.length > 0 && (
         <p class="note build-effect" id="build-effect">
@@ -461,13 +462,13 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
       ? pick('guerre', 4, true)
       : popup.kind === 'uprising'
         ? popup.coalition
-          ? pick('coalition', 2)
+          ? pick('coalition', 4)
           : pick('soulevement', 4, true)
         : popup.kind === 'demand'
           ? popup.demand === 'investment'
-            ? pick('investissements', 2)
-            : pick('independance', 2)
-          : pick('offre-paix', 2);
+            ? pick('investissements', 4)
+            : pick('independance', 4)
+          : pick('offre-paix', 4);
   return (
     <div class="dialog-backdrop">
       <section class={`panel dialog event ${popup.kind}`} role="alertdialog" aria-labelledby="event-title">
@@ -510,7 +511,7 @@ function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): 
   return (
     <div class="dialog-backdrop">
       <section class="panel dialog event" role="alertdialog" aria-labelledby="defeat-title">
-        <Art id="ecrans/defaite" class="dialog-art" eager />
+        <Art id={DEFEAT_ART} class="dialog-art" eager />
         <h2 id="defeat-title">{nameOf(game.player)} a capitulé</h2>
         <p>
           {nameOf(game.defeatedBy)} annexe tout ce qu'il te restait, après {formatDuration(game.tick)} de partie.

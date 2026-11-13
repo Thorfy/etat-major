@@ -2,13 +2,14 @@
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { wrapDeltaX } from '../map/projection.ts';
 import { MAX_OFFENSIVE_LENGTH } from '../sim/balance.ts';
-import type { AxisSnapshot, NationLabel, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
+import type { AxisSnapshot, FrontSnapshot, NationLabel, OffensiveSnapshot, PocketSnapshot } from '../sim/protocol.ts';
 import { traceRoute } from '../sim/route.ts';
 import { Camera } from './Camera.ts';
 import { Labels } from './Labels.ts';
 import { MapRenderer } from './MapRenderer.ts';
 import { MAX_FORT_LINE_LENGTH, PRIORITY_RADIUS } from '../sim/balance.ts';
 import { type ArrowDraft, type ResourceMarker, drawAxes, drawCampaign, drawPriorityZones, drawResources } from './Overlay.ts';
+import { drawFlows, onSpriteLoad } from './Sprites.ts';
 
 const CLICK_TOLERANCE_PX = 5;
 const KEY_PAN_PX_PER_SECOND = 700;
@@ -93,6 +94,10 @@ export class MapView {
     this.canvas = mapCanvas;
     this.world = world;
     this.events = events;
+    // Un sprite chargé : la carte se redessine.
+    onSpriteLoad(() => {
+      this.dirty = true;
+    });
     this.camera = new Camera(world.data.width, world.data.height);
     this.renderer = new MapRenderer(mapCanvas, world);
     this.labels = new Labels(labelCanvas, world.data.nations);
@@ -239,11 +244,18 @@ export class MapView {
     };
   }
 
-  setCampaign(offensives: readonly OffensiveSnapshot[], pockets: readonly PocketSnapshot[]): void {
+  setCampaign(offensives: readonly OffensiveSnapshot[], pockets: readonly PocketSnapshot[], fronts: readonly FrontSnapshot[] = []): void {
     this.offensives = offensives;
     this.pockets = pockets;
+    this.fronts = fronts;
     this.dirty = true;
   }
+
+  /** Fronts du joueur, pour y poser ses troupes et celles de l'ennemi. */
+  private fronts: readonly FrontSnapshot[] = [];
+  /** Le trafic des routes s'anime : la couche du dessus se redessine à chaque image, la carte non. */
+  private flowEdges: ReturnType<typeof drawAxes> = [];
+  private lastOverlay = 0;
 
   get activeTool(): MapTool | null {
     return this.tool;
@@ -517,6 +529,19 @@ export class MapView {
     if (settled || atLimit) this.zoomTarget = null;
   }
 
+  private drawOverlay(time: number): void {
+    this.lastOverlay = time;
+    this.labels.draw(this.camera);
+    const ctx = this.labels.context;
+    if (this.mode === 'economic') drawResources(ctx, this.camera, this.resourceMarkers);
+    if (this.player === 0) return;
+    // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
+    this.flowEdges = drawAxes(ctx, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
+    drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
+    drawPriorityZones(ctx, this.camera, this.priorityZones, PRIORITY_RADIUS);
+    drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts);
+  }
+
   private tick(time: number): void {
     const dt = Math.min(0.1, (time - this.lastFrame) / 1000);
     this.frameMs = time - this.lastFrame;
@@ -525,6 +550,7 @@ export class MapView {
     this.applyKeys(dt);
     this.applyZoom(dt);
 
+    const animate = this.player !== 0 && this.flowEdges.length > 0 && time - this.lastOverlay >= 33;
     if (this.dirty || this.continuous) {
       if (this.lastPointer && this.pointers.size === 0) {
         this.hoverAt(this.lastPointer.x, this.lastPointer.y);
@@ -534,15 +560,11 @@ export class MapView {
         selectedProvince: this.selectedProvince,
         selectedOwner: this.selectedOwner,
       });
-      this.labels.draw(this.camera);
-      if (this.mode === 'economic') drawResources(this.labels.context, this.camera, this.resourceMarkers);
-      if (this.player !== 0) {
-        // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
-        drawAxes(this.labels.context, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
-        drawPriorityZones(this.labels.context, this.camera, this.priorityZones, PRIORITY_RADIUS);
-        drawCampaign(this.labels.context, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft);
-      }
+      this.drawOverlay(time);
       this.dirty = false;
+    } else if (animate) {
+      // Seule la couche du dessus bouge : noms, routes, trafic, campagne.
+      this.drawOverlay(time);
     }
     requestAnimationFrame((next) => this.tick(next));
   }

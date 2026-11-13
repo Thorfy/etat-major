@@ -4828,6 +4828,7 @@ export class Simulation {
         b: front.b,
         length: front.length,
         logRatio: front.logRatio,
+        marks: front.a === this.player || front.b === this.player ? this.frontMarks(front) : [],
         sides: [side(front.sides[0]), side(front.sides[1])],
       };
     });
@@ -4946,6 +4947,38 @@ export class Simulation {
       pockets: this.pockets,
       axes: this.axesSnapshot(),
     };
+  }
+
+  /**
+   * Points répartis le long d'un front : une cellule de chaque camp par carré de FRONT_MARK_SPACING
+   * cellules, au plus FRONT_MARK_MAX ; c'est de l'affichage.
+   */
+  private frontMarks(front: Front): number[] {
+    const { owners, width: W, height: H } = this;
+    const SPACING = 24;
+    const MAX = 16;
+    const seen = new Set<number>();
+    const marks: number[] = [];
+    for (let i = 0; i < this.frontierCount && marks.length < MAX * 3; i++) {
+      const cell = this.frontier[i];
+      const owner = owners[cell];
+      if (owner !== front.a && owner !== front.b) continue;
+      const enemy = owner === front.a ? front.b : front.a;
+      const x = cell % W;
+      const y = (cell - x) / W;
+      const touches =
+        owners[y * W + ((x + 1) % W)] === enemy ||
+        owners[y * W + ((x + W - 1) % W)] === enemy ||
+        (y > 0 && owners[cell - W] === enemy) ||
+        (y < H - 1 && owners[cell + W] === enemy);
+      if (!touches) continue;
+      const side = owner === front.a ? 0 : 1;
+      const bucket = (Math.floor(y / SPACING) * 1024 + Math.floor(x / SPACING)) * 2 + side;
+      if (seen.has(bucket)) continue;
+      seen.add(bucket);
+      marks.push(x, y, side);
+    }
+    return marks;
   }
 
   /** Axes du monde, seulement s'ils ont changé depuis le dernier instantané : c'est de l'affichage. */

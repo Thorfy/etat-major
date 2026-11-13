@@ -250,6 +250,22 @@ d'avant (réseau tracé à la main), graines 1 et 2.
 - **Non réglé :** la croissance du monde reste forte (+73 à +130 % de PIB en 4 ans), comme avant le
   réseau ; une graine voit la Chine s'effondrer (−18 %, 90 indépendances accordées dans le monde).
 
+## Troisième série d'images, sprites et trafic sur la carte
+
+- **Variantes :** quatre scènes pour chaque événement (coalition, indépendance, investissements, offre
+  de paix : +8), cinq écrans d'accueil et deux de défaite (+3), deux vues par bâtiment, la même pour
+  une province donnée (+12), quatre paysages par terrain et par état (+18). Six bâtiments
+  régénérés (un faux texte, des ciels en bandes qui faisaient drapeau) et un événement (une bannière
+  trop proche d'un vrai drapeau).
+- **Sprites de la carte** (`public/art/carte/`, format `sprite` : un objet seul sur un vert uni que
+  `tools/illustrate.ts` retire avec ffmpeg) : infanterie, blindé, camion, cargo, avion, navire de guerre.
+- **Troupes :** le long de chacun de ses fronts, de l'infanterie de chaque camp, face à face de part
+  et d'autre de la ligne (des points répartis par la simulation, un par carré de 24 cellules) ; un
+  blindé en tête de chaque offensive, un navire de guerre pendant une traversée.
+- **Trafic :** des camions vont et viennent sur ses routes et celles de ses partenaires, des cargos
+  et quelques avions sur les traversées ; plus nombreux sur les tronçons partagés. Seule la couche
+  du dessus se redessine (30 images par seconde), pas la carte ; rien à trop petit zoom.
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

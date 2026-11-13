@@ -33,6 +33,11 @@ export function Blason({ nation, size = 'small' }: { nation: NationData; size?: 
   return <Art id={`blasons/${nation.code}`} alt={`Blason : ${nation.name}`} class={`blason ${size}`} eager={size !== 'small'} />;
 }
 
+/** Illustration d'un bâtiment : deux vues chacun, la même pour une province donnée. */
+export function buildingArt(kind: string, province = 0): string {
+  return `batiments/${kind}${province % 2 === 1 ? '-2' : ''}`;
+}
+
 const TERRAIN_FILES = ['plaine', 'montagne', 'plateau', 'desert', 'arctique', 'jungle'] as const;
 
 /**
@@ -41,7 +46,7 @@ const TERRAIN_FILES = ['plaine', 'montagne', 'plateau', 'desert', 'arctique', 'j
  */
 export function landscapeOf(terrain: number, gdpMusd: number, areaKm2: number, development: number, province = 0): string {
   const kind = development < 0.92 ? 'ravage' : gdpMusd / Math.max(1, areaKm2) >= 3 ? 'industriel' : 'rural';
-  // Trois paysages par terrain et par état : chaque province garde toujours le même.
-  const variant = province % 3;
+  // Quatre paysages par terrain et par état : chaque province garde toujours le même.
+  const variant = province % 4;
   return `paysages/${TERRAIN_FILES[terrain] ?? 'plaine'}-${kind}${variant > 0 ? `-${variant + 1}` : ''}`;
 }

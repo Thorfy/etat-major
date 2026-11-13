@@ -168,6 +168,8 @@ export interface FrontSnapshot {
   /** Log du rapport de force de `a` sur `b`, posture comprise. */
   logRatio: number;
   sides: [FrontSideSnapshot, FrontSideSnapshot];
+  /** Fronts du joueur : des points répartis le long du front, x, y, camp (0 : a, 1 : b)… pour y poser des troupes. */
+  marks: number[];
 }
 
 export interface FrontSideSnapshot {
