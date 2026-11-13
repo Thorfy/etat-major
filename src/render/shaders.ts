@@ -24,7 +24,7 @@ uniform sampler2D uTerrain;
 uniform sampler2D uEconomy;
 uniform sampler2D uSupply;
 uniform sampler2D uFort;
-uniform uint uMapMode;      // 0 : politique, 1 : économique, 2 : ravitaillement
+uniform uint uMapMode;      // 0 : pays, 1 : économie, 2 : ravitaillement, 3 : relations, 4 : intérieur
 uniform vec2 uCenter;
 uniform vec2 uResolution;
 uniform float uZoom;        // pixels physiques par cellule
@@ -32,6 +32,8 @@ uniform uint uHoverProvince;
 uniform uint uSelectedProvince;
 uniform uint uSelectedOwner;
 uniform sampler2D uAllies;
+uniform sampler2D uNationTint;  // relations, intérieur : teinte de chaque nation
+uniform sampler2D uUnrest;      // intérieur : agitation de chaque province
 
 out vec4 outColor;
 
@@ -58,6 +60,12 @@ const vec3 FORT_COLOR = vec3(0.137, 0.149, 0.157);
 const vec3 SUPPLY_GOOD = vec3(0.333, 0.588, 0.314);
 const vec3 SUPPLY_LOW = vec3(0.886, 0.643, 0.212);
 const vec3 SUPPLY_CUT = vec3(0.776, 0.188, 0.149);
+// Évolution de l'économie : hachures vertes là où elle monte, rouges là où elle recule.
+const vec3 TREND_UP = vec3(0.204, 0.443, 0.243);
+const vec3 TREND_DOWN = vec3(0.612, 0.106, 0.086);
+// Intérieur : l'agitation des régions.
+const vec3 UNREST_COLOR = vec3(0.698, 0.110, 0.090);
+const vec3 TRADE_STRIPE = vec3(0.290, 0.592, 0.333);
 
 ivec2 wrapCell(ivec2 c) {
   return ivec2(c.x & (MAP_W - 1), clamp(c.y, 0, MAP_H - 1));
@@ -103,15 +111,27 @@ float graticule(vec2 p) {
   return max(lineAlpha(dx, 0.5), lineAlpha(dy, 0.5));
 }
 
-// Relief discret : il se lit sans jamais masquer la couleur du pays.
-vec3 applyTerrain(vec3 color, vec2 p) {
-  int id = int(texelFetch(uTerrain, wrapCell(ivec2(floor(p))), 0).r * 255.0 + 0.5);
+// Les massifs : assombris et hachurés, sur toutes les cartes.
+vec3 applyRelief(vec3 color, int id, vec2 p) {
   if (id == 1) {
     color *= 0.87;
     float line = abs(fract((p.x + p.y * 0.6) / 2.7) - 0.5) * 2.0;
     color *= 1.0 - 0.12 * smoothstep(0.72, 0.95, line) * smoothstep(1.0, 2.0, uZoom);
   } else if (id == 2) {
     color *= 0.95;
+  }
+  return color;
+}
+
+int terrainAt(vec2 p) {
+  return int(texelFetch(uTerrain, wrapCell(ivec2(floor(p))), 0).r * 255.0 + 0.5);
+}
+
+// Relief discret : il se lit sans jamais masquer la couleur du pays.
+vec3 applyTerrain(vec3 color, vec2 p) {
+  int id = terrainAt(p);
+  if (id == 1 || id == 2) {
+    color = applyRelief(color, id, p);
   } else if (id == 3) {
     color = mix(color, vec3(0.93, 0.84, 0.62), 0.14);
   } else if (id == 4) {
@@ -163,10 +183,17 @@ vec3 shade(vec2 p, float gratAlpha) {
     color = texelFetch(uPalette, ivec2(int(owner), 0), 0).rgb;
     if (uMapMode == 1u) {
       // Densité de PIB de la province, avec un soupçon de la couleur du pays qui la tient.
-      float wealth = texelFetch(uEconomy, ivec2(int(province), 0), 0).r;
+      vec2 economy = texelFetch(uEconomy, ivec2(int(province), 0), 0).rg;
+      float wealth = economy.r;
       vec3 ramp = mix(ECONOMY_LOW, ECONOMY_MID, smoothstep(0.0, 0.6, wealth));
       ramp = mix(ramp, ECONOMY_HIGH, smoothstep(0.55, 1.0, wealth));
       color = mix(ramp, color, 0.2);
+      // L'évolution depuis le départ : hachures fines, plus denses à mesure qu'elle s'écarte.
+      float trend = (economy.g - 0.5) * 2.0;
+      float hatch = step(0.62, fract((gl_FragCoord.x - gl_FragCoord.y) / 6.0));
+      if (trend > 0.04) color = mix(color, TREND_UP, hatch * smoothstep(0.04, 0.5, trend) * 0.75);
+      else if (trend < -0.04) color = mix(color, TREND_DOWN, hatch * smoothstep(0.04, 0.5, -trend) * 0.8);
+      color = applyRelief(color, terrainAt(p), p);
     } else if (uMapMode == 2u) {
       // Le sol national, toujours ravitaillé, s'efface ; le territoire conquis prend sa teinte.
       float value = texelFetch(uSupply, wrapCell(ivec2(floor(p))), 0).r * 255.0;
@@ -177,6 +204,27 @@ vec3 shade(vec2 p, float gratAlpha) {
         ramp = mix(ramp, SUPPLY_GOOD, smoothstep(0.5, 1.0, level));
         color = mix(ramp, color, 0.15);
       }
+      color = applyRelief(color, terrainAt(p), p);
+    } else if (uMapMode == 3u) {
+      // Relations : la teinte de la relation, un soupçon de la couleur du pays ; rayé vert pour un accord.
+      vec4 tint = texelFetch(uNationTint, ivec2(int(owner), 0), 0);
+      color = mix(tint.rgb, color, 0.12);
+      if (tint.a < 0.75) {
+        float ray = step(0.6, fract((gl_FragCoord.x + gl_FragCoord.y) / 9.0));
+        color = mix(color, TRADE_STRIPE, 0.7 * ray);
+      }
+      color = applyRelief(color, terrainAt(p), p);
+    } else if (uMapMode == 4u) {
+      // Intérieur : la stabilité du pays, puis l'agitation de chaque région par-dessus.
+      color = mix(texelFetch(uNationTint, ivec2(int(owner), 0), 0).rgb, color, 0.15);
+      float raw = texelFetch(uUnrest, ivec2(int(province), 0), 0).r * 255.0;
+      float level = raw > 0.5 ? (raw - 1.0) / 254.0 : 0.0;
+      // Une région calme ne se voit pas ; elle rougit à mesure qu'elle s'agite.
+      if (level >= 0.05) {
+        float ray = step(0.5, fract((gl_FragCoord.x - gl_FragCoord.y) / 8.0));
+        color = mix(color, UNREST_COLOR, (0.1 + 0.6 * level) * (0.55 + 0.45 * ray));
+      }
+      color = applyRelief(color, terrainAt(p), p);
     } else {
       color = applyTerrain(color, p);
     }
@@ -204,7 +252,7 @@ vec3 shade(vec2 p, float gratAlpha) {
     if (province == uHoverProvince) color = mix(color, vec3(1.0), 0.16);
     if (province == uSelectedProvince) color = mix(color, HIGHLIGHT, 0.42);
 
-    float provinceVisible = uMapMode == 1u ? smoothstep(0.3, 1.2, uZoom) : smoothstep(0.75, 2.4, uZoom);
+    float provinceVisible = uMapMode == 1u || uMapMode == 4u ? smoothstep(0.3, 1.2, uZoom) : smoothstep(0.75, 2.4, uZoom);
     if (provinceVisible > 0.0 && provinceMargin < 0.999) {
       color = mix(color, PROVINCE_LINE, 0.42 * provinceVisible * lineAlpha(provinceDist, 0.35));
     }

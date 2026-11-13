@@ -120,6 +120,19 @@ describe('fortifications', () => {
     expect(sim.orderCost(order)).toBe(Math.ceil(cells * FORT_COST_PER_CELL));
   });
 
+  it('renforcent une frontière en paix, à la demande du joueur seulement', () => {
+    const sim = new Simulation(config());
+    // L'IA (chantier urgent) ne fortifie que ses fronts.
+    expect(sim.fortifyFront(B, A, true)).toBe(0);
+    const cells = sim.fortifyFront(B, A);
+    expect(cells).toBeGreaterThan(H);
+    const order = sim.buildQueueOf(B)[0];
+    expect(order.kind).toBe('fort');
+    // Le long de la frontière, sur son propre sol.
+    expect(order.cells!.every((cell) => sim.owners[cell] === B)).toBe(true);
+    expect(order.cells!.includes(ROW * W + BORDER)).toBe(true);
+  });
+
   it('se bâtissent, puis tombent avec les cellules prises', () => {
     const sim = new Simulation(config());
     sim.declareWars([[A, B]]);

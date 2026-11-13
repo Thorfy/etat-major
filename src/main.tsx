@@ -45,6 +45,7 @@ async function start(): Promise<void> {
   const setMapMode = (mode: MapMode) => {
     state.mapMode = mode;
     view?.setMapMode(mode);
+    state.game?.refreshMapTints();
     refresh();
   };
 
@@ -126,8 +127,9 @@ async function start(): Promise<void> {
     const { target } = event;
     if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
     const key = event.key.toLowerCase();
-    if ((key === 'e' || key === 'r') && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const mode = key === 'e' ? 'economic' : 'supply';
+    const modeKeys: Record<string, MapMode> = { e: 'economic', r: 'supply', t: 'relations', i: 'interior' };
+    if (modeKeys[key] && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const mode = modeKeys[key];
       setMapMode(state.mapMode === mode ? 'political' : mode);
       return;
     }

@@ -25,6 +25,9 @@ export interface BuildOrder {
   path?: number[];
   sea?: boolean;
   length?: number;
+  /** Route mixte : tronçons pris par la mer, et leur longueur (le reste est sur terre). */
+  seaLinks?: number[];
+  seaLength?: number;
   /** Investissements : la région (pays d'origine annexé) qui les a demandés, et leur coût. */
   region?: number;
   cost?: number;
@@ -43,6 +46,14 @@ export interface TradeAxis {
   length: number;
   /** Faux : coupé par l'ennemi, ou sous blocus. */
   active: boolean;
+  /** Tronçons pris par la mer : i relie provinces[i] à provinces[i + 1] (une route mixte, terre et mer). */
+  seaLinks?: number[];
+  /**
+   * Route d'un accord commercial : le partenaire qu'elle relie, de capitale à capitale. Tracée à la
+   * signature, sans chantier, elle disparaît avec l'accord ; elle montre l'échange sans enrichir les
+   * provinces (l'accord rapporte déjà), ni compter parmi les axes du pays.
+   */
+  partner?: number;
 }
 
 export interface AxisSnapshot {
@@ -55,6 +66,10 @@ export interface AxisSnapshot {
   points: number[];
   /** Pour chacune : encore tenue par le pays de l'axe. */
   held: boolean[];
+  /** Route d'un accord commercial : le partenaire relié (0 : un axe ordinaire). */
+  partner: number;
+  /** Tronçons pris par la mer : i relie le point i au point i + 1. */
+  seaLinks: number[];
 }
 
 /** Ce qu'une région agitée demande : des investissements, ou l'indépendance sans combat. */
@@ -105,6 +120,7 @@ export type SimCommand =
   /** Part des points de construction qui va à la file militaire, quand les deux files ont des chantiers. */
   | { type: 'setMilitaryShare'; nation: number; share: number }
   | { type: 'fortifyLine'; nation: number; fromX: number; fromY: number; toX: number; toY: number }
+  /** Fortifie la frontière avec ce pays, en guerre ou en paix. */
   | { type: 'fortifyFront'; nation: number; enemy: number }
   | { type: 'setCounterShare'; nation: number; share: number }
   | { type: 'addPriority'; nation: number; x: number; y: number }
@@ -245,6 +261,12 @@ export interface EconomySnapshot {
   alliances: Uint16Array;
   /** Doctrine de chaque nation, à plat : ses cinq axes à la suite (indice = nation × 5 + axe). */
   doctrine: Float32Array;
+  /** Accords commerciaux (a, b…), embargos (de, à…) et trêves (a, b…), à plat. */
+  tradeDeals: Uint16Array;
+  embargoes: Uint16Array;
+  truces: Uint16Array;
+  /** Par province : agitation de sa région dans le pays qui la tient, de 1 à 255 (0 : aucune région). */
+  provinceUnrest: Uint8Array;
 }
 
 export interface OffensiveSnapshot {

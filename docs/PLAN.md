@@ -166,6 +166,37 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   pour changer son rang ; les points accumulés vont au nouveau premier.
 - **Onglet Diplomatie :** lignes des régions agitées plus compactes (blason de 16 px).
 
+## Cartes, routes des accords et frontières (après le jalon 10)
+
+- **Relief partout.** Les massifs (montagnes, plateaux) se lisent sur toutes les cartes, pas
+  seulement sur celle des pays.
+- **Carte économique.** Elle se mettait déjà à jour à chaque relevé, mais l'évolution d'une
+  région s'y voyait à peine. Elle compte maintenant les usines, et des hachures montrent
+  l'évolution depuis le début de la partie : vertes là où l'économie grandit, rouges là où elle
+  recule (combats, usure de la guerre).
+- **Carte des relations** (touche T) : les liens d'un pays avec tous les autres, vus du pays
+  sélectionné ou, sans sélection, du joueur. En guerre, pacte, coalition, trêve, embargo ou
+  neutre ; un accord commercial raye le pays de vert, et un neutre agressif tire vers l'orange.
+- **Carte de l'intérieur** (touche I) : la stabilité de chaque pays, du calme pâle au rouge sombre
+  d'un pays à bout, et par-dessus ses régions agitées, d'autant plus rouges qu'elles s'agitent.
+- **8 axes commerciaux** au plus, au lieu de 6.
+- **Routes des accords.** Un accord commercial trace une route d'une capitale à l'autre (la
+  province nationale la plus riche de chaque pays), par leurs terres ou par la mer, en reprenant
+  les tronçons déjà tracés. Elle apparaît à la signature et disparaît avec l'accord ; elle
+  n'enrichit pas les provinces (l'accord rapporte déjà) et ne compte pas parmi les 8 axes.
+- **Routes communes.** Toutes les routes passent de ville en ville : un tronçon que plusieurs routes
+  empruntent (les tiennes, celles de tes accords, celles de tes partenaires entre eux) n'est dessiné
+  qu'une fois, plus large, et un nouveau tracé reprend les routes de tous les pays.
+- **Routes par la mer.** Une route va par la terre jusqu'à un port, traverse la mer (220 cellules au
+  plus, d'un port à un autre qui borde la même mer), et reprend la terre : Paris → Normandie →
+  Sussex pour un accord avec le Royaume-Uni. La traversée se paie au tarif de la mer, et un blocus
+  la coupe. Avant, une route ne prenait la mer qu'entre deux villes côtières.
+- **File militaire dans l'onglet Défense**, la civile dans l'onglet Économie ; chaque onglet montre
+  le nombre de chantiers de sa file.
+- **Fortifier une frontière** (fiche d'un pays voisin) : en paix comme en guerre, une bande de
+  fortifications le long de la frontière avec ce pays, dans la file militaire. L'IA ne fortifie
+  toujours que ses fronts.
+
 ## Tempéraments de l'IA et équilibrage (pendant le jalon 9)
 
 Demandé par le joueur : « des nations un peu belligérantes, quelques nations pro-commerce ». Chaque

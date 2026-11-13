@@ -173,6 +173,18 @@ describe('axes commerciaux', () => {
     expect(sim.tradeAxes[0].provinces).toHaveLength(2);
   });
 
+  it("vont d'une ville de l'intérieur à une île : par la terre jusqu'au port, puis par la mer", () => {
+    const sim = new Simulation(config((x, y) => (y < 10 || y >= 70 ? 0 : x < 60 ? A : x >= 100 && x < 160 ? A : x >= 170 ? B : 0), 2));
+    expect(sim.buildAxis(A, 10, 40, 130, 40)).toBeGreaterThan(0);
+    for (let t = 0; t < 600 * 60 && sim.tradeAxes.length === 0; t++) sim.step();
+    const axis = sim.tradeAxes[0];
+    // Par la terre jusqu'à la côte, puis une seule traversée.
+    expect(axis.seaLinks).toHaveLength(1);
+    expect(axis.provinces.length).toBeGreaterThan(3);
+    expect(axis.seaLinks![0]).toBeGreaterThan(0);
+    expect(axis.active).toBe(true);
+  });
+
   it('reprennent les tronçons déjà tracés, sans les payer deux fois', () => {
     const sim = wide();
     sim.buildAxis(A, 10, 20, 90, 20);
@@ -194,8 +206,9 @@ describe('axes commerciaux', () => {
     expect(sim.buildAxis(A, 10, 20, 10, 70)).toBe(0);
     expect(sim.proposeTradeDeal(A, B)).toBe(true);
     expect(sim.buildAxis(A, 10, 20, 10, 70)).toBeGreaterThan(0);
-    for (let t = 0; t < 600 * 60 && sim.tradeAxes.length === 0; t++) sim.step();
-    const axis = sim.tradeAxes[0];
+    const own = () => sim.tradeAxes.find((entry) => !entry.partner)!;
+    for (let t = 0; t < 600 * 60 && !own(); t++) sim.step();
+    const axis = own();
     expect(axis.active).toBe(true);
     const theirs = axis.provinces.filter((p) => sim.controllerOf(p) === B);
     expect(theirs.length).toBeGreaterThan(0);
@@ -204,11 +217,26 @@ describe('axes commerciaux', () => {
     for (const p of theirs) expect(bonus[p]).toBeGreaterThan(0);
     sim.endTradeDeal(A, B);
     run(sim, 20);
-    expect(sim.tradeAxes[0].active).toBe(false);
+    expect(own().active).toBe(false);
     for (const p of theirs) expect(bonus[p]).toBe(0);
     expect(sim.proposeTradeDeal(A, B)).toBe(true);
     run(sim, 20);
-    expect(sim.tradeAxes[0].active).toBe(true);
+    expect(own().active).toBe(true);
+  });
+
+  it("un accord trace une route d'une capitale à l'autre, qui disparaît avec lui", () => {
+    const sim = wide();
+    expect(sim.proposeTradeDeal(A, B)).toBe(true);
+    const route = sim.tradeAxes.find((axis) => axis.partner);
+    expect(route).toBeDefined();
+    const holders = new Set(route!.provinces.map((p) => sim.controllerOf(p)));
+    expect(holders.has(A) && holders.has(B)).toBe(true);
+    // Elle ne compte pas parmi les axes du pays, et n'enrichit pas les provinces.
+    expect(sim.axesOf(A)).toBe(0);
+    const bonus = (sim as unknown as { axisBonus: Float64Array }).axisBonus;
+    for (const p of route!.provinces) expect(bonus[p]).toBe(0);
+    sim.endTradeDeal(A, B);
+    expect(sim.tradeAxes.some((axis) => axis.partner)).toBe(false);
   });
 });
 

@@ -41,7 +41,8 @@ import { ARCHETYPES, BALANCED_ARCHETYPE, DOCTRINE_AXES, DOCTRINE_AXIS_COUNT, DOC
 import { landingProblem, traceRoute } from '../sim/route.ts';
 import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
-import { provinceWealth } from './economy.ts';
+import { provinceTrend, provinceWealth } from './economy.ts';
+import { relationTint, stabilityTint } from './mapTints.ts';
 import { eventNations } from './events.ts';
 import { regionName } from './regionNames.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
@@ -254,7 +255,11 @@ export class GameClient {
     if (update.economy) {
       this.economy = update.economy;
       const areas = this.world.data.provinces.map((province) => province.areaKm2);
-      this.view.setEconomy(provinceWealth(areas, update.economy.provinceGdp, update.economy.development));
+      this.view.setEconomy(
+        provinceWealth(areas, update.economy.provinceGdp, update.economy.development, update.economy.factories),
+        provinceTrend(update.economy.development),
+      );
+      this.refreshMapTints();
       // Les alliances changent : la carte suit.
       if (this.highlighted !== 0) this.highlightAlliesOf(this.highlighted);
     }
@@ -274,6 +279,7 @@ export class GameClient {
       if (update.snapshot.fronts.length !== this.frontCount || update.events.length > 0) {
         this.frontCount = update.snapshot.fronts.length;
         this.view.setWars(update.snapshot.fronts.map((front) => [front.a, front.b]));
+        this.refreshMapTints();
       }
       this.view.setCampaign(update.snapshot.offensives, update.snapshot.pockets);
       this.watchSupply(update.snapshot);
@@ -400,9 +406,33 @@ export class GameClient {
     return { treaty, coalition };
   }
 
+  /**
+   * Teintes des cartes des relations (vues du pays sélectionné, sinon du joueur) et de l'intérieur
+   * (stabilité de chaque pays, agitation de chaque région).
+   */
+  refreshMapTints(): void {
+    const mode = this.view.mapMode;
+    if (mode !== 'relations' && mode !== 'interior') return;
+    const count = this.world.data.nations.length;
+    if (mode === 'relations') {
+      const subject = this.highlighted !== 0 ? this.highlighted : this.player;
+      const wars = (this.snapshot?.fronts ?? []).map((front) => [front.a, front.b] as [number, number]);
+      this.view.setNationTint(relationTint(subject, count, this.economy, wars));
+    } else {
+      this.view.setNationTint(stabilityTint(count, this.economy));
+      if (this.economy) this.view.setUnrest(this.economy.provinceUnrest);
+    }
+  }
+
+  /** Pays dont la carte des relations montre les liens : le sélectionné, sinon le joueur. */
+  get relationSubject(): number {
+    return this.highlighted !== 0 ? this.highlighted : this.player;
+  }
+
   /** Met en évidence sur la carte les alliés du pays sélectionné. */
   highlightAlliesOf(nation: number): void {
     this.highlighted = nation;
+    this.refreshMapTints();
     if (nation === 0) {
       this.view.setAllies([]);
       return;
@@ -557,8 +587,17 @@ export class GameClient {
   /** Axes commerciaux du monde, tels que le dernier instantané les donne. */
   axes: AxisSnapshot[] = [];
 
+  /** Axes du joueur (sans les routes de ses accords, qui ne comptent pas dans le plafond). */
   get playerAxes(): AxisSnapshot[] {
-    return this.axes.filter((axis) => axis.nation === this.player);
+    return this.axes.filter((axis) => axis.nation === this.player && !axis.partner);
+  }
+
+  /** Peut-on fortifier sa frontière avec ce pays : un voisin par la terre, ou un ennemi au front. */
+  canFortifyBorder(nation: number): boolean {
+    if (!this.canCommand || nation === 0 || nation === this.player) return false;
+    if (this.isAtWarWith(nation)) return true;
+    const { ownerGrid, data } = this.world;
+    return areLandNeighbors(ownerGrid, data.width, data.height, this.player, nation);
   }
 
   proposeTradeDeal(other: number): void {
@@ -906,7 +945,11 @@ export class GameClient {
   fortifyFront(enemy: number): void {
     if (!this.canCommand) return;
     this.command({ type: 'fortifyFront', nation: this.player, enemy });
-    this.notify(`Front avec ${this.nameOf(enemy)} mis en chantier de fortification.`);
+    this.notify(
+      this.isAtWarWith(enemy)
+        ? `Front avec ${this.nameOf(enemy)} mis en chantier de fortification.`
+        : `Frontière avec ${this.nameOf(enemy)} mise en chantier de fortification : elle apparaît dans ta file militaire.`,
+    );
   }
 
   setCounterShare(share: number): void {

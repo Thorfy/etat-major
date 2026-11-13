@@ -241,6 +241,8 @@ import {
   AXIS_COST_PER_CELL,
   SEA_AXIS_COST_PER_CELL,
   AXIS_REUSE_WEIGHT,
+  SEA_LINK_MAX,
+  SEA_LINK_PENALTY,
   AI_AXIS_MIN_DISTANCE,
   AI_MAX_AXES,
   AI_AXIS_CHANCE,
@@ -554,6 +556,8 @@ export class Simulation {
   private axesVersion = 1;
   /** Provinces voisines par la terre, pour tracer les axes. */
   private provinceNeighbors: number[][] | null = null;
+  /** Mers que borde chaque province (bits, comme coastSeas), calculées à la première demande. */
+  private provinceSeas: Uint32Array | null = null;
   private sentAxesVersion = 0;
   /** Régions annexées qui s'agitent, par pays qui les tient. */
   private movements: MovementState[] = [];
@@ -2611,8 +2615,39 @@ export class Simulation {
     if (this.tradeDeal[a * this.stride + b] === value) return;
     this.tradeDeal[a * this.stride + b] = value;
     this.tradeDeal[b * this.stride + a] = value;
-    if (on) this.tradeDeals.push([Math.min(a, b), Math.max(a, b)]);
-    else this.tradeDeals = this.tradeDeals.filter(([x, y]) => !(x === Math.min(a, b) && y === Math.max(a, b)));
+    if (on) {
+      this.tradeDeals.push([Math.min(a, b), Math.max(a, b)]);
+      this.buildDealRoute(Math.min(a, b), Math.max(a, b));
+    } else {
+      this.tradeDeals = this.tradeDeals.filter(([x, y]) => !(x === Math.min(a, b) && y === Math.max(a, b)));
+      const before = this.axes.length;
+      this.axes = this.axes.filter((axis) => !(axis.partner && ((axis.nation === a && axis.partner === b) || (axis.nation === b && axis.partner === a))));
+      if (this.axes.length !== before) this.axesVersion++;
+    }
+  }
+
+  /** Capitale approchée d'un pays : sa province nationale la plus riche qu'il tient encore. */
+  private capitalOf(nation: number): number {
+    let best = 0;
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] !== nation || this.provinceHome[p] !== nation) continue;
+      if (best === 0 || this.provinceGdp[p] > this.provinceGdp[best]) best = p;
+    }
+    return best;
+  }
+
+  /**
+   * Un accord commercial se voit : une route relie les deux capitales, par les terres des deux pays
+   * (ou par la mer), en reprenant les tronçons déjà tracés.
+   */
+  private buildDealRoute(a: number, b: number): void {
+    const from = this.capitalOf(a);
+    const to = this.capitalOf(b);
+    if (from === 0 || to === 0) return;
+    const plan = this.planAxis(a, from, to);
+    if (!plan) return;
+    this.axes.push({ id: this.nextAxisId++, nation: a, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, partner: b, seaLinks: plan.seaLinks });
+    this.axesVersion++;
   }
 
   private setEmbargoFlag(from: number, to: number, on: boolean): void {
@@ -2713,7 +2748,7 @@ export class Simulation {
 
   /** Axes d'une nation, bâtis ou en chantier. */
   axesOf(nation: number): number {
-    return this.axes.filter((axis) => axis.nation === nation).length + this.queues[nation].filter((order) => order.kind === 'axis').length;
+    return this.axes.filter((axis) => axis.nation === nation && !axis.partner).length + this.queues[nation].filter((order) => order.kind === 'axis').length;
   }
 
   get tradeAxes(): readonly TradeAxis[] {
@@ -2766,15 +2801,51 @@ export class Simulation {
    * des provinces que la nation tient. Faute de chemin par la terre, une ligne maritime entre deux
    * provinces côtières.
    */
-  planAxis(nation: number, from: number, to: number): { path: number[]; sea: boolean; length: number } | null {
+  /** Mers que borde chaque province : la géographie ne change pas, on la calcule une fois. */
+  private seasOfProvinces(): Uint32Array {
+    if (!this.provinceSeas) {
+      const { coastCells, provinceGrid, seas, width: W, height: H } = this;
+      const masks = new Uint32Array(this.controller.length);
+      for (let k = 0; k < coastCells.length; k++) {
+        const cell = coastCells[k];
+        const province = provinceGrid[cell];
+        if (province === 0) continue;
+        const x = cell % W;
+        const y = (cell - x) / W;
+        for (let j = 0; j < 4; j++) {
+          if ((j === 2 && y === 0) || (j === 3 && y === H - 1)) continue;
+          const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+          const sea = seas[next];
+          if (sea !== 0) masks[province] |= 1 << ((sea - 1) % 31);
+        }
+      }
+      this.provinceSeas = masks;
+    }
+    return this.provinceSeas;
+  }
+
+  planAxis(
+    nation: number,
+    from: number,
+    to: number,
+  ): { path: number[]; sea: boolean; length: number; seaLinks: number[]; seaLength: number } | null {
     const count = this.controller.length;
     if (from <= 0 || to <= 0 || from >= count || to >= count || from === to) return null;
     if (this.controller[from] !== nation || !this.axisAllows(nation, this.controller[to])) return null;
-    // Tronçons de ses axes, bâtis ou en chantier : le nouveau les reprend volontiers.
+    // Routes déjà tracées, les siennes en chantier comprises, et celles des autres pays (partenaires,
+    // routes d'accords) : le nouveau tracé les reprend volontiers, et les routes se rejoignent.
     const built = new Set<number>();
     const linkKey = (a: number, b: number) => Math.min(a, b) * 65536 + Math.max(a, b);
-    const paths = [...this.axes.filter((axis) => axis.nation === nation && !axis.sea).map((axis) => axis.provinces), ...this.queues[nation].filter((order) => order.kind === 'axis' && !order.sea).map((order) => order.path ?? [])];
-    for (const path of paths) for (let i = 0; i + 1 < path.length; i++) built.add(linkKey(path[i], path[i + 1]));
+    const routes = [
+      ...this.axes.map((axis) => ({ path: axis.provinces, sea: this.seaLinksOf(axis) })),
+      ...this.queues[nation].filter((order) => order.kind === 'axis').map((order) => ({ path: order.path ?? [], sea: this.seaLinksOf(order) })),
+    ];
+    for (const { path, sea } of routes) for (let i = 0; i + 1 < path.length; i++) if (!sea.includes(i)) built.add(linkKey(path[i], path[i + 1]));
+    // Ports possibles : les provinces côtières qu'elle peut traverser, avec les mers qu'elles bordent.
+    const seasOf = this.seasOfProvinces();
+    const ports: number[] = [];
+    for (let p = 1; p < count; p++) if (seasOf[p] !== 0 && this.axisAllows(nation, this.controller[p])) ports.push(p);
+    const bySea = new Set<number>();
     // Dijkstra sur les provinces tenues : elles sont au plus quelques centaines par nation.
     const distance = new Map<number, number>([[from, 0]]);
     const previous = new Map<number, number>();
@@ -2791,6 +2862,21 @@ export class Simulation {
         if (d < (distance.get(next) ?? Infinity)) {
           distance.set(next, d);
           previous.set(next, current);
+          bySea.delete(next);
+        }
+      }
+      // Par la mer, d'un port à un autre qui borde la même mer.
+      const mask = seasOf[current];
+      if (mask === 0) continue;
+      for (const next of ports) {
+        if (next === current || done.has(next) || (seasOf[next] & mask) === 0) continue;
+        const crossing = this.provinceDistance(current, next);
+        if (crossing > SEA_LINK_MAX) continue;
+        const d = best + crossing + SEA_LINK_PENALTY;
+        if (d < (distance.get(next) ?? Infinity)) {
+          distance.set(next, d);
+          previous.set(next, current);
+          bySea.add(next);
         }
       }
     }
@@ -2798,13 +2884,30 @@ export class Simulation {
       const path = [to];
       while (path[path.length - 1] !== from) path.push(previous.get(path[path.length - 1])!);
       path.reverse();
-      // Seuls les tronçons nouveaux se paient.
+      // Seuls les tronçons nouveaux se paient ; une traversée se paie au tarif de la mer.
       let length = 0;
-      for (let i = 0; i + 1 < path.length; i++) if (!built.has(linkKey(path[i], path[i + 1]))) length += this.provinceDistance(path[i], path[i + 1]);
-      return { path, sea: false, length };
+      let seaLength = 0;
+      const seaLinks: number[] = [];
+      for (let i = 0; i + 1 < path.length; i++) {
+        if (bySea.has(path[i + 1])) {
+          seaLinks.push(i);
+          seaLength += this.provinceDistance(path[i], path[i + 1]);
+        } else if (!built.has(linkKey(path[i], path[i + 1]))) length += this.provinceDistance(path[i], path[i + 1]);
+      }
+      return { path, sea: seaLinks.length > 0, length, seaLinks, seaLength };
     }
-    if (!this.provinceCoastal[from] || !this.provinceCoastal[to] || this.coastSeas[nation] === 0) return null;
-    return { path: [from, to], sea: true, length: this.provinceDistance(from, to) };
+    // Dernier recours : une ligne directe entre deux ports lointains d'une même mer.
+    if (!this.provinceCoastal[from] || !this.provinceCoastal[to] || (seasOf[from] & seasOf[to]) === 0) return null;
+    const crossing = this.provinceDistance(from, to);
+    return { path: [from, to], sea: true, length: 0, seaLinks: [0], seaLength: crossing };
+  }
+
+  /** Tronçons d'un axe pris par la mer ; une ancienne ligne maritime l'est tout entière. */
+  private seaLinksOf(route: { sea?: boolean; seaLinks?: number[]; provinces?: number[]; path?: number[] }): number[] {
+    if (route.seaLinks) return route.seaLinks;
+    if (!route.sea) return [];
+    const length = (route.provinces ?? route.path ?? []).length;
+    return Array.from({ length: Math.max(0, length - 1) }, (_, i) => i);
   }
 
   /** Met un axe en chantier entre les provinces de deux cellules ; renvoie sa longueur (0 : impossible). */
@@ -2823,8 +2926,8 @@ export class Simulation {
     if (this.axesOf(nation) >= MAX_AXES) return 0;
     const plan = this.planAxis(nation, from, to);
     if (!plan) return 0;
-    this.queues[nation].push({ province: from, kind: 'axis', path: plan.path, sea: plan.sea, length: plan.length });
-    return Math.max(1, Math.round(plan.length));
+    this.queues[nation].push({ province: from, kind: 'axis', path: plan.path, sea: plan.sea, length: plan.length, seaLinks: plan.seaLinks, seaLength: plan.seaLength });
+    return Math.max(1, Math.round(plan.length + plan.seaLength));
   }
 
   removeAxis(nation: number, id: number): void {
@@ -2837,7 +2940,8 @@ export class Simulation {
 
   private completeAxis(nation: number, order: BuildOrder): void {
     const provinces = (order.path ?? []).slice();
-    this.axes.push({ id: this.nextAxisId++, nation, sea: order.sea === true, provinces, length: order.length ?? 0, active: true });
+    const seaLinks = this.seaLinksOf(order);
+    this.axes.push({ id: this.nextAxisId++, nation, sea: seaLinks.length > 0, provinces, length: (order.length ?? 0) + (order.seaLength ?? 0), active: true, seaLinks });
     this.axesVersion++;
     this.pendingEvents.push({ type: 'axisBuilt', tick: this.tick, nation });
     this.recomputeAxisBonus();
@@ -2860,6 +2964,7 @@ export class Simulation {
       if (active === axis.active) continue;
       axis.active = active;
       changed = true;
+      if (axis.partner) continue;
       this.pendingEvents.push(
         active ? { type: 'axisRestored', tick: this.tick, nation: axis.nation } : { type: 'axisCut', tick: this.tick, nation: axis.nation, by: Math.max(0, by) },
       );
@@ -2873,7 +2978,7 @@ export class Simulation {
   private recomputeAxisBonus(): void {
     this.axisCount.fill(0);
     for (const axis of this.axes) {
-      if (!axis.active) continue;
+      if (!axis.active || axis.partner) continue;
       for (const p of axis.provinces) if (this.axisCount[p] < 255) this.axisCount[p]++;
     }
     for (let p = 1; p < this.axisBonus.length; p++) this.axisBonus[p] = AXIS_BONUS * Math.min(AXIS_MAX_PER_PROVINCE, this.axisCount[p]);
@@ -3169,7 +3274,12 @@ export class Simulation {
   orderCost(order: BuildOrder): number {
     if (order.kind === 'fort') return order.cost ?? Math.ceil((order.cells?.length ?? 0) * FORT_COST_PER_CELL);
     if (order.kind === 'investment' || order.kind === 'research') return order.cost ?? 0;
-    if (order.kind === 'axis') return Math.ceil(AXIS_COST_BASE + (order.length ?? 0) * (order.sea ? SEA_AXIS_COST_PER_CELL : AXIS_COST_PER_CELL));
+    if (order.kind === 'axis') {
+      // Une ancienne ligne maritime n'a que sa longueur, toute en mer.
+      const seaLength = order.seaLength ?? (order.sea ? (order.length ?? 0) : 0);
+      const landLength = order.seaLength === undefined && order.sea ? 0 : (order.length ?? 0);
+      return Math.ceil(AXIS_COST_BASE + landLength * AXIS_COST_PER_CELL + seaLength * SEA_AXIS_COST_PER_CELL);
+    }
     return this.buildCost(order.province, order.kind);
   }
 
@@ -3229,12 +3339,17 @@ export class Simulation {
 
   /** Fortifie le front face à un ennemi, sur quelques cellules de profondeur. */
   fortifyFront(nation: number, enemy: number, urgent = false): number {
-    if (!this.frontOf(nation, enemy)) return 0;
+    if (nation <= 0 || nation >= this.stride || enemy <= 0 || enemy >= this.stride || nation === enemy) return 0;
+    const atWar = this.frontOf(nation, enemy) !== null;
+    // L'IA ne fortifie que ses fronts ; le joueur, toute frontière terrestre.
+    if (urgent && !atWar) return 0;
     const { owners, width: W, height: H } = this;
     const depth = new Map<number, number>();
     let layer: number[] = [];
-    for (let i = 0; i < this.frontierCount; i++) {
-      const cell = this.frontier[i];
+    // En guerre, la frontière active ; en paix, toutes les cellules du pays.
+    const seeds = atWar ? this.frontier.subarray(0, this.frontierCount) : this.landCells;
+    for (let i = 0; i < seeds.length; i++) {
+      const cell = seeds[i];
       if (owners[cell] !== nation) continue;
       const x = cell % W;
       const y = (cell - x) / W;
@@ -4398,7 +4513,28 @@ export class Simulation {
       coalitionAgainst: this.coalitionAgainst.slice(),
       alliances: Uint16Array.from(this.pairsOf((a, b) => this.allied[a * this.stride + b]).flat()),
       doctrine: Float32Array.from(this.doctrine),
+      tradeDeals: Uint16Array.from(this.tradeDeals.flat()),
+      embargoes: Uint16Array.from(this.embargoes.flat()),
+      truces: Uint16Array.from(this.pairsOf((a, b) => (this.hasTruce(a, b) ? 1 : 0)).flatMap(([a, b]) => [a, b])),
+      provinceUnrest: this.provinceUnrest(),
     };
+  }
+
+  /** Agitation de chaque province : celle du mouvement de sa région dans le pays qui la tient. */
+  private provinceUnrest(): Uint8Array {
+    const unrest = new Uint8Array(this.controller.length);
+    if (this.movements.length === 0) return unrest;
+    const byKey = new Map<number, number>();
+    for (const movement of this.movements) byKey.set(movement.parent * this.stride + movement.origin, movement.unrest);
+    for (let p = 1; p < this.controller.length; p++) {
+      const holder = this.controller[p];
+      if (holder === 0) continue;
+      const origin = this.claimantOf(p, holder);
+      if (origin === 0) continue;
+      const value = byKey.get(holder * this.stride + origin);
+      if (value !== undefined) unrest[p] = 1 + Math.round(value * 254);
+    }
+    return unrest;
   }
 
   snapshot(): SimSnapshot {
@@ -4523,7 +4659,17 @@ export class Simulation {
       // Les villes traversées : le centre de chaque province, et qui la tient.
       const points: number[] = [];
       for (const p of axis.provinces) points.push(((this.provinces[p - 1].x % W) + W) % W, this.provinces[p - 1].y);
-      return { id: axis.id, nation: axis.nation, sea: axis.sea, active: axis.active, provinces: axis.provinces.length, points, held: axis.provinces.map((p) => this.axisAllows(axis.nation, this.controller[p])) };
+      return {
+        id: axis.id,
+        nation: axis.nation,
+        sea: axis.sea,
+        active: axis.active,
+        provinces: axis.provinces.length,
+        points,
+        held: axis.provinces.map((p) => this.axisAllows(axis.nation, this.controller[p])),
+        partner: axis.partner ?? 0,
+        seaLinks: this.seaLinksOf(axis),
+      };
     });
   }
 
@@ -4714,6 +4860,9 @@ export class Simulation {
     if (legacy.coastSeas) this.coastSeas = Uint32Array.from(legacy.coastSeas);
     this.axes = (legacy.axes ?? []).map((axis) => ({ ...axis, provinces: axis.provinces.slice() }));
     this.nextAxisId = legacy.nextAxisId ?? 1;
+    if (this.tradeDeals.length > 0 && !this.axes.some((axis) => axis.partner)) {
+      for (const [a, b] of this.tradeDeals) this.buildDealRoute(a, b);
+    }
     this.recomputeAxisBonus();
     // Une partie d'avant les doctrines garde les cibles tirées pour l'IA, et part du centre.
     restoreArray(this.doctrine, legacy.doctrine);

@@ -1450,3 +1450,42 @@ canvas {
   margin-right: 4px;
   vertical-align: -3px;
 }
+
+/* Légendes des cartes des relations et de l'intérieur. */
+.legend.relations span:last-of-type {
+  text-align: left;
+}
+
+.legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 2px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.legend .swatch.hatch {
+  background: repeating-linear-gradient(135deg, var(--stripe) 0 2px, transparent 2px 5px);
+  box-shadow: inset 0 0 0 1px var(--stripe);
+}
+
+.legend .swatch.hatch.up {
+  --stripe: #34713e;
+}
+
+.legend .swatch.hatch.down {
+  --stripe: #9c1b16;
+}
+
+.legend .swatch.hatch.trade {
+  --stripe: #4a9755;
+}
+
+.legend .swatch.hatch.unrest {
+  --stripe: #b21c17;
+}
+
+.legend .ramp.interior {
+  background: linear-gradient(90deg, #ccd1bd, #d9a861 55%, #8c261f);
+}

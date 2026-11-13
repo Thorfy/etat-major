@@ -18,9 +18,9 @@ const MAX_DPR = 2;
 export type MapTool = 'offensive' | 'fort' | 'priority' | 'axis';
 
 /** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
-export type MapMode = 'political' | 'economic' | 'supply';
+export type MapMode = 'political' | 'economic' | 'supply' | 'relations' | 'interior';
 
-const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2 };
+const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2, relations: 3, interior: 4 };
 
 export interface CellInfo {
   province: number;
@@ -144,9 +144,21 @@ export class MapView {
   }
 
   /** Richesse de chaque province, pour la carte économique. */
-  setEconomy(wealth: Uint8Array): void {
-    this.renderer.updateEconomy(wealth);
+  setEconomy(wealth: Uint8Array, trend?: Uint8Array): void {
+    this.renderer.updateEconomy(wealth, trend);
     if (this.mode === 'economic') this.dirty = true;
+  }
+
+  /** Teinte de chaque nation, pour les cartes des relations et de l'intérieur. */
+  setNationTint(tint: Uint8Array): void {
+    this.renderer.setNationTint(tint);
+    if (this.mode === 'relations' || this.mode === 'interior') this.dirty = true;
+  }
+
+  /** Agitation de chaque province, pour la carte de l'intérieur. */
+  setUnrest(unrest: Uint8Array): void {
+    this.renderer.setUnrest(unrest);
+    if (this.mode === 'interior') this.dirty = true;
   }
 
   /** Pays sélectionné, pour mettre ses alliés en évidence. */

@@ -268,7 +268,7 @@ function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; t
             <li key={axis.id}>
               <div class="offensive-row">
                 <span>
-                  {axis.sea ? 'Ligne maritime' : 'Axe'} {index + 1}{' '}
+                  {axis.seaLinks.length > 0 && axis.seaLinks.length === axis.provinces - 1 ? 'Ligne maritime' : 'Axe'} {index + 1}{' '}
                   <small>
                     · {axis.provinces} provinces · <b class={axis.active ? 'ahead' : 'behind'}>{axis.active ? 'actif' : 'coupé'}</b>
                   </small>
@@ -289,7 +289,7 @@ function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; t
  * Les deux files de chantiers, civile et militaire, qui avancent en même temps. On glisse un
  * chantier pour le remonter ou le descendre dans sa file.
  */
-function BuildQueues({ game }: { game: GameClient }) {
+function BuildQueues({ game, military: showMilitary }: { game: GameClient; military: boolean }) {
   const [dragged, setDragged] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
   const stats = game.playerStats;
@@ -373,7 +373,7 @@ function BuildQueues({ game }: { game: GameClient }) {
   const militaryRate = stats.construction * (both ? share : military.length > 0 ? 1 : 0);
   return (
     <section>
-      <h3>Chantiers</h3>
+      <h3>{showMilitary ? 'Chantiers militaires' : 'Chantiers'}</h3>
       <dl>
         <dt>Capacité</dt>
         <dd>+{integer.format(stats.construction)} pts / sem.</dd>
@@ -391,11 +391,13 @@ function BuildQueues({ game }: { game: GameClient }) {
         onChange={(value) => game.setMilitaryShare(value / 100)}
       />
       <Note lines={2}>
-        Les deux files avancent en même temps ; une file vide laisse tous ses points à l'autre. Glisse un chantier pour changer
-        son rang.
+        {showMilitary
+          ? `La file militaire avance en même temps que la civile (onglet Économie, ${civil.length} en cours). Glisse un chantier pour changer son rang.`
+          : `La file civile avance en même temps que la militaire (onglet Défense, ${military.length} en cours). Glisse un chantier pour changer son rang.`}
       </Note>
-      {list('Civil', civil, civilRate, 'Clique sur une de tes provinces pour bâtir.')}
-      {list('Militaire', military, militaryRate, 'Fortifications, dépôts, routes du territoire conquis et recherche.')}
+      {showMilitary
+        ? list('Militaire', military, militaryRate, 'Fortifications, dépôts, routes du territoire conquis et recherche.')
+        : list('Civil', civil, civilRate, 'Clique sur une de tes provinces pour bâtir.')}
     </section>
   );
 }
@@ -453,7 +455,7 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
             : effortEffect(target, atWar)}
         </Note>
       </section>
-      <BuildQueues game={game} />
+      <BuildQueues game={game} military={false} />
     </>
   );
 }
@@ -614,6 +616,7 @@ function DefenseTab({ game, view, tool }: { game: GameClient; view: MapView; too
             : "Garde une part de ton armée pour contrer d'elle-même les percées ennemies."}
         </Note>
       </section>
+      <BuildQueues game={game} military={true} />
     </>
   );
 }
@@ -774,8 +777,13 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
   const offers = (stats?.peaceOffers.length ?? 0) + (stats?.movements.filter((movement) => movement.demand !== '').length ?? 0);
   const tabs: { id: Tab; label: string; badge: string; alert: boolean }[] = [
     { id: 'fronts', label: 'Fronts', badge: fronts ? String(fronts) : '', alert: enemyOffensives > 0 },
-    { id: 'economy', label: 'Économie', badge: stats?.builds.length ? String(stats.builds.length) : '', alert: false },
-    { id: 'defense', label: 'Défense', badge: stats?.pocketCells ? '!' : '', alert: (stats?.pocketCells ?? 0) > 0 },
+    { id: 'economy', label: 'Économie', badge: stats?.builds.filter((order) => !order.military).length ? String(stats?.builds.filter((order) => !order.military).length) : '', alert: false },
+    {
+      id: 'defense',
+      label: 'Défense',
+      badge: stats?.pocketCells ? '!' : stats?.builds.some((order) => order.military) ? String(stats.builds.filter((order) => order.military).length) : '',
+      alert: (stats?.pocketCells ?? 0) > 0,
+    },
     { id: 'doctrine', label: 'Doctrine', badge: '', alert: false },
     {
       id: 'diplomacy',

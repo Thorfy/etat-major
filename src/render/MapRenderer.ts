@@ -77,6 +77,7 @@ export class MapRenderer {
     for (const name of [
       'uOwners', 'uProvinces', 'uPalette', 'uCoast', 'uProvinceHome', 'uWars', 'uTerrain', 'uCenter', 'uResolution', 'uZoom',
       'uHoverProvince', 'uSelectedProvince', 'uSelectedOwner', 'uEconomy', 'uMapMode', 'uSupply', 'uFort', 'uAllies',
+      'uNationTint', 'uUnrest',
     ]) {
       this.uniforms.set(name, gl.getUniformLocation(program, name));
     }
@@ -106,10 +107,14 @@ export class MapRenderer {
     const size = nations.length + 1;
     this.bindDataTexture(5, 'uWars', gl.R8, size, size, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(size * size));
     this.bindDataTexture(6, 'uTerrain', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, world.terrainGrid);
-    this.bindDataTexture(7, 'uEconomy', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
+    // Carte économique : richesse (rouge) et évolution depuis le départ (vert, 128 : inchangée).
+    this.bindDataTexture(7, 'uEconomy', gl.RG8, this.homes.length, 1, gl.RG, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length * 2));
     this.bindDataTexture(8, 'uSupply', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.supply);
     this.bindDataTexture(9, 'uFort', gl.R8, width, height, gl.RED, gl.UNSIGNED_BYTE, this.forts);
     this.bindDataTexture(10, 'uAllies', gl.R8, nations.length + 1, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(nations.length + 1));
+    // Cartes des relations et de l'intérieur : une teinte par nation, et l'agitation de chaque province.
+    this.bindDataTexture(11, 'uNationTint', gl.RGBA8, nations.length + 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array((nations.length + 1) * 4));
+    this.bindDataTexture(12, 'uUnrest', gl.R8, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(this.homes.length));
   }
 
   /** Nations à mettre en évidence comme alliées du pays sélectionné. */
@@ -145,13 +150,32 @@ export class MapRenderer {
   }
 
   /** Richesse de chaque province, de 0 à 255 (indice = identifiant de province). */
-  updateEconomy(wealth: Uint8Array): void {
+  updateEconomy(wealth: Uint8Array, trend?: Uint8Array): void {
     const { gl } = this;
+    const pixels = new Uint8Array(this.homes.length * 2);
+    for (let id = 0; id < this.homes.length; id++) {
+      pixels[id * 2] = wealth[id] ?? 0;
+      pixels[id * 2 + 1] = trend ? (trend[id] ?? 128) : 128;
+    }
     gl.activeTexture(gl.TEXTURE7);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.homes.length, 1, gl.RED, gl.UNSIGNED_BYTE, wealth);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.homes.length, 1, gl.RG, gl.UNSIGNED_BYTE, pixels);
   }
 
-  /** 0 : carte politique, 1 : carte économique, 2 : ravitaillement. */
+  /** Teinte de chaque nation (RGBA, indice = nation) pour les cartes des relations et de l'intérieur. */
+  setNationTint(tint: Uint8Array): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE11);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.world.data.nations.length + 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, tint);
+  }
+
+  /** Agitation de chaque province (0 : aucune région ; 1 à 255 : de calme à soulevée). */
+  setUnrest(unrest: Uint8Array): void {
+    const { gl } = this;
+    gl.activeTexture(gl.TEXTURE12);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, Math.min(unrest.length, this.homes.length), 1, gl.RED, gl.UNSIGNED_BYTE, unrest);
+  }
+
+  /** 0 : pays, 1 : économie, 2 : ravitaillement, 3 : relations, 4 : intérieur. */
   setMapMode(mode: number): void {
     this.mapMode = mode;
   }

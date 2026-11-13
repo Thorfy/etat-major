@@ -369,7 +369,7 @@ export const AI_TRADE_DEAL_CHANCE = 0.3;
  */
 export const AXIS_BONUS = 0.1;
 export const AXIS_MAX_PER_PROVINCE = 2;
-export const MAX_AXES = 6;
+export const MAX_AXES = 8;
 export const MAX_AXIS_CELLS = 400;
 export const AXIS_COST_BASE = 80;
 export const AXIS_COST_PER_CELL = 2;
@@ -380,6 +380,13 @@ export const SEA_AXIS_COST_PER_CELL = 1;
  * au lieu de doubler ses routes.
  */
 export const AXIS_REUSE_WEIGHT = 0.5;
+/**
+ * Une route prend la mer entre deux ports qui bordent une même mer, à cette distance au plus (en
+ * cellules) : une traversée compte sa longueur, plus ce détour, pour qu'une route par la terre
+ * reste préférée quand elle existe.
+ */
+export const SEA_LINK_MAX = 220;
+export const SEA_LINK_PENALTY = 25;
 /** L'IA trace un axe, en paix, entre deux de ses provinces riches assez éloignées. */
 export const AI_AXIS_MIN_DISTANCE = 25;
 export const AI_MAX_AXES = 2;

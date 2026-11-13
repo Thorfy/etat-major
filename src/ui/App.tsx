@@ -15,6 +15,7 @@ import { formatDuration, formatShortDate } from '../game/time.ts';
 import { AI_PROFILES, ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
 import { DOCTRINE_AXES, archetypeName } from '../sim/doctrine.ts';
 import { poleName } from '../game/doctrines.ts';
+import { RELATION_COLORS, type Relation } from '../game/mapTints.ts';
 import { formatGdp, formatPercent, integer } from './format.ts';
 
 export interface UiState {
@@ -195,6 +196,11 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
         <button class="action quiet" onClick={() => game.setEmbargo(nation, trade !== 'embargo')}>
           {trade === 'embargo' ? "Lever l'embargo" : 'Embargo'}
         </button>
+        {game.canFortifyBorder(nation) && (
+          <button class="action quiet" title={BUILD_EFFECTS.fort} onClick={() => game.fortifyFront(nation)}>
+            Fortifier la frontière
+          </button>
+        )}
       </div>
     </>
   );
@@ -248,14 +254,54 @@ function BuildOptions({ game, province, options }: { game: GameClient; province:
 }
 
 /** Légende de la carte affichée. */
-function MapLegend({ mode }: { mode: MapMode }) {
+function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) {
   if (mode === 'economic') {
     return (
       <div class="legend">
         <div class="ramp" role="img" aria-label="Du plus pauvre au plus riche" />
         <span>Rural</span>
         <span>Industriel</span>
-        <small>PIB par km² · goutte : pétrole · carré : acier</small>
+        <small>PIB par km², usines comprises · goutte : pétrole · carré : acier</small>
+        <small>
+          <i class="swatch hatch up" /> en croissance · <i class="swatch hatch down" /> en recul depuis le départ
+        </small>
+      </div>
+    );
+  }
+  if (mode === 'relations') {
+    const rgb = (relation: Relation) => `rgb(${RELATION_COLORS[relation].join(',')})`;
+    const entries: [Relation, string][] = [
+      ['self', subject || 'Le pays'],
+      ['war', 'En guerre'],
+      ['ally', 'Pacte'],
+      ['coalition', 'Coalisé'],
+      ['truce', 'Trêve'],
+      ['embargo', 'Embargo'],
+      ['neutral', 'Neutre'],
+    ];
+    return (
+      <div class="legend relations">
+        {entries.map(([relation, label]) => (
+          <span key={relation}>
+            <i class="swatch" style={{ background: rgb(relation) }} /> {label}
+          </span>
+        ))}
+        <span>
+          <i class="swatch hatch trade" /> Accord commercial
+        </span>
+        <small>Vu de {subject || 'ton pays'} : clique un pays pour voir ses relations. Un neutre agressif tire vers l'orange.</small>
+      </div>
+    );
+  }
+  if (mode === 'interior') {
+    return (
+      <div class="legend">
+        <div class="ramp interior" role="img" aria-label="De la stabilité au pays à bout" />
+        <span>Stable</span>
+        <span>À bout</span>
+        <small>
+          <i class="swatch hatch unrest" /> régions agitées, d'autant plus rouges qu'elles s'agitent
+        </small>
       </div>
     );
   }
@@ -276,7 +322,7 @@ function MapLegend({ mode }: { mode: MapMode }) {
 function MapModeSwitch({ mode, onMapMode }: { mode: MapMode; onMapMode(mode: MapMode): void }) {
   return (
     <div class="panel map-mode">
-      <div class="speeds" role="group" aria-label="Carte affichée (touches E et R)">
+      <div class="speeds" role="group" aria-label="Carte affichée (touches E, R, T et I)">
         {MAP_MODES.map(({ id, label }) => (
           <button key={id} class={mode === id ? 'on' : ''} aria-pressed={mode === id} onClick={() => onMapMode(id)}>
             {label}
@@ -452,7 +498,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
           <TopBar game={game} nation={nations[game.player - 1]} mapMode={state.mapMode} onMapMode={onMapMode} />
           {state.mapMode !== 'political' && (
             <div class="panel map-legend">
-              <MapLegend mode={state.mapMode} />
+              <MapLegend mode={state.mapMode} subject={game.nameOf(game.relationSubject)} />
             </div>
           )}
           <SidePanel game={game} nations={nations} view={view} tool={state.tool} />
@@ -482,8 +528,8 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
       {game && <Journal game={game} nameOf={nameOf} />}
       <div class="panel hints">
         {game
-          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, R : cartes'
-          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, R : cartes · F3 : mesures'}
+          ? 'Clic droit + glisser : offensive · Espace : pause · 1, 2, 3 : vitesse · E, R, T, I : cartes'
+          : 'Glisser : déplacer · Molette : zoomer · Clic : sélectionner · E, R, T, I : cartes · F3 : mesures'}
       </div>
       {game && selected && holder && (
         <aside class="panel info" aria-label="Province sélectionnée">

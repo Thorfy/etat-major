@@ -137,6 +137,7 @@ interface RoadEdge {
   sea: boolean;
   own: boolean;
   color: string;
+  rank: number;
 }
 
 interface RoadNode {
@@ -147,6 +148,7 @@ interface RoadNode {
   own: boolean;
   count: number;
   color: string;
+  rank: number;
 }
 
 /**
@@ -169,10 +171,12 @@ export function drawAxes(
   const edges = new Map<string, RoadEdge>();
   const nodes = new Map<string, RoadNode>();
   for (const axis of axes) {
-    const own = axis.nation === player;
+    const own = axis.nation === player || axis.partner === player;
     const enemy = !own && atWar(axis.nation);
     if (!own && !enemy && !partner(axis.nation)) continue;
     const color = own ? AXIS_COLOR : enemy ? ENEMY_COLOR : PARTNER_AXIS_COLOR;
+    // Une route partagée prend la teinte la plus proche du joueur : la sienne, puis celle d'un partenaire.
+    const rank = own ? 3 : enemy ? 1 : 2;
     const raw = axis.points;
     if (raw.length < 4) continue;
     // Points à l'écran, déroulés depuis le premier sans couper la carte au raccord.
@@ -183,10 +187,13 @@ export function drawAxes(
       ys.push((raw[i + 1] - camera.y) * zoom + viewHeight / 2);
     }
     const n = xs.length;
-    const keyOf = (i: number) => `${axis.nation}:${raw[2 * i]},${raw[2 * i + 1]}`;
+    // Toutes les routes passent par les mêmes villes : un tronçon commun n'est dessiné qu'une fois.
+    const keyOf = (i: number) => `${raw[2 * i]},${raw[2 * i + 1]}`;
+    const bySea = new Set(axis.seaLinks ?? []);
     for (let i = 0; i < n; i++) {
       const key = keyOf(i);
-      const node = nodes.get(key) ?? { x: xs[i], y: ys[i], end: false, lost: false, own, count: 0, color };
+      const node = nodes.get(key) ?? { x: xs[i], y: ys[i], end: false, lost: false, own, count: 0, color, rank };
+      if (rank > node.rank) Object.assign(node, { own, color, rank });
       node.end ||= i === 0 || i === n - 1;
       node.lost ||= axis.held[i] === false;
       node.count++;
@@ -199,10 +206,12 @@ export function drawAxes(
       if (existing) {
         existing.count++;
         existing.active ||= axis.active;
+        if (rank > existing.rank) Object.assign(existing, { own, color, rank });
         continue;
       }
       let curve: RoadEdge['curve'];
-      if (axis.sea) {
+      const sea = bySea.has(i);
+      if (sea) {
         // Une traversée : un arc léger au-dessus de la mer.
         const bend = 0.18;
         const qx = (xs[i] + xs[i + 1]) / 2 - (ys[i + 1] - ys[i]) * bend;
@@ -216,7 +225,7 @@ export function drawAxes(
         const y3 = ys[Math.min(n - 1, i + 2)];
         curve = [xs[i], ys[i], xs[i] + (xs[i + 1] - x0) / 6, ys[i] + (ys[i + 1] - y0) / 6, xs[i + 1] - (x3 - xs[i]) / 6, ys[i + 1] - (y3 - ys[i]) / 6, xs[i + 1], ys[i + 1]];
       }
-      edges.set(key, { curve, count: 1, active: axis.active, sea: axis.sea, own, color });
+      edges.set(key, { curve, count: 1, active: axis.active, sea, own, color, rank });
     }
   }
   if (edges.size === 0) return;

@@ -14,6 +14,8 @@ export const MAP_MODES: { id: MapMode; label: string }[] = [
   { id: 'political', label: 'Pays' },
   { id: 'economic', label: 'Économie' },
   { id: 'supply', label: 'Ravitaillement' },
+  { id: 'relations', label: 'Relations' },
+  { id: 'interior', label: 'Intérieur' },
 ];
 
 /** Un indicateur : un libellé court au-dessus d'une valeur, d'une largeur fixe. */
