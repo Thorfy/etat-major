@@ -107,6 +107,36 @@ describe('commerce entre pays', () => {
     expect(sim.proposeTradeDeal(A, B)).toBe(false);
   });
 
+  it("signe avec un pays au bout des routes d'un de ses accords, en passant par les terres du partenaire", () => {
+    const sim = row();
+    expect(sim.dealReachOf(A)).toEqual([B]);
+    expect(sim.proposeTradeDeal(A, B)).toBe(true);
+    // C touche B, partenaire de A : il est à portée.
+    expect(sim.dealReachOf(A)).toEqual([C]);
+    expect(sim.proposeTradeDeal(A, C)).toBe(true);
+    const route = sim.tradeAxes.find((axis) => axis.partner && (axis.nation === C || axis.partner === C));
+    expect(route).toBeDefined();
+    const holders = new Set(route!.provinces.map((p) => sim.controllerOf(p)));
+    expect([...holders].sort()).toEqual([A, B, C]);
+    expect(route!.active).toBe(true);
+    run(sim, 20);
+    // Les deux accords rapportent.
+    expect(sim.dealFlows(A, C)).toBe(true);
+    expect(sim.tradeFactorOf(A)).toBeGreaterThan(1 + TRADE_DEAL_GAIN * 1.5);
+  });
+
+  it("perd l'accord lointain quand tombe celui qui y menait", () => {
+    const sim = row();
+    sim.proposeTradeDeal(A, B);
+    sim.proposeTradeDeal(A, C);
+    sim.endTradeDeal(A, B);
+    // La route de A vers C passait par B : coupée tout de suite, l'accord tombe à la diplomatie.
+    expect(sim.dealFlows(A, C)).toBe(false);
+    run(sim, 300);
+    expect(sim.hasTradeDeal(A, C)).toBe(false);
+    expect(sim.dealReachOf(A)).toEqual([B]);
+  });
+
   it("subit l'embargo de ses voisins s'il est trop agressif, levé quand il se calme", () => {
     const sim = row({ ai: true });
     const internals = sim as unknown as { aggression: Float64Array };

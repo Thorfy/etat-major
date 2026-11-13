@@ -2629,7 +2629,7 @@ export class Simulation {
       let steelDeals = 0;
       for (const [a, b] of this.tradeDeals) {
         const partner = a === n ? b : b === n ? a : 0;
-        if (partner === 0 || !this.tradesWith(n, partner)) continue;
+        if (partner === 0 || !this.dealFlows(n, partner)) continue;
         if (oil[partner] > oilNeed[partner]) oilDeals++;
         if (steel[partner] > steelNeed[partner]) steelDeals++;
       }
@@ -2647,6 +2647,60 @@ export class Simulation {
   /** Deux pays peuvent-ils commercer, par la terre ou par une mer qu'ils bordent tous deux ? */
   private connected(a: number, b: number): boolean {
     return (this.coastSeas[a] & this.coastSeas[b]) !== 0 || this.landNeighbors[a].includes(b);
+  }
+
+  /**
+   * Réseau d'accords d'un pays : lui-même, puis, de proche en proche, ses partenaires qui touchent
+   * déjà ce réseau, par la terre ou par une mer commune. Ses routes passent par leurs terres.
+   * `flowing` : seulement par les liens où l'on commerce en ce moment (ni guerre, ni blocus).
+   */
+  private dealNetwork(nation: number, flowing: boolean): number[] {
+    const network = [nation];
+    const partners = this.dealsOf(nation);
+    for (let i = 0; i < network.length; i++) {
+      const from = network[i];
+      for (let j = partners.length - 1; j >= 0; j--) {
+        const partner = partners[j];
+        if (!this.connected(from, partner) || (flowing && !this.tradesWith(from, partner))) continue;
+        network.push(partner);
+        partners.splice(j, 1);
+      }
+    }
+    return network;
+  }
+
+  /** Un pays touche-t-il le réseau d'accords d'un autre ? */
+  private touchesNetwork(owner: number, other: number, flowing: boolean): boolean {
+    return this.dealNetwork(owner, flowing).some((member) => member !== other && this.connected(member, other) && (!flowing || this.tradesWith(member, other)));
+  }
+
+  /**
+   * Deux pays peuvent-ils signer un accord : voisins, ou l'un touche le réseau d'accords de l'autre,
+   * dont les routes le relient en passant par les terres des partenaires.
+   */
+  private dealReachable(a: number, b: number, flowing = false): boolean {
+    if (this.connected(a, b)) return !flowing || this.tradesWith(a, b);
+    return this.touchesNetwork(a, b, flowing) || this.touchesNetwork(b, a, flowing);
+  }
+
+  /**
+   * Un accord porte-t-il en ce moment : ni guerre, ni embargo entre les deux, et un lien ouvert,
+   * direct ou par le réseau d'accords.
+   */
+  dealFlows(a: number, b: number): boolean {
+    if (this.connected(a, b)) return this.tradesWith(a, b);
+    if (!this.alive[a] || !this.alive[b] || a === b || this.frontOf(a, b)) return false;
+    if (this.embargo[a * this.stride + b] || this.embargo[b * this.stride + a]) return false;
+    return this.dealReachable(a, b, true);
+  }
+
+  /** Pays avec qui un pays peut signer un nouvel accord, par la géographie ou son réseau d'accords. */
+  dealReachOf(nation: number): number[] {
+    const reach: number[] = [];
+    for (let m = 1; m < this.stride; m++) {
+      if (m !== nation && this.alive[m] && !this.hasTradeDeal(nation, m) && this.dealReachable(nation, m)) reach.push(m);
+    }
+    return reach;
   }
 
   /** Commercent-ils en ce moment : ni guerre, ni embargo, ni blocus sur la route maritime ? */
@@ -2668,7 +2722,7 @@ export class Simulation {
     const byLand = new Uint8Array(stride);
     const dealGain = new Float64Array(stride);
     for (const [a, b] of this.tradeDeals) {
-      if (!this.tradesWith(a, b)) continue;
+      if (!this.dealFlows(a, b)) continue;
       dealGain[a] += TRADE_DEAL_GAIN * Math.min(1, Math.max(0, output[b]) / Math.max(1, output[a]));
       dealGain[b] += TRADE_DEAL_GAIN * Math.min(1, Math.max(0, output[a]) / Math.max(1, output[b]));
     }
@@ -2763,9 +2817,17 @@ export class Simulation {
     const from = this.capitalOf(a);
     const to = this.capitalOf(b);
     if (from === 0 || to === 0) return;
-    const plan = this.planAxis(a, from, to);
+    // Un accord lointain passe par les terres des partenaires de l'un ou de l'autre.
+    let owner = a;
+    let partner = b;
+    let plan = this.planAxis(a, from, to);
+    if (!plan) {
+      plan = this.planAxis(b, to, from);
+      owner = b;
+      partner = a;
+    }
     if (!plan) return;
-    this.axes.push({ id: this.nextAxisId++, nation: a, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, partner: b, seaLinks: plan.seaLinks });
+    this.axes.push({ id: this.nextAxisId++, nation: owner, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, partner, seaLinks: plan.seaLinks });
     this.axesVersion++;
   }
 
@@ -2778,14 +2840,14 @@ export class Simulation {
   }
 
   /**
-   * L'IA signe un accord commercial avec un pays avec qui elle commerce, s'il n'est pas trop
-   * agressif et qu'il lui reste de la place.
+   * L'IA signe un accord commercial avec un pays avec qui elle commerce, voisin ou au bout des routes
+   * d'un accord, s'il n'est pas trop agressif et qu'il lui reste de la place.
    */
   private aiAcceptsTradeDeal(ai: number, proposer: number): boolean {
     if (!this.alive[ai] || !this.alive[proposer] || ai === proposer || this.hasTradeDeal(ai, proposer)) return false;
     if (this.dealsOf(ai).length >= MAX_TRADE_DEALS || this.dealsOf(proposer).length >= MAX_TRADE_DEALS) return false;
     if (this.aggression[proposer] >= ALLIANCE_MAX_AGGRESSION) return false;
-    return this.connected(ai, proposer) && this.tradesWith(ai, proposer);
+    return this.dealFlows(ai, proposer);
   }
 
   proposeTradeDeal(nation: number, other: number): boolean {
@@ -2821,7 +2883,8 @@ export class Simulation {
    */
   private decideTrade(): void {
     for (const [a, b] of [...this.tradeDeals]) {
-      if (this.alive[a] && this.alive[b] && !this.frontOf(a, b) && !this.hasEmbargo(a, b) && !this.hasEmbargo(b, a)) continue;
+      // Un accord lointain tombe aussi quand plus aucun accord ne relie les deux réseaux.
+      if (this.alive[a] && this.alive[b] && !this.frontOf(a, b) && !this.hasEmbargo(a, b) && !this.hasEmbargo(b, a) && this.dealReachable(a, b)) continue;
       this.setTradeDeal(a, b, false);
       this.pendingEvents.push({ type: 'tradeDealEnded', tick: this.tick, a, b });
     }
@@ -2856,9 +2919,16 @@ export class Simulation {
         break;
       }
     }
-    // Le partenaire le plus riche qui accepte, parmi ses voisins par la terre et par la mer.
+    // Le partenaire le plus riche qui accepte, parmi ses voisins par la terre et par la mer, et ceux
+    // de son réseau d'accords.
     let best = 0;
-    for (const m of new Set([...this.landNeighbors[proposer], ...this.seaNeighbors[proposer]])) {
+    const nearby = new Set<number>();
+    for (const member of this.dealNetwork(proposer, true)) {
+      for (const m of this.landNeighbors[member]) nearby.add(m);
+      for (const m of this.seaNeighbors[member]) nearby.add(m);
+    }
+    nearby.delete(proposer);
+    for (const m of nearby) {
       if (m === this.player || !this.aiAcceptsTradeDeal(m, proposer)) continue;
       if (best === 0 || this.output[m] > this.output[best]) best = m;
     }
@@ -2879,7 +2949,7 @@ export class Simulation {
    * il commerce : c'est une route internationale, qui enrichit les provinces des deux pays.
    */
   private axisAllows(nation: number, holder: number): boolean {
-    return holder === nation || (holder !== 0 && this.hasTradeDeal(nation, holder) && this.tradesWith(nation, holder));
+    return holder === nation || (holder !== 0 && this.hasTradeDeal(nation, holder) && this.dealFlows(nation, holder));
   }
 
   /** Distance, en cellules, entre les centres de deux provinces. */
@@ -4865,6 +4935,7 @@ export class Simulation {
         trade: this.tradeAccess[id],
         tradeFactor: this.tradeFactor[id],
         deals: id === this.player ? this.dealsOf(id) : [],
+        dealReach: id === this.player ? this.dealReachOf(id) : [],
         embargoes: id === this.player ? this.embargoes.filter(([from]) => from === id).map(([, to]) => to) : [],
         embargoedBy: id === this.player ? this.embargoes.filter(([, to]) => to === id).map(([from]) => from) : [],
         construction: this.constructionRate[id],

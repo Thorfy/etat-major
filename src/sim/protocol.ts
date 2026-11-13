@@ -214,6 +214,8 @@ export interface NationSnapshot {
   tradeFactor: number;
   /** Joueur seulement : accords commerciaux, embargos qu'il impose, et qu'il subit. */
   deals: number[];
+  /** Joueur seulement : pays à portée d'un nouvel accord, voisins ou au bout des routes de ses accords. */
+  dealReach: number[];
   embargoes: number[];
   embargoedBy: number[];
   /** Points de construction par minute. */

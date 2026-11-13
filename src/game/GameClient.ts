@@ -521,13 +521,17 @@ export class GameClient {
     return this.snapshot?.nations.find((entry) => entry.id === nation)?.profile ?? -1;
   }
 
-  /** Commerce avec un pays : accord, embargo (de toi ou contre toi), coupé par la guerre, ou libre. */
-  tradeRelationOf(nation: number): 'deal' | 'embargo' | 'embargoed' | 'war' | 'free' {
+  /**
+   * Commerce avec un pays : accord, embargo (de toi ou contre toi), coupé par la guerre, libre, ou
+   * hors de portée (ni voisin, ni au bout des routes de tes accords).
+   */
+  tradeRelationOf(nation: number): 'deal' | 'embargo' | 'embargoed' | 'war' | 'free' | 'distant' {
     const stats = this.playerStats;
     if (stats?.embargoes.includes(nation)) return 'embargo';
     if (stats?.embargoedBy.includes(nation)) return 'embargoed';
     if (this.isAtWarWith(nation)) return 'war';
     if (stats?.deals.includes(nation)) return 'deal';
+    if (stats && !stats.dealReach.includes(nation)) return 'distant';
     return 'free';
   }
 

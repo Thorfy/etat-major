@@ -4,7 +4,7 @@ import { BUILD_EFFECTS, BUILD_NAMES } from '../game/buildings.ts';
 import type { SaveSlot } from '../game/saves.ts';
 import type { LoadedWorld } from '../map/loadWorld.ts';
 import { TERRAIN_NAMES } from '../map/terrain.ts';
-import type { CellInfo, MapMode, MapTool, MapView } from '../render/MapView.ts';
+import type { CellInfo, MapLayer, MapMode, MapTool, MapView } from '../render/MapView.ts';
 import type { BuildKind, SimEvent } from '../sim/protocol.ts';
 import { Art, Blason, buildingArt, landscapeOf } from './Art.tsx';
 import { RegionCard } from './RegionCard.tsx';
@@ -101,6 +101,7 @@ const TRADE_RELATIONS = {
   embargoed: 'son embargo contre toi',
   war: 'coupé par la guerre',
   free: 'échanges libres',
+  distant: 'hors de portée',
 } as const;
 
 /** Les penchants d'une doctrine, axe par axe : « Mouvement 40 %, Qualité 25 % ». */
@@ -148,7 +149,7 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
         <dt>Doctrine</dt>
         <dd title={doctrineSummary(game.doctrineOf(nation))}>{archetypeName(game.doctrineOf(nation))}</dd>
         <dt>Commerce</dt>
-        <dd class={trade === 'deal' ? 'ahead' : trade === 'free' ? '' : 'behind'}>{TRADE_RELATIONS[trade]}</dd>
+        <dd class={trade === 'deal' ? 'ahead' : trade === 'free' || trade === 'distant' ? '' : 'behind'}>{TRADE_RELATIONS[trade]}</dd>
         <dt>Pactes</dt>
         <dd>{alliances.treaty.length > 0 ? alliances.treaty.map(nameOf).join(', ') : 'aucun'}</dd>
         <dt>Soulèvement</dt>
@@ -192,7 +193,12 @@ function NationDiplomacy({ game, nation, nameOf }: { game: GameClient; nation: n
             Rompre l'accord
           </button>
         ) : (
-          <button class="action quiet" disabled={trade !== 'free'} onClick={() => game.proposeTradeDeal(nation)}>
+          <button
+            class="action quiet"
+            disabled={trade !== 'free'}
+            title={trade === 'distant' ? "Ni frontière, ni mer commune, ni route d'un de tes accords jusqu'à lui." : undefined}
+            onClick={() => game.proposeTradeDeal(nation)}
+          >
             Accord commercial
           </button>
         )}
@@ -256,8 +262,27 @@ function BuildOptions({ game, province, options }: { game: GameClient; province:
   );
 }
 
+/** Afficher ou masquer les routes et les sprites, sur toutes les cartes. */
+function LayerToggles({ view }: { view: MapView }) {
+  const [layers, setLayers] = useState(view.mapLayers);
+  const toggle = (layer: MapLayer) => {
+    view.setMapLayer(layer, !layers[layer]);
+    setLayers(view.mapLayers);
+  };
+  return (
+    <div class="layer-toggles">
+      <label title="Les routes commerciales, et le trafic qui les parcourt.">
+        <input type="checkbox" checked={layers.routes} onChange={() => toggle('routes')} /> Routes
+      </label>
+      <label title="Camions, navires et avions sur les routes, troupes au front et blindés des offensives.">
+        <input type="checkbox" checked={layers.sprites} onChange={() => toggle('sprites')} /> Sprites
+      </label>
+    </div>
+  );
+}
+
 /** Légende de la carte affichée. */
-function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) {
+function MapLegend({ mode, subject = '', view }: { mode: MapMode; subject?: string; view?: MapView }) {
   if (mode === 'economic') {
     return (
       <div class="legend">
@@ -294,6 +319,7 @@ function MapLegend({ mode, subject = '' }: { mode: MapMode; subject?: string }) 
           <i class="swatch" style={{ background: 'rgb(196, 182, 150)' }} /> Les autres pays
         </span>
         <small>Toutes les routes commerciales du monde ; plus larges là où plusieurs se rejoignent, pointillées en mer.</small>
+        {view && <LayerToggles view={view} />}
       </div>
     );
   }
@@ -553,7 +579,7 @@ export function App({ world, view, state, onStart, onResume, onMapMode }: AppPro
           <TopBar game={game} nation={nations[game.player - 1]} mapMode={state.mapMode} onMapMode={onMapMode} />
           <div class="panel map-legend">
             <MapSubModes mode={state.mapMode} onMapMode={onMapMode} />
-            <MapLegend mode={state.mapMode} subject={game.nameOf(game.relationSubject)} />
+            <MapLegend mode={state.mapMode} subject={game.nameOf(game.relationSubject)} view={view} />
           </div>
           <SidePanel game={game} nations={nations} view={view} tool={state.tool} />
         </>

@@ -955,6 +955,25 @@ canvas {
   font-size: 11px;
 }
 
+.legend .layer-toggles {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--panel-line);
+  color: var(--ink);
+  /* La légende laisse passer les clics vers la carte, pas ses cases. */
+  pointer-events: auto;
+}
+
+.legend .layer-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
 .side dd small {
   font-size: 12px;
 }

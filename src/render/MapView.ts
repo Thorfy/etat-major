@@ -21,6 +21,23 @@ export type MapTool = 'offensive' | 'fort' | 'priority' | 'axis';
 /** Carte politique (pays), économique (richesse des provinces) ou du ravitaillement. */
 export type MapMode = 'political' | 'regions' | 'stability' | 'economic' | 'growth' | 'routes' | 'relations' | 'supply';
 
+export type MapLayer = 'routes' | 'sprites';
+
+const LAYERS_KEY = 'etat-major:couches';
+
+/** Couches affichées, retenues d'une partie à l'autre dans ce navigateur. */
+function loadLayers(): Record<MapLayer, boolean> {
+  const layers = { routes: true, sprites: true };
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYERS_KEY) ?? '{}') as Partial<Record<MapLayer, unknown>>;
+    if (typeof saved.routes === 'boolean') layers.routes = saved.routes;
+    if (typeof saved.sprites === 'boolean') layers.sprites = saved.sprites;
+  } catch {
+    // Stockage indisponible ou illisible : tout s'affiche.
+  }
+  return layers;
+}
+
 const MODE_IDS: Record<MapMode, number> = { political: 0, economic: 1, supply: 2, relations: 3, stability: 4, regions: 5, growth: 6, routes: 7 };
 
 export interface CellInfo {
@@ -134,6 +151,23 @@ export class MapView {
 
   get mapMode(): MapMode {
     return this.mode;
+  }
+
+  /** Couches que le joueur peut masquer : les routes (et leur trafic), les sprites (véhicules, troupes). */
+  private layers: Record<MapLayer, boolean> = loadLayers();
+
+  get mapLayers(): Readonly<Record<MapLayer, boolean>> {
+    return this.layers;
+  }
+
+  setMapLayer(layer: MapLayer, on: boolean): void {
+    this.layers = { ...this.layers, [layer]: on };
+    try {
+      localStorage.setItem(LAYERS_KEY, JSON.stringify(this.layers));
+    } catch {
+      // Sans stockage, le choix vaut pour la session.
+    }
+    this.dirty = true;
   }
 
   setMapMode(mode: MapMode): void {
@@ -533,17 +567,20 @@ export class MapView {
     this.lastOverlay = time;
     const ctx = this.labels.context;
     this.labels.clear(this.camera);
-    // Du dessous au-dessus : routes, trafic, puis les noms des pays.
+    // Du dessous au-dessus : routes, trafic, puis les noms des pays. Sans routes, pas de trafic.
+    const { routes, sprites } = this.layers;
     if (this.player !== 0) {
       // La carte des routes montre celles de tous les pays ; les autres cartes, les siennes et celles qui le touchent.
-      this.flowEdges = drawAxes(ctx, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes');
+      this.flowEdges = routes
+        ? drawAxes(ctx, this.camera, this.player, this.atWar, (nation) => this.partners.has(nation), this.axes, this.mode === 'routes')
+        : [];
     }
-    if (this.player !== 0) drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
+    if (this.player !== 0 && sprites) drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
     this.labels.draw(this.camera, false);
     if (this.mode === 'economic') drawResources(ctx, this.camera, this.resourceMarkers);
     if (this.player === 0) return;
     drawPriorityZones(ctx, this.camera, this.priorityZones, PRIORITY_RADIUS);
-    drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts, time / 1000);
+    drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts, time / 1000, sprites);
   }
 
   private tick(time: number): void {
@@ -555,7 +592,8 @@ export class MapView {
     this.applyZoom(dt);
 
     // Trafic, troupes au front ou offensives : la couche du dessus s'anime, 30 images par seconde.
-    const lively = this.flowEdges.length > 0 || this.offensives.length > 0 || this.fronts.some((front) => front.marks.length > 0);
+    const lively =
+      this.offensives.length > 0 || (this.layers.sprites && (this.flowEdges.length > 0 || this.fronts.some((front) => front.marks.length > 0)));
     const animate = this.player !== 0 && lively && time - this.lastOverlay >= 33;
     if (this.dirty || this.continuous) {
       if (this.lastPointer && this.pointers.size === 0) {

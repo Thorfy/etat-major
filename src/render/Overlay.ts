@@ -314,6 +314,8 @@ export function drawCampaign(
   draft: ArrowDraft | null,
   fronts: readonly FrontSnapshot[] = [],
   time = 0,
+  /** Faux : ni troupes au front, ni blindés en tête des offensives. */
+  sprites = true,
 ): void {
   const { viewWidth, viewHeight, zoom } = camera;
   const toScreenX = (x: number) => wrapDeltaX(camera.x, x) * zoom + viewWidth / 2;
@@ -322,7 +324,7 @@ export function drawCampaign(
 
   // Les troupes de ses fronts : de l'infanterie de chaque côté de la ligne.
   // Elles apparaissent en fondu quand on zoome, au lieu de surgir d'un coup.
-  const troopFade = Math.max(0, Math.min(1, (zoom - 0.7) / 0.4));
+  const troopFade = sprites ? Math.max(0, Math.min(1, (zoom - 0.7) / 0.4)) : 0;
   if (troopFade > 0) {
     ctx.save();
     ctx.globalAlpha = troopFade;
@@ -406,7 +408,7 @@ export function drawCampaign(
     const fill = offensive.inTransit && (own || enemy) ? SEA_COLOR : color;
     drawArrow(ctx, x0, y0, x0 + dx, y0 + dy, width, fill, own || enemy ? 0.8 : 0.35, offensive.inTransit);
     // En tête de l'offensive : des blindés, ou un navire de guerre pendant la traversée.
-    if (own || enemy) {
+    if (sprites && (own || enemy)) {
       const lead = 0.55;
       const size = troopSize * 1.15;
       drawUnit(ctx, offensive.inTransit ? 'navire-guerre' : 'blinde', x0 + dx * lead, y0 + dy * lead, size, dx, dy, time);
