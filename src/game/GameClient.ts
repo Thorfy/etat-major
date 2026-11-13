@@ -43,6 +43,7 @@ import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
 import { provinceWealth } from './economy.ts';
 import { eventNations } from './events.ts';
+import { regionName } from './regionNames.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
 import { type SaveSlot, writeSave } from './saves.ts';
 
@@ -293,7 +294,7 @@ export class GameClient {
       this.journal.push(event);
       if (this.journal.length > JOURNAL_SIZE) this.journal.shift();
     }
-    const name = (id: number) => this.world.data.nations[id - 1].name;
+    const name = (id: number) => this.nameOf(id);
     const me = this.player;
     switch (event.type) {
       case 'war': {
@@ -413,6 +414,18 @@ export class GameClient {
   /** Pays liés au joueur par un pacte de non-agression. */
   get allies(): number[] {
     return this.playerStats?.allies ?? [];
+  }
+
+  /**
+   * Nom d'une nation. Une région historique qui n'est pas indépendante porte son nom de région
+   * (« Bretagne ») ; son nom d'État (« Duché de Bretagne ») n'apparaît qu'à sa naissance.
+   */
+  nameOf(id: number): string {
+    const nation = this.world.data.nations[id - 1];
+    if (!nation) return '';
+    if (nation.parent === undefined) return nation.name;
+    const label = this.labels.get(id);
+    return label && label.r >= 0 ? nation.name : regionName(nation.name);
   }
 
   /** Relation du joueur avec une nation. */
@@ -631,7 +644,7 @@ export class GameClient {
       // Un front né d'un débarquement démarre sans troupes : il faut le dire au joueur.
       const contact = front.length > 0;
       if (contact && !this.inContact.has(enemy) && this.orderFor(enemy).allocation === 0) {
-        this.notify(`Front ouvert avec ${this.world.data.nations[enemy - 1].name} : affecte-lui des forces !`);
+        this.notify(`Front ouvert avec ${this.nameOf(enemy)} : affecte-lui des forces !`);
       }
       if (contact) this.inContact.add(enemy);
       else this.inContact.delete(enemy);
@@ -893,7 +906,7 @@ export class GameClient {
   fortifyFront(enemy: number): void {
     if (!this.canCommand) return;
     this.command({ type: 'fortifyFront', nation: this.player, enemy });
-    this.notify(`Front avec ${this.world.data.nations[enemy - 1].name} mis en chantier de fortification.`);
+    this.notify(`Front avec ${this.nameOf(enemy)} mis en chantier de fortification.`);
   }
 
   setCounterShare(share: number): void {

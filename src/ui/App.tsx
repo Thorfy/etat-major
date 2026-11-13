@@ -429,7 +429,7 @@ function DefeatDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): 
 export function App({ world, view, state, onStart, onResume, onMapMode }: AppProps) {
   const { nations, provinces } = world.data;
   const { game } = state;
-  const nameOf = (owner: number) => nations[owner - 1].name;
+  const nameOf = (owner: number) => (game ? game.nameOf(owner) : nations[owner - 1].name);
   const hovered = state.hover.province ? provinces[state.hover.province - 1] : null;
   const selected = state.selected.province ? provinces[state.selected.province - 1] : null;
   const owner = state.selected.owner;

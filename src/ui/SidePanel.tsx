@@ -229,7 +229,7 @@ function FrontsTab({ game, nations, view, tool }: { game: GameClient; nations: N
 function TradeSection({ game, view, tool }: { game: GameClient; view: MapView; tool: MapTool | null }) {
   const stats = game.playerStats;
   if (!stats) return null;
-  const names = (ids: number[]) => (ids.length > 0 ? ids.map((id) => game.worldData.nations[id - 1].name).join(', ') : 'aucun');
+  const names = (ids: number[]) => (ids.length > 0 ? ids.map((id) => game.nameOf(id)).join(', ') : 'aucun');
   const axes = game.playerAxes;
   const queued = stats.builds.filter((order) => order.kind === 'axis').length;
   return (
@@ -362,7 +362,7 @@ function EconomyTab({ game, nation, view, tool }: { game: GameClient; nation: Na
                         : order.kind === 'research'
                           ? DOCTRINE_AXES[order.axis].name
                           : order.kind === 'investment'
-                          ? game.worldData.nations[order.region - 1].name
+                          ? game.nameOf(order.region)
                           : provinces[order.province - 1].name}
                     </small>
                   </span>
@@ -547,7 +547,7 @@ function DefenseTab({ game, view, tool }: { game: GameClient; view: MapView; too
 function DiplomacyTab({ game, nations }: { game: GameClient; nations: NationData[] }) {
   const stats = game.playerStats;
   if (!stats) return null;
-  const name = (id: number) => nations[id - 1].name;
+  const name = (id: number) => game.nameOf(id);
   const list = (ids: number[], empty: string) => (ids.length > 0 ? ids.map(name).join(', ') : empty);
   return (
     <>
@@ -628,7 +628,7 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
           <div class="offensive-row">
             <span>
               <Blason nation={nations[movement.origin - 1]} />
-              {nations[movement.origin - 1].name}{' '}
+              {game.nameOf(movement.origin)}{' '}
               <small>
                 · {historic(movement.origin) ? `identité ${IDENTITY_NAMES[nations[movement.origin - 1].identity ?? 1]}` : 'annexée'} ·{' '}
                 {formatPercent(movement.share)} du pays · équipée à {formatPercent(movement.care)}
@@ -660,7 +660,7 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
       ))}
       {calm.length > 0 && (
         <p class="region-calm">
-          Calmes : {calm.map((movement) => nations[movement.origin - 1].name).join(', ')}.
+          Calmes : {calm.map((movement) => game.nameOf(movement.origin)).join(', ')}.
         </p>
       )}
     </section>
