@@ -381,14 +381,25 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   revérifie son réseau toutes les dix passes d'économie, et le redessine si un département hors
   réseau dépasse de 10 % la plus petite ville principale, si une ville est perdue, une route coupée,
   ou si le nombre permis change.
-- **Routes de l'autarcie** (demandé : « les routes vers nos propres ressources sont toujours
-  gratuites en mode autarcie, progressif, de sorte que quand l'empire grandit nos routes se créent
-  d'elles-mêmes ») : l'autarcie relie d'elle-même au réseau une part de ses gisements de pétrole et
-  d'acier égale à sa position sur l'axe Échanges (la moitié des gisements à mi-chemin, tous à fond),
-  les plus gros d'abord, terres annexées comprises. Ils ne prennent pas de place de ville principale
-  et deviennent des villes du réseau (avec leur bonus) ; le réseau se redessine quand la doctrine
-  avance ou qu'un gisement est gagné ou perdu. L'IA en profite de même. Onglet Économie :
-  « Gisements reliés ».
+- **Réseau : autarcie et libre-échange, deux façons de jouer l'économie.** Demandé : « les
+  terminaisons vers nos ressources sont gratuites en autarcie, et on conserve les terminaisons sur
+  les régions les plus fortes ; en libre-échange, connecter le plus de régions possible à partir du
+  même point de terminaison ; la transition est progressive, l'état neutre fait un peu des deux ».
+  La part du libre-échange f va de 0 (autarcie à fond) à 1 (libre-échange à fond), 0,5 au centre :
+  - **gisements gratuits** : une part (1 − f) des gisements de pétrole et d'acier du territoire,
+    terres annexées comprises, les plus gros d'abord, a son terminus gratuit ; tous en autarcie à
+    fond, la moitié au centre, aucun en libre-échange à fond. Ils ne prennent pas de place : les
+    villes principales restent aux régions les plus fortes ;
+  - **ce qui compte sur la capacité** : (1 − f) × villes reliées + f × terminus (bouts de route). En
+    autarcie, chaque ville compte ; en libre-échange, une route qui enfile plusieurs villes ne coûte
+    qu'un terminus. Les villes sont essayées des plus riches aux moins riches ; un tracé trop coûteux
+    laisse sa chance aux suivants (jusqu'à 24 refus, à proportion de f) ;
+  - le réseau se redessine quand le mélange change d'un dixième, ou qu'un gisement est gagné ou perdu.
+  Sur la vraie carte, en libre-échange à fond contre l'autarcie à fond : Russie 22 villes contre 12,
+  Brésil 18 contre 9, France 16 contre 11 (son réseau en étoile autour de Paris s'y prête moins).
+  Onglet Économie : capacité utilisée, villes reliées et terminus, gisements gratuits. Coût : les
+  réseaux se redessinent plus souvent (les doctrines de l'IA glissent) ; une semaine de jeu prend
+  environ 1,7 s de calcul, et le pic du premier jour 240 ms.
 - **Cartes en familles**, chacune avec ses sous-cartes (touches P, E, T, R ; appuyer encore passe à
   la sous-carte suivante) :
   - Pays : Pays, Régions, Stabilité ;

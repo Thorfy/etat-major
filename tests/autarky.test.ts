@@ -55,40 +55,53 @@ function world(): SimConfig {
   };
 }
 
-/** Fixe la position de A sur l'axe Échanges (−1 : autarcie), puis laisse le réseau se redessiner. */
-function withAutarky(position: number): Simulation {
+/** Fixe la position de A sur l'axe Échanges (−1 : autarcie, +1 : libre-échange), et l'y tient. */
+function withExchange(position: number): Simulation {
   const sim = new Simulation(world());
-  (sim as unknown as { doctrine: Float64Array }).doctrine[A * DOCTRINE_AXIS_COUNT + 3] = position;
-  for (let t = 0; t < 600; t++) sim.step();
+  const internals = sim as unknown as { doctrine: Float64Array; doctrineTarget: Float64Array };
+  for (let t = 0; t < 600; t++) {
+    internals.doctrine[A * DOCTRINE_AXIS_COUNT + 3] = position;
+    internals.doctrineTarget[A * DOCTRINE_AXIS_COUNT + 3] = position;
+    sim.step();
+  }
   return sim;
 }
 
 const oilOf = (sim: Simulation, p: number) => (sim as unknown as { provinceOil: Float64Array }).provinceOil[p];
 
-describe("routes de l'autarcie", () => {
-  it('sans autarcie, aucun gisement pauvre n\'est relié', () => {
-    const sim = withAutarky(0);
-    const network = sim.networkOf(A);
-    expect(network.resources ?? []).toEqual([]);
-    expect(network.principal.some((p) => oilOf(sim, p) > 0)).toBe(false);
+describe("réseau : de l'autarcie au libre-échange", () => {
+  it("l'autarcie relie ses gisements gratuitement : tous à fond, la moitié au centre, aucun en libre-échange", () => {
+    const oils = (position: number) => {
+      const sim = withExchange(position);
+      return (sim.networkOf(A).resources ?? []).map((p) => oilOf(sim, p));
+    };
+    expect(oils(-1)).toEqual([4, 3, 2, 1]);
+    expect(oils(0)).toEqual([4, 3]);
+    expect(oils(1)).toEqual([]);
   });
 
-  it('à mi-chemin, les deux plus gros gisements ; à fond, tous, sans prendre de place de ville principale', () => {
-    const half = withAutarky(-0.5);
-    const linked = half.networkOf(A).resources ?? [];
-    expect(linked.map((p) => oilOf(half, p))).toEqual([4, 3]);
-
-    const full = withAutarky(-1);
-    const network = full.networkOf(A);
-    expect((network.resources ?? []).map((p) => oilOf(full, p))).toEqual([4, 3, 2, 1]);
-    // Chaque gisement est sur une route du réseau, et compte comme une ville du réseau…
-    const onRoads = new Set(full.tradeAxes.filter((axis) => axis.auto && axis.nation === A).flatMap((axis) => axis.provinces));
+  it("en autarcie, chaque gisement relié est sur une route, sans prendre de place de ville principale", () => {
+    const sim = withExchange(-1);
+    const network = sim.networkOf(A);
+    const onRoads = new Set(sim.tradeAxes.filter((axis) => axis.auto && axis.nation === A).flatMap((axis) => axis.provinces));
     for (const p of network.resources ?? []) {
       expect(onRoads.has(p)).toBe(true);
       expect(network.principal).toContain(p);
     }
-    // … sans prendre de place : les villes principales restent au plafond habituel.
-    expect(network.hubs.length).toBeLessThanOrEqual(network.capacity);
-    expect(network.hubs.some((p) => oilOf(full, p) > 0)).toBe(false);
+    // Chaque ville compte : autant de villes reliées que la capacité, et aucune n'est un gisement pauvre.
+    expect(network.hubs).toHaveLength(network.capacity);
+    expect(network.hubs.some((p) => oilOf(sim, p) > 0)).toBe(false);
+  });
+
+  it('le libre-échange ne compte que les bouts de route : bien plus de villes reliées pour la même capacité', () => {
+    const autarky = withExchange(-1).networkOf(A);
+    const middle = withExchange(0).networkOf(A);
+    const free = withExchange(1).networkOf(A);
+    expect(free.capacity).toBe(autarky.capacity);
+    expect(free.termini ?? 0).toBeLessThanOrEqual(free.capacity);
+    expect(free.hubs.length).toBeGreaterThan(autarky.hubs.length);
+    // Le centre est entre les deux.
+    expect(middle.hubs.length).toBeGreaterThanOrEqual(autarky.hubs.length);
+    expect(middle.hubs.length).toBeLessThanOrEqual(free.hubs.length);
   });
 });

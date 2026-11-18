@@ -350,13 +350,20 @@ function AutoNetwork({ game }: { game: GameClient }) {
   if (network.territory > 0) sources.push(`${network.territory} par le territoire`);
   if (network.research > 0) sources.push(`${network.research} par la recherche`);
   const shown = open ? network.principal : network.principal.slice(0, 6);
+  // Ce que le réseau prend sur sa capacité : chaque ville en autarcie, chaque bout de route en
+  // libre-échange, un mélange entre les deux.
+  const used = (1 - network.freeTrade) * network.hubs.length + network.freeTrade * network.termini;
   return (
     <>
       <h3>Réseau commercial</h3>
       <dl>
-        <dt>Villes principales</dt>
+        <dt title="En autarcie, chaque ville reliée compte ; en libre-échange, seuls les bouts de route ; entre les deux, un mélange.">Capacité</dt>
         <dd>
-          {network.hubs.length} / {network.capacity}
+          {used.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} / {network.capacity}
+        </dd>
+        <dt>Villes reliées</dt>
+        <dd>
+          {network.hubs.length} · {network.termini} terminus
         </dd>
         <dt>D'où</dt>
         <dd>
@@ -366,8 +373,8 @@ function AutoNetwork({ game }: { game: GameClient }) {
         <dd>{integer.format(crossed.size)}</dd>
         <dt>Routes d'accords</dt>
         <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
-        <dt title="L'autarcie relie d'elle-même tes gisements au réseau, gratuitement, d'autant plus qu'elle est poussée.">Gisements reliés</dt>
-        <dd>{network.resources.length > 0 ? `${network.resources.length} · autarcie` : '—'}</dd>
+        <dt title="L'autarcie relie gratuitement une part de tes gisements : tous à fond, la moitié au centre, aucun en libre-échange à fond.">Gisements reliés</dt>
+        <dd>{network.resources.length > 0 ? `${network.resources.length} · gratuits` : '—'}</dd>
       </dl>
       {network.principal.length > 0 && (
         <ol class="builds axis-list">

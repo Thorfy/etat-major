@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AUTO_HUBS_BASE, AUTO_HUBS_PER_PROVINCES, AUTO_HUBS_PER_RESEARCH, AUTO_TRANSIT_BONUS, HUB_BONUS, NETWORK_CHECK_GROUPS } from '../src/sim/balance.ts';
+import { DOCTRINE_AXIS_COUNT } from '../src/sim/doctrine.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
 
 const W = 200;
@@ -46,8 +47,20 @@ function config(gdp: (col: number, row: number) => number, withB = false): SimCo
   };
 }
 
+/**
+ * Ces tests mesurent le réseau en autarcie à fond, où chaque ville reliée compte sur la capacité (le
+ * libre-échange, qui ne compte que les bouts de route, a ses propres tests). Il n'y a pas de gisement.
+ */
+const autarkic = (sim: Simulation) => {
+  const internals = sim as unknown as { doctrine: Float64Array; doctrineTarget: Float64Array };
+  internals.doctrine[A * DOCTRINE_AXIS_COUNT + 3] = -1;
+  internals.doctrineTarget[A * DOCTRINE_AXIS_COUNT + 3] = -1;
+};
 const run = (sim: Simulation, ticks: number) => {
-  for (let t = 0; t < ticks; t++) sim.step();
+  for (let t = 0; t < ticks; t++) {
+    autarkic(sim);
+    sim.step();
+  }
 };
 const at = (sim: Simulation, col: number, row: number) => sim.provinceGrid[(row * 20 + 10) * W + col * 20 + 10];
 const bonusOf = (sim: Simulation, p: number) => (sim as unknown as { axisBonus: Float64Array }).axisBonus[p];
@@ -97,7 +110,10 @@ describe('réseau commercial automatique', () => {
     const sim = new Simulation(config((col, row) => 1e5 - (row * 10 + col) * 1000));
     const before = sim.hubCapacityOf(A).total;
     sim.queueResearch(A, 3);
-    for (let t = 0; t < 600 * 40 && sim.researchOf(A, 3) === 0; t++) sim.step();
+    for (let t = 0; t < 600 * 40 && sim.researchOf(A, 3) === 0; t++) {
+      autarkic(sim);
+      sim.step();
+    }
     expect(sim.hubCapacityOf(A).total).toBe(before + AUTO_HUBS_PER_RESEARCH);
     run(sim, CHECK);
     expect(sim.networkOf(A).hubs).toHaveLength(before + AUTO_HUBS_PER_RESEARCH);

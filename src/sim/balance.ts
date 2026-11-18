@@ -403,6 +403,8 @@ export const AUTO_TRANSIT_BONUS = 0.05;
 export const HUB_SWAP_MARGIN = 1.1;
 /** Chaque pays vérifie son réseau une passe d'économie sur ce nombre. */
 export const NETWORK_CHECK_GROUPS = 10;
+/** En redessinant un réseau, on cesse d'essayer d'autres villes après tant de tracés trop coûteux. */
+export const NETWORK_MAX_REFUSED = 24;
 export const MAX_AXES = 30;
 export const MAX_AXIS_CELLS = 400;
 export const AXIS_COST_BASE = 80;
