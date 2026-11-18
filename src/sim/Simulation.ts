@@ -274,6 +274,7 @@ import {
   HUB_SWAP_MARGIN,
   NETWORK_CHECK_GROUPS,
   NETWORK_MAX_REFUSED,
+  RESOURCE_ROUTE_MAX_CELLS,
   MAX_AXIS_CELLS,
   AXIS_COST_BASE,
   AXIS_COST_PER_CELL,
@@ -3440,6 +3441,8 @@ export class Simulation {
     nation: number,
     from: number,
     to: number,
+    /** Longueur au plus, en cellules : les routes vers les gisements vont aussi loin qu'il faut. */
+    maxCells = MAX_AXIS_CELLS,
   ): { path: number[]; sea: boolean; length: number; seaLinks: number[]; seaLength: number } | null {
     const count = this.controller.length;
     if (from <= 0 || to <= 0 || from >= count || to >= count || from === to) return null;
@@ -3464,7 +3467,7 @@ export class Simulation {
       let current = 0;
       let best = Infinity;
       for (const [p, d] of distance) if (!done.has(p) && d < best) [current, best] = [p, d];
-      if (current === 0 || current === to || best > MAX_AXIS_CELLS) break;
+      if (current === 0 || current === to || best > maxCells) break;
       done.add(current);
       for (const next of this.provinceNeighborsOf(current)) {
         if (done.has(next) || !this.axisAllows(nation, this.controller[next])) continue;
@@ -3488,7 +3491,7 @@ export class Simulation {
         }
       }
     }
-    if (distance.has(to) && distance.get(to)! <= MAX_AXIS_CELLS) {
+    if (distance.has(to) && distance.get(to)! <= maxCells) {
       const path = [to];
       while (path[path.length - 1] !== from) path.push(previous.get(path[path.length - 1])!);
       path.reverse();
@@ -3680,7 +3683,7 @@ export class Simulation {
     for (let p = 1; p < this.controller.length; p++) {
       worldOil += this.provinceOil[p];
       worldSteel += this.provinceSteel[p];
-      if (this.controller[p] !== nation || this.provinceHome[p] !== nation) continue;
+      if (this.controller[p] !== nation) continue;
       if (this.provinceOil[p] > 0 || this.provinceSteel[p] > 0) deposits.push(p);
     }
     const weight = (p: number) => this.provinceOil[p] / Math.max(1e-9, worldOil) + this.provinceSteel[p] / Math.max(1e-9, worldSteel);
@@ -3711,7 +3714,7 @@ export class Simulation {
     if ((network.blend ?? -1) !== Math.round(this.freeTradeShareOf(nation) * 10) / 10) return true;
     // L'autarcie avance ou recule, l'empire gagne ou perd un gisement : les routes vers eux suivent.
     const resources = this.resourceLinksOf(nation);
-    const linked = network.resources ?? [];
+    const linked = network.resourceTargets ?? [];
     if (resources.length !== linked.length || resources.some((p) => !linked.includes(p))) return true;
     const own = this.axes.filter((axis) => axis.auto && axis.nation === nation);
     if (own.some((axis) => !axis.active)) return true;
@@ -3744,6 +3747,7 @@ export class Simulation {
     const hubs: number[] = [];
     const principal: number[] = [];
     const resources: number[] = [];
+    const resourceTargets = this.alive[nation] ? this.resourceLinksOf(nation) : [];
     // Le réseau comme graphe de provinces : un terminus est une province où une seule route arrive.
     const links = new Map<number, Set<number>>();
     let termini = 0;
@@ -3815,22 +3819,25 @@ export class Simulation {
         hubs.push(p);
         principal.push(p);
       }
-      // Les gisements que l'autarcie relie, gratuitement : chacun devient une ville du réseau.
-      for (const p of this.resourceLinksOf(nation)) {
-        resources.push(p);
-        if (principal.includes(p) || root === undefined) continue;
+      // Les gisements que l'autarcie relie, gratuitement : chacun rejoint le point le plus proche du
+      // réseau, aussi loin qu'il faut, et devient une ville du réseau. Seuls comptent ceux qui y sont.
+      for (const p of resourceTargets) {
+        if (root === undefined) break;
         if (!onNetwork.has(p)) {
-          const plan = this.planAxis(nation, p, root);
+          let nearest = root;
+          for (const q of onNetwork) if (this.provinceDistance(p, q) < this.provinceDistance(p, nearest)) nearest = q;
+          const plan = this.planAxis(nation, p, nearest, RESOURCE_ROUTE_MAX_CELLS) ?? (nearest !== root ? this.planAxis(nation, p, root, RESOURCE_ROUTE_MAX_CELLS) : null);
           if (!plan) continue;
           this.axes.push({ id: this.nextAxisId++, nation, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, seaLinks: plan.seaLinks, auto: true });
           for (const q of plan.path) onNetwork.add(q);
         }
-        principal.push(p);
+        resources.push(p);
+        if (!principal.includes(p)) principal.push(p);
       }
     }
     // Le mélange autarcie / libre-échange retenu, au dixième près : le réseau se redessine quand il change.
     const blend = Math.round(freeTrade * 10) / 10;
-    this.networks[nation] = { hubs, principal, capacity, resources, termini, blend };
+    this.networks[nation] = { hubs, principal, capacity, resources, resourceTargets, termini, blend };
     this.axesVersion++;
     if (nation === this.player) {
       const added = hubs.filter((p) => !before.includes(p));
@@ -5650,7 +5657,7 @@ export class Simulation {
             ? (() => {
                 const { base, territory, research, total } = this.hubCapacityOf(id);
                 const network = this.networkOf(id);
-                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research, resources: (network.resources ?? []).slice(), termini: network.termini ?? 0, freeTrade: this.freeTradeShareOf(id) };
+                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).length, termini: network.termini ?? 0, freeTrade: this.freeTradeShareOf(id) };
               })()
             : null,
         doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
@@ -5867,7 +5874,7 @@ export class Simulation {
         networks: Array.from({ length: this.stride }, (_, n) => {
           const network = this.networks[n];
           return network
-            ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), termini: network.termini, blend: network.blend }
+            ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend }
             : { hubs: [], principal: [], capacity: -1 };
         }),
         doctrine: Array.from(this.doctrine),
@@ -5978,7 +5985,7 @@ export class Simulation {
     // Un réseau jamais calculé (capacité -1) le sera à son tour.
     this.networks = [];
     (legacy.networks ?? []).forEach((network, n) => {
-      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), termini: network.termini, blend: network.blend };
+      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend };
     });
     this.networkPhase = legacy.networkPhase ?? 0;
     if (legacy.axisBaseline) {

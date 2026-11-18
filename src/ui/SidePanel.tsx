@@ -374,7 +374,9 @@ function AutoNetwork({ game }: { game: GameClient }) {
         <dt>Routes d'accords</dt>
         <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
         <dt title="L'autarcie relie gratuitement une part de tes gisements : tous à fond, la moitié au centre, aucun en libre-échange à fond.">Gisements reliés</dt>
-        <dd>{network.resources.length > 0 ? `${network.resources.length} · gratuits` : '—'}</dd>
+        <dd class={network.resources.length < network.resourceTargets ? 'behind' : ''}>
+          {network.resourceTargets > 0 ? `${network.resources.length} / ${network.resourceTargets} · gratuits` : '—'}
+        </dd>
       </dl>
       {network.principal.length > 0 && (
         <ol class="builds axis-list">

@@ -405,6 +405,8 @@ export const HUB_SWAP_MARGIN = 1.1;
 export const NETWORK_CHECK_GROUPS = 10;
 /** En redessinant un réseau, on cesse d'essayer d'autres villes après tant de tracés trop coûteux. */
 export const NETWORK_MAX_REFUSED = 24;
+/** Une route vers un gisement va jusqu'au point le plus proche du réseau, sur cette longueur au plus (en cellules). */
+export const RESOURCE_ROUTE_MAX_CELLS = 4000;
 export const MAX_AXES = 30;
 export const MAX_AXIS_CELLS = 400;
 export const AXIS_COST_BASE = 80;

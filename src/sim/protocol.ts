@@ -84,6 +84,8 @@ export interface NetworkState {
   principal: number[];
   /** Gisements que l'autarcie relie d'elle-même au réseau, en plus des villes principales. */
   resources?: number[];
+  /** Gisements qu'elle cherchait à relier (une route impossible en laisse hors du réseau). */
+  resourceTargets?: number[];
   /** Bouts de route du réseau (une province où une seule route arrive). */
   termini?: number;
   /** Part du libre-échange (0 à 1, au dixième) avec laquelle il a été bâti. */
@@ -264,7 +266,7 @@ export interface NationSnapshot {
   /** Joueur seulement : terminus de son réseau commercial (axes en chantier compris). */
   axisTerminals: number;
   /** Joueur seulement : réseau automatique, et d'où vient le nombre de ses villes principales. */
-  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number; resources: number[]; termini: number; freeTrade: number } | null;
+  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number; resources: number[]; resourceTargets: number; termini: number; freeTrade: number } | null;
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
   doctrineTarget: number[];
   research: number[];

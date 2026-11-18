@@ -22,6 +22,8 @@ function world(): SimConfig {
     ['5,0', 3],
     ['7,0', 2],
     ['9,0', 1],
+    // Un gisement de B, sur sa rangée du bas.
+    ['4,3', 5],
   ]);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -103,5 +105,29 @@ describe("réseau : de l'autarcie au libre-échange", () => {
     // Le centre est entre les deux.
     expect(middle.hubs.length).toBeGreaterThanOrEqual(autarky.hubs.length);
     expect(middle.hubs.length).toBeLessThanOrEqual(free.hubs.length);
+  });
+
+  it("relie aussi un gisement pris à l'ennemi, encore sous occupation", () => {
+    const sim = new Simulation(world());
+    const internals = sim as unknown as { doctrine: Float64Array; doctrineTarget: Float64Array; owners: Uint16Array; takeCell(cell: number, attacker: number, defender: number): unknown };
+    sim.declareWars([[A, B]]);
+    // A avance jusqu'au gisement de B (la colonne 4, des deux rangées de B, jusqu'en bas).
+    for (let cell = 0; cell < W * H; cell++) {
+      const x = cell % W;
+      if (internals.owners[cell] === B && Math.floor(x / 20) === 4) internals.takeCell(cell, A, B);
+    }
+    for (let t = 0; t < 600; t++) {
+      internals.doctrine[A * DOCTRINE_AXIS_COUNT + 3] = -1;
+      internals.doctrineTarget[A * DOCTRINE_AXIS_COUNT + 3] = -1;
+      // Un front figé : B n'y engage personne, la province reste occupée.
+      sim.setFront(B, A, 0, 'hold');
+      sim.setFront(A, B, 1, 'hold');
+      sim.step();
+    }
+    const network = sim.networkOf(A);
+    const taken = sim.provinceGrid[70 * W + 90];
+    expect(sim.controllerOf(taken)).toBe(A);
+    expect(network.resourceTargets).toContain(taken);
+    expect(network.resources).toContain(taken);
   });
 });

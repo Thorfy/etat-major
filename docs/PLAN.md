@@ -394,7 +394,13 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
     autarcie, chaque ville compte ; en libre-échange, une route qui enfile plusieurs villes ne coûte
     qu'un terminus. Les villes sont essayées des plus riches aux moins riches ; un tracé trop coûteux
     laisse sa chance aux suivants (jusqu'à 24 refus, à proportion de f) ;
-  - le réseau se redessine quand le mélange change d'un dixième, ou qu'un gisement est gagné ou perdu.
+  - le réseau se redessine quand le mélange change d'un dixième, ou qu'un gisement est gagné ou perdu ;
+  - « toutes les ressources ne sont pas connectées alors que je suis en full autarcie » : une route
+    vers un gisement ne pouvait pas dépasser 400 cellules depuis la capitale (l'Alaska, le Xinjiang,
+    les conquêtes lointaines restaient dehors), et les provinces occupées n'étaient pas comptées.
+    Désormais, chaque gisement du territoire tenu, occupation comprise, rejoint le point le plus
+    proche du réseau, aussi loin qu'il faut ; seule une enclave coupée par l'ennemi reste dehors.
+    L'onglet Économie dit « reliés / à relier ».
   Sur la vraie carte, en libre-échange à fond contre l'autarcie à fond : Russie 22 villes contre 12,
   Brésil 18 contre 9, France 16 contre 11 (son réseau en étoile autour de Paris s'y prête moins).
   Onglet Économie : capacité utilisée, villes reliées et terminus, gisements gratuits. Coût : les
