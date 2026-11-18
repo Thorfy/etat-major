@@ -13,7 +13,8 @@ import { TopBar } from './TopBar.tsx';
 import { MAP_GROUPS, groupOf } from './mapModes.ts';
 import { SetupPanel } from './SetupPanel.tsx';
 import { describeEvent, eventKey, eventNations } from '../game/events.ts';
-import { formatDuration, formatShortDate } from '../game/time.ts';
+import { formatDate, formatDuration, formatShortDate } from '../game/time.ts';
+import { PILLARS, formatMultiple } from './score.ts';
 import { AI_PROFILES, ALLIANCE_MAX_AGGRESSION, INVESTMENT_WEEKS } from '../sim/balance.ts';
 import { DOCTRINE_AXES, archetypeName } from '../sim/doctrine.ts';
 import { poleName } from '../game/doctrines.ts';
@@ -299,7 +300,6 @@ function MapLegend({ mode, subject = '', view }: { mode: MapMode; subject?: stri
         <div class="ramp growth" role="img" aria-label="Du recul à la croissance depuis le début de la partie" />
         <span>En recul</span>
         <span>En croissance</span>
-        <small>Depuis le début de la partie : les combats et l'usure de la guerre font reculer, la paix fait grandir.</small>
       </div>
     );
   }
@@ -318,7 +318,6 @@ function MapLegend({ mode, subject = '', view }: { mode: MapMode; subject?: stri
         <span>
           <i class="swatch" style={{ background: 'rgb(196, 182, 150)' }} /> Les autres pays
         </span>
-        <small>Toutes les routes commerciales du monde ; plus larges là où plusieurs se rejoignent, pointillées en mer.</small>
         {view && <LayerToggles view={view} />}
       </div>
     );
@@ -326,23 +325,22 @@ function MapLegend({ mode, subject = '', view }: { mode: MapMode; subject?: stri
   if (mode === 'regions') {
     return (
       <div class="legend">
-        <small>
-          Chaque région historique et chaque pays annexé dans sa couleur ; le cœur des pays reste pâle. Rayée de rouge :
-          une région qui s'agite. Clique une de tes régions pour lui proposer l'indépendance, ou régler impôts et levées.
-        </small>
       </div>
     );
   }
   if (mode === 'relations') {
     const rgb = (relation: Relation) => `rgb(${RELATION_COLORS[relation].join(',')})`;
+    // Sans pays sélectionné : la vue d'ensemble du monde.
+    const overview = !subject;
     const entries: [Relation, string][] = [
-      ['self', subject || 'Le pays'],
+      ...(overview ? [] : [['self', subject] as [Relation, string]]),
       ['war', 'En guerre'],
+      ['threat', 'Te menace'],
       ['ally', 'Pacte'],
-      ['coalition', 'Coalisé'],
+      ['coalition', overview ? 'Coalition' : 'Coalisé'],
       ['truce', 'Trêve'],
-      ['embargo', 'Embargo'],
-      ['neutral', 'Neutre'],
+      ['embargo', overview ? 'Sous embargo' : 'Embargo'],
+      ['neutral', overview ? 'En paix' : 'Neutre'],
     ];
     return (
       <div class="legend relations">
@@ -351,10 +349,12 @@ function MapLegend({ mode, subject = '', view }: { mode: MapMode; subject?: stri
             <i class="swatch" style={{ background: rgb(relation) }} /> {label}
           </span>
         ))}
-        <span>
-          <i class="swatch hatch trade" /> Accord commercial
-        </span>
-        <small>Vu de {subject || 'ton pays'} : clique un pays pour voir ses relations. Un neutre agressif tire vers l'orange.</small>
+        {!overview && (
+          <span>
+            <i class="swatch hatch trade" /> Accord commercial
+          </span>
+        )}
+        <small>{overview ? "Vue d'ensemble" : `Vu de ${subject}`}</small>
       </div>
     );
   }
@@ -459,6 +459,34 @@ function popupContent(game: GameClient, popup: Popup, nameOf: (id: number) => st
             choices: true,
           };
     }
+    case 'ultimatum': {
+      const enemy = popup.nations[0];
+      const province = popup.province ? game.worldData.provinces[popup.province - 1]?.name : '';
+      const threat = game.playerStats?.threats.find((entry) => entry.nation === enemy);
+      return {
+        title: `${who} pose un ultimatum`,
+        text: `Céder ou payer : il renonce, et une trêve d'un an est signée. Refuser : la guerre sous une semaine, s'il te juge toujours assez faible.`,
+        note: threat ? `Sa force ${integer.format(threat.strength)} contre ta défense ${integer.format(threat.defense)} : il lui faut ${threat.needed.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} contre 1.` : '',
+        choices: false,
+        options: [
+          ...(popup.province ? [{ label: `Céder ${province}`, choice: 'cede' as const }] : []),
+          { label: `Tribut : ${formatGdp(threat?.tribute ?? 0)} / sem., 6 mois`, choice: 'tribute' as const },
+          { label: 'Refuser', choice: 'refuse' as const, quiet: true },
+        ],
+      };
+    }
+    case 'end': {
+      const score = game.snapshot?.score;
+      const pillars = score?.pillars ?? [1, 1, 1, 1];
+      return {
+        title: `Bilan : ${formatDate(popup.tick)}`,
+        text: score
+          ? `Indice ${Math.round(score.index)} : ${score.rank === 1 ? 'premier' : `${score.rank}e`} sur ${score.of} pays. ${score.index >= 100 ? 'Tu as fait mieux que le monde.' : 'Le monde a fait mieux que toi.'}`
+          : 'La date butoir est atteinte.',
+        note: PILLARS.map((pillar, i) => `${pillar.name} ${formatMultiple(pillars[i])}`).join(' · ') + '. Tu peux continuer à jouer, sans limite.',
+        choices: false,
+      };
+    }
     case 'peaceOffer': {
       const enemy = popup.nations[0];
       const front = game.snapshot?.fronts.find((entry) => (entry.a === game.player && entry.b === enemy) || (entry.b === game.player && entry.a === enemy));
@@ -499,7 +527,11 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
           ? popup.demand === 'investment'
             ? pick('investissements', 4)
             : pick('independance', 4)
-          : pick('offre-paix', 4);
+          : popup.kind === 'end'
+            ? WELCOME_ART
+            : popup.kind === 'ultimatum'
+              ? pick('guerre', 4, true)
+              : pick('offre-paix', 4);
   return (
     <div class="dialog-backdrop">
       <section class={`panel dialog event ${popup.kind}`} role="alertdialog" aria-labelledby="event-title">
@@ -519,7 +551,15 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
         <h2 id="event-title">{content.title}</h2>
         <p>{content.text}</p>
         {content.note && <p class="event-note">{content.note}</p>}
-        {content.choices ? (
+        {content.options ? (
+          <div class="card-actions options">
+            {content.options.map((option) => (
+              <button key={option.choice} class={`action ${option.quiet ? 'quiet' : ''}`} onClick={() => game.answerThreat(popup.nations[0], option.choice)}>
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : content.choices ? (
           <div class="card-actions">
             <button class="action" onClick={() => game.answerPopup(popup.id, true)}>
               Accepter
@@ -530,7 +570,7 @@ function EventDialog({ game, nameOf }: { game: GameClient; nameOf(id: number): s
           </div>
         ) : (
           <button class="action" onClick={() => game.closePopup(popup.id)}>
-            {popup.kind === 'war' ? 'Aux armes' : 'Compris'}
+            {popup.kind === 'war' ? 'Aux armes' : popup.kind === 'end' ? 'Continuer à jouer' : 'Compris'}
           </button>
         )}
       </section>

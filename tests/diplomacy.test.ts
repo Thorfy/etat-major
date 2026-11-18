@@ -6,6 +6,7 @@ import {
   PLAYER_DEMAND_COOLDOWN_TICKS,
   PLAYER_GRACE_TICKS,
   PLAYER_WAR_COOLDOWN_TICKS,
+  THREAT_GRACE_TICKS,
   TRUCE_TICKS,
 } from '../src/sim/balance.ts';
 import { Simulation, type SimConfig } from '../src/sim/Simulation.ts';
@@ -426,18 +427,113 @@ describe('guerres déclarées au joueur', () => {
     expect(warsOnPlayer(sim, 600 * 60)).toEqual([]);
   });
 
-  it("attendent la fin du répit, puis 26 semaines entre deux attaques", () => {
-    // A au centre, entre deux voisins bien plus puissants.
+  it("préviennent avant d'attaquer (troupes massées, ultimatum), puis 26 semaines entre deux attaques", () => {
+    // A à l'est, la mer derrière lui ; B, à l'ouest, bien plus puissant et conquérant.
     const sim = new Simulation({
-      ...config((x) => (x < 70 ? B : x < 130 ? A : C), (n) => (n === A ? 1e6 : 6e6), 3),
+      ...config((x) => (x < 100 ? B : x < 190 ? A : 0), (n) => (n === A ? 1e6 : 6e6), 2),
       ai: true,
+      restraint: false,
     });
-    // Deux voisins prudents : un commerçant n'oserait pas.
-    (sim as unknown as { profile: Uint8Array }).profile.fill(0);
-    const opened = warsOnPlayer(sim, 600 * 80);
+    (sim as unknown as { profile: Uint8Array }).profile.fill(1);
+    const warned = new Map<number, number>();
+    const ultimatums = new Map<number, number>();
+    const opened: number[] = [];
+    for (let t = 0; t < 600 * 80 && sim.isAlive(A); t++) {
+      sim.step();
+      if (t % 50 !== 0) continue;
+      for (const event of sim.drainChanges().events) {
+        if (event.type === 'threat' && event.to === A) warned.set(event.from, event.tick);
+        if (event.type === 'ultimatum' && event.to === A) ultimatums.set(event.from, event.tick);
+        if (event.type === 'war' && (event.a === A || event.b === A)) {
+          const enemy = event.a === A ? event.b : event.a;
+          // Jamais sans avoir massé des troupes, puis posé un ultimatum (laissé sans réponse).
+          expect(warned.get(enemy)).toBeLessThan(event.tick);
+          expect(ultimatums.get(enemy)).toBeLessThan(event.tick);
+          opened.push(event.tick);
+        }
+      }
+    }
     expect(opened.length).toBeGreaterThan(0);
-    expect(opened[0]).toBeGreaterThanOrEqual(PLAYER_GRACE_TICKS);
+    expect(opened[0]).toBeGreaterThanOrEqual(THREAT_GRACE_TICKS);
     for (let i = 1; i < opened.length; i++) expect(opened[i] - opened[i - 1]).toBeGreaterThanOrEqual(PLAYER_WAR_COOLDOWN_TICKS);
+  });
+
+  it("un voisin géant mais prudent laisse en paix un joueur pacifique, pas un joueur agressif", () => {
+    const make = () => new Simulation({ ...config((x) => (x < 100 ? A : B), (n) => (n === A ? 1e6 : 8e6), 2), ai: true });
+    const threats = (sim: Simulation) => sim.snapshot().nations.find((entry) => entry.id === A)?.threats ?? [];
+    const calm = make();
+    (calm as unknown as { profile: Uint8Array }).profile.fill(0);
+    for (let t = 0; t < 600 * 40; t++) calm.step();
+    expect(threats(calm)).toEqual([]);
+    expect(calm.fronts).toHaveLength(0);
+    // Le même voisin, face à un joueur qui s'est montré agressif : il le menace.
+    const provoked = make();
+    const internals = provoked as unknown as { profile: Uint8Array; aggression: Float64Array };
+    internals.profile.fill(0);
+    let seen = false;
+    for (let t = 0; t < 600 * 40 && !seen; t++) {
+      internals.aggression[A] = 0.5;
+      provoked.step();
+      if (t % 100 === 0) seen = threats(provoked).length > 0;
+    }
+    expect(seen).toBe(true);
+  });
+
+  it("une puissance en bonne santé ne menace pas un joueur pacifique, même conquérante", () => {
+    // Sur cette petite carte, B pèse les deux tiers du monde : riche et stable, il se retient.
+    const sim = new Simulation({ ...config((x) => (x < 100 ? B : x < 190 ? A : 0), (n) => (n === A ? 1e6 : 6e6), 2), ai: true });
+    (sim as unknown as { profile: Uint8Array }).profile.fill(1);
+    expect(sim.isRestrained(B)).toBe(true);
+    for (let t = 0; t < 600 * 45; t++) sim.step();
+    expect(sim.snapshot().nations.find((entry) => entry.id === A)?.threats).toEqual([]);
+    expect(sim.fronts).toHaveLength(0);
+  });
+
+  it("posent toujours une demande, même par la mer, et un tribut les apaise", () => {
+    // A et B sur deux îles : B, conquérant et bien plus riche, menace A par la mer.
+    const sim = new Simulation({
+      ...config((x, y) => (y < 10 || y >= 70 ? 0 : x < 60 ? A : x >= 120 && x < 190 ? B : 0), (n) => (n === A ? 1e6 : 8e6), 2),
+      ai: true,
+      restraint: false,
+    });
+    (sim as unknown as { profile: Uint8Array }).profile.fill(1);
+    const threatOf = () => sim.snapshot().nations.find((entry) => entry.id === A)?.threats.find((threat) => threat.nation === B);
+    for (let t = 0; t < 600 * 60 && (threatOf()?.stage ?? 0) < 2; t++) sim.step();
+    const threat = threatOf()!;
+    expect(threat.stage).toBe(2);
+    // Sans frontière terrestre : la province de A la plus proche de B.
+    expect(sim.controllerOf(threat.province)).toBe(A);
+    expect(threat.tribute).toBeGreaterThan(0);
+    const before = { a: sim.outputOf(A), b: sim.outputOf(B) };
+    sim.apply({ type: 'answerThreat', nation: A, enemy: B, choice: 'tribute' });
+    for (let t = 0; t < 20; t++) sim.step();
+    expect(threatOf()).toBeUndefined();
+    expect(sim.hasTruce(A, B)).toBe(true);
+    // Un dixième du PIB de A passe à B.
+    expect(sim.outputOf(A)).toBeLessThan(before.a * 0.92);
+    expect(sim.outputOf(B)).toBeGreaterThan(before.b);
+    for (let t = 0; t < 600 * 30; t++) sim.step();
+    expect(sim.fronts).toHaveLength(0);
+  });
+
+  it("renoncent devant une frontière fortifiée", () => {
+    // B, bien plus riche que A : assez pour le menacer, pas face à une frontière fortifiée.
+    const sim = new Simulation({ ...config((x) => (x < 100 ? A : B), (n) => (n === A ? 1e6 : 8e6), 2), ai: true, restraint: false });
+    (sim as unknown as { profile: Uint8Array }).profile.fill(1);
+    const threatened = () => sim.snapshot().nations.find((entry) => entry.id === A)?.threats ?? [];
+    let first = 0;
+    for (let t = 0; t < 600 * 40 && first === 0; t++) {
+      sim.step();
+      if (t % 100 === 0 && threatened().length > 0) first = sim.tick;
+    }
+    expect(first).toBeGreaterThan(0);
+    // A fortifie toute sa frontière : B n'ose plus, sa tension retombe.
+    const forts = (sim as unknown as { forts: Uint8Array; owners: Uint16Array }).forts;
+    const owners = (sim as unknown as { owners: Uint16Array }).owners;
+    for (let cell = 0; cell < owners.length; cell++) if (owners[cell] === A && cell % 200 >= 90) forts[cell] = 255;
+    for (let t = 0; t < 600 * 20; t++) sim.step();
+    expect(threatened()).toEqual([]);
+    expect(sim.fronts).toHaveLength(0);
   });
 });
 

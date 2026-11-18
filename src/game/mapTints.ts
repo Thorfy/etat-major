@@ -1,12 +1,13 @@
 // Teintes des cartes des relations et de l'intérieur, nation par nation.
 import type { EconomySnapshot } from '../sim/protocol.ts';
 
-export type Relation = 'self' | 'war' | 'ally' | 'coalition' | 'truce' | 'embargo' | 'neutral';
+export type Relation = 'self' | 'war' | 'threat' | 'ally' | 'coalition' | 'truce' | 'embargo' | 'neutral';
 
 /** Couleur de chaque relation, en octets RGB : les légendes reprennent les mêmes. */
 export const RELATION_COLORS: Record<Relation, [number, number, number]> = {
   self: [245, 200, 73],
   war: [204, 41, 26],
+  threat: [232, 128, 36],
   ally: [59, 107, 173],
   coalition: [92, 140, 191],
   truce: [140, 158, 184],
@@ -25,7 +26,14 @@ const mixRgb = (a: readonly number[], b: readonly number[], t: number) => a.map(
  * Relations de `subject` avec chaque nation, en RGBA : la couleur de la relation, et une alpha
  * réduite pour un partenaire commercial (la carte le raye de vert).
  */
-export function relationTint(subject: number, count: number, economy: EconomySnapshot | null, wars: readonly [number, number][]): Uint8Array {
+export function relationTint(
+  subject: number,
+  count: number,
+  economy: EconomySnapshot | null,
+  wars: readonly [number, number][],
+  /** Vu du joueur : les pays qui le menacent (troupes massées ou ultimatum). */
+  threats: readonly { nation: number; stage: number }[] = [],
+): Uint8Array {
   const relation: Relation[] = Array(count + 1).fill('neutral');
   const trade = new Uint8Array(count + 1);
   const pairs = (flat: ArrayLike<number>, step: number, visit: (a: number, b: number, k: number) => void) => {
@@ -50,6 +58,7 @@ export function relationTint(subject: number, count: number, economy: EconomySna
       if (n) trade[n] = 1;
     });
   }
+  for (const threat of threats) if (threat.stage >= 1 && threat.nation <= count) relation[threat.nation] = 'threat';
   for (const [a, b] of wars) {
     const n = other(a, b);
     if (n) relation[n] = 'war';
@@ -60,6 +69,47 @@ export function relationTint(subject: number, count: number, economy: EconomySna
     let rgb: number[] = RELATION_COLORS[relation[n]];
     if (relation[n] === 'neutral' && economy) rgb = mixRgb(rgb, AGGRESSIVE, Math.min(1, (economy.aggression[n] ?? 0) / 0.6));
     tint.set([rgb[0], rgb[1], rgb[2], trade[n] ? 128 : 255], n * 4);
+  }
+  return tint;
+}
+
+/**
+ * Vue d'ensemble du monde, sans pays sélectionné : la situation de chaque nation. En guerre (avec
+ * qui que ce soit), menaçant le joueur, coalisée, sous pacte, en trêve, sous embargo, ou en paix
+ * (tirant vers l'orange si elle est agressive). Le joueur aussi : rien n'est sélectionné.
+ */
+export function worldRelationTint(
+  count: number,
+  economy: EconomySnapshot | null,
+  wars: readonly [number, number][],
+  threats: readonly { nation: number; stage: number }[] = [],
+): Uint8Array {
+  const relation: Relation[] = Array(count + 1).fill('neutral');
+  const mark = (n: number, value: Relation) => {
+    if (n > 0 && n <= count) relation[n] = value;
+  };
+  if (economy) {
+    for (let i = 0; i + 1 < economy.embargoes.length; i += 2) mark(economy.embargoes[i + 1], 'embargo');
+    for (let i = 0; i + 1 < economy.truces.length; i += 2) {
+      mark(economy.truces[i], 'truce');
+      mark(economy.truces[i + 1], 'truce');
+    }
+    for (let i = 0; i + 2 < economy.alliances.length; i += 3) {
+      const kind = economy.alliances[i + 2] === 2 ? 'coalition' : 'ally';
+      mark(economy.alliances[i], kind);
+      mark(economy.alliances[i + 1], kind);
+    }
+  }
+  for (const threat of threats) if (threat.stage >= 1) mark(threat.nation, 'threat');
+  for (const [a, b] of wars) {
+    mark(a, 'war');
+    mark(b, 'war');
+  }
+  const tint = new Uint8Array((count + 1) * 4);
+  for (let n = 1; n <= count; n++) {
+    let rgb: number[] = RELATION_COLORS[relation[n]];
+    if (relation[n] === 'neutral' && economy) rgb = mixRgb(rgb, AGGRESSIVE, Math.min(1, (economy.aggression[n] ?? 0) / 0.6));
+    tint.set([rgb[0], rgb[1], rgb[2], 255], n * 4);
   }
   return tint;
 }

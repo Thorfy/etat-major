@@ -108,6 +108,29 @@ import {
   SEA_IMPORT_SHARE,
   STABILITY_RECOVERY_PER_MINUTE,
   UNREST_STABILITY_DRAG,
+  SCORE_END_TICK,
+  THREAT_DECAY_PER_WEEK,
+  THREAT_GRACE_TICKS,
+  THREAT_GROWTH_PER_WEEK,
+  TRIBUTE_SHARE,
+  TRIBUTE_TICKS,
+  RESTRAINT_MIN_SHARE,
+  RESTRAINT_STABILITY,
+  RESTRAINT_WEALTH,
+  THREAT_PROVOKED_AGGRESSION,
+  THREAT_ULTIMATUM,
+  THREAT_WARNING,
+  ULTIMATUM_REFUSED_TICKS,
+  ULTIMATUM_TICKS,
+  SCORE_MIN_RANKED_OUTPUT,
+  ANNEX_RECOVERY_CALM,
+  ANNEX_RECOVERY_CAP,
+  ANNEX_RECOVERY_PER_WEEK,
+  SCORE_OCCUPIED_SHARE,
+  SCORE_PACT_SHARE,
+  SCORE_PARTNER_SHARE,
+  SCORE_PILLAR_FLOOR,
+  SCORE_POINTS_PER_DOUBLING,
   START_STABILITY,
   STEEL_SHORTAGE_FLOOR,
   UNREST_CAPITULATION,
@@ -220,8 +243,6 @@ import {
   WAR_CAPACITY_RATIO,
   PLAYER_WAR_RATIO,
   PLAYER_WAR_COOLDOWN_TICKS,
-  PEACEFUL_AGGRESSION,
-  PEACEFUL_PLAYER_SPARED,
   WAR_CHANCE,
   WAR_INTERVAL_TICKS,
   baseCapacity,
@@ -274,6 +295,9 @@ import type {
   MovementState,
   OffensiveEnd,
   PeaceTerms,
+  ScoreSnapshot,
+  ThreatAnswer,
+  ThreatSnapshot,
   PeaceRefusal,
   BuildOrder,
   EconomySnapshot,
@@ -309,6 +333,9 @@ import {
 } from './doctrine.ts';
 import { landingProblem, traceRoute } from './route.ts';
 import { Waterways } from './waterways.ts';
+
+/** Mesures de départ gardées par pays pour le score : richesse, terres, armée, influence, solidité. */
+const SCORE_BASES = 5;
 import { findSeas } from './seas.ts';
 
 export interface SimConfig {
@@ -350,6 +377,11 @@ export interface SimConfig {
   trade?: boolean;
   /** Faux : pas de réseau automatique, les axes se tracent à la main (tests des axes). */
   autoTrade?: boolean;
+  /**
+   * Faux : les puissances en bonne santé ne se retiennent plus de faire la guerre. Pour les tests de
+   * l'IA sur de petites cartes, où chaque pays pèse une grosse part du monde.
+   */
+  restraint?: boolean;
   /** Faux : les demandes des régions du joueur ne sont plus espacées, pour les tests de l'agitation. */
   demandPacing?: boolean;
   /** Faux : l'IA garde une doctrine au centre, pour les tests qui ne mesurent pas les doctrines. */
@@ -564,6 +596,12 @@ export class Simulation {
   private lastPeaceOffer: Float64Array;
   /** Tick de la dernière guerre déclarée au joueur par une IA (très loin dans le passé : aucune). */
   private lastWarOnPlayer = -1e12;
+  /** Menaces contre le joueur, par pays : tension (0 à 1), étape, province exigée et échéance. */
+  private threats = new Map<number, { level: number; stage: number; province: number; deadline: number }>();
+  /** Tributs en cours : qui paie, qui reçoit, quelle part de son PIB, jusqu'à quand. */
+  private tributes: { from: number; to: number; share: number; until: number }[] = [];
+  /** Part fortifiée de la frontière du joueur avec chaque voisin, mesurée chaque semaine. */
+  private borderForts = new Map<number, number>();
   /** Tick à partir duquel une région du joueur peut de nouveau lui adresser une demande. */
   private nextPlayerDemand = PLAYER_GRACE_TICKS;
   private readonly demandPacing: boolean;
@@ -582,6 +620,7 @@ export class Simulation {
   /** Réseau commercial automatique de chaque nation. */
   private networks: NetworkState[] = [];
   private readonly autoTrade: boolean;
+  private readonly restraint: boolean;
   private networkPhase = 0;
   /** Politiques régionales, par (pays × stride + région) : impôts et levée, de −2 à +2. */
   private regionPolicies = new Map<number, { tax: number; levy: number }>();
@@ -595,6 +634,13 @@ export class Simulation {
   private readonly baselineSet: Uint8Array;
   /** PIB de chaque pays au dernier relevé hebdomadaire : la croissance affichée en vient. */
   private readonly weekOutput: Float64Array;
+  /** Score : valeurs de départ de chaque pays (SCORE_BASES mesures), ses quatre piliers et son indice. */
+  private readonly scoreBase: Float64Array;
+  private readonly pillars: Float64Array;
+  private readonly scores: Float64Array;
+  private gameEnded = false;
+  /** Pays qui figurent au classement : présents au départ, et pas des micro-États. */
+  private readonly ranked: Uint8Array;
   private readonly axisCount: Uint8Array;
   private axesVersion = 1;
   /** Provinces voisines par la terre, pour tracer les axes. */
@@ -684,6 +730,7 @@ export class Simulation {
     this.tradeEnabled = config.trade ?? true;
     // Sans commerce, pas de réseau ; sinon il est automatique, sauf demande contraire.
     this.autoTrade = this.tradeEnabled && (config.autoTrade ?? true);
+    this.restraint = config.restraint ?? true;
     this.demandPacing = config.demandPacing ?? true;
     this.rngState = config.seed >>> 0 || 1;
     this.provinces = config.provinces;
@@ -804,6 +851,10 @@ export class Simulation {
     this.axisBaseline = new Float64Array(provinceCount);
     this.baselineSet = new Uint8Array(this.stride);
     this.weekOutput = new Float64Array(this.stride);
+    this.scoreBase = new Float64Array(this.stride * SCORE_BASES);
+    this.pillars = new Float64Array(this.stride * 4).fill(1);
+    this.scores = new Float64Array(this.stride).fill(100);
+    this.ranked = new Uint8Array(this.stride);
     this.axisCount = new Uint8Array(provinceCount);
     this.nationGdp = config.nations.map((nation) => nation.gdpMusd);
     this.priorityZones = Array.from({ length: this.stride }, () => []);
@@ -917,6 +968,13 @@ export class Simulation {
     if (config.saved) this.restore(config.saved);
     // Les voies d'eau se calculent au chargement, pas au premier tracé : pas d'à-coup en jeu.
     if (this.autoTrade) void this.waterways;
+    // Au classement : les pays présents au départ, d'un PIB d'origine suffisant (calculé sur la carte de
+    // départ, pour qu'une partie reprise garde le même classement).
+    const startOutput = new Float64Array(this.stride);
+    for (let p = 1; p < this.startHome.length; p++) startOutput[this.startHome[p]] += this.startGdp[p];
+    for (let n = 1; n < this.stride; n++) if (startOutput[n] >= SCORE_MIN_RANKED_OUTPUT) this.ranked[n] = 1;
+    // Une partie reprise garde son score tel quel ; une nouvelle (ou d'avant le score) part de 100.
+    if (!config.saved?.state.scores) this.computeScores();
   }
 
   private touchesWater(cell: number): boolean {
@@ -1119,6 +1177,9 @@ export class Simulation {
         break;
       case 'proposePeace':
         this.proposePeace(command.nation, command.enemy);
+        break;
+      case 'answerThreat':
+        if (command.nation === this.player) this.answerThreat(command.enemy, command.choice);
         break;
       case 'answerPeace':
         this.answerPeace(command.nation, command.enemy, command.accept);
@@ -1361,6 +1422,11 @@ export class Simulation {
 
   step(): void {
     this.tick++;
+    if (!this.gameEnded && this.tick >= SCORE_END_TICK) {
+      this.gameEnded = true;
+      this.computeScores();
+      this.pendingEvents.push({ type: 'gameEnd', tick: this.tick });
+    }
     this.evolveSectors();
     // Les voisinages servent aux décisions de l'IA et à la diplomatie (alliances, coalitions).
     const phase = this.tick % ADJACENCY_INTERVAL_TICKS;
@@ -1370,7 +1436,10 @@ export class Simulation {
       this.refreshCoastSeas();
     }
     if (this.aiEnabled) {
-      if (this.tick % WAR_INTERVAL_TICKS === 0) this.decideWars();
+      if (this.tick % WAR_INTERVAL_TICKS === 0) {
+        this.decideWars();
+        this.updateThreats();
+      }
       if (this.tick % AI_INTERVAL_TICKS === 0) {
         this.decideAllocations();
         this.decideOffensives();
@@ -1743,18 +1812,16 @@ export class Simulation {
   private tryWar(nation: number): void {
     const ratio = AI_PROFILES[this.profile[nation]].warRatio;
     if (this.fronts.some((front) => front.a === nation || front.b === nation)) return;
+    // Une puissance en bonne santé s'étend par l'économie et la diplomatie, pas par la guerre.
+    if (this.isRestrained(nation)) return;
 
     // Un voisin occupé ailleurs, las ou à court d'hommes pèse moins : il devient une proie.
     const pick = (candidates: number[]) => {
       const weak = candidates.filter((other) => {
         if (!this.alive[other]) return false;
         if (this.isAllied(nation, other) || this.hasTruce(nation, other)) return false;
-        if (other === this.player) {
-          // Le joueur : seulement après son répit, pas deux guerres de suite, et à deux contre un au
-          // moins, même pour un belliqueux ; un commerçant en exige davantage.
-          if (this.tick < PLAYER_GRACE_TICKS || this.tick - this.lastWarOnPlayer < PLAYER_WAR_COOLDOWN_TICKS) return false;
-          return this.capacity[nation] >= this.availableStrength(other) * PLAYER_WAR_RATIO * Math.max(1, ratio / WAR_CAPACITY_RATIO);
-        }
+        // Le joueur n'est jamais attaqué d'un coup : la menace monte d'abord, visible (updateThreats).
+        if (other === this.player) return false;
         return this.capacity[nation] >= this.availableStrength(other) * ratio;
       });
       if (weak.length === 0) return 0;
@@ -1767,12 +1834,235 @@ export class Simulation {
     const land = pick(this.landNeighbors[nation]);
     const enemy = land !== 0 ? land : this.navy[nation] > 0 ? pick(this.seaNeighbors[nation]) : 0;
     if (enemy === 0) return;
-    if (enemy === this.player) {
-      // Un joueur pacifique est le plus souvent épargné.
-      if (this.aggression[enemy] < PEACEFUL_AGGRESSION && this.random() < PEACEFUL_PLAYER_SPARED) return;
-      this.lastWarOnPlayer = this.tick;
-    }
     this.declareWars([[nation, enemy]]);
+  }
+
+  /**
+   * Une puissance en bonne santé : assez grosse (RESTRAINT_MIN_SHARE du PIB mondial), sans déclin de
+   * sa richesse face au monde, et stable. Elle privilégie l'économie et la diplomatie à la guerre.
+   */
+  isRestrained(nation: number): boolean {
+    if (!this.restraint) return false;
+    let world = 0;
+    for (let n = 1; n < this.stride; n++) if (this.alive[n]) world += Math.max(0, this.output[n]);
+    return (
+      world > 0 &&
+      this.output[nation] / world >= RESTRAINT_MIN_SHARE &&
+      this.pillars[nation * 4] >= RESTRAINT_WEALTH &&
+      this.stability[nation] >= RESTRAINT_STABILITY
+    );
+  }
+
+  /** Le rapport de force qu'il faut à cette IA pour attaquer le joueur : deux contre un au moins. */
+  private playerWarRatio(nation: number): number {
+    return PLAYER_WAR_RATIO * Math.max(1, AI_PROFILES[this.profile[nation]].warRatio / WAR_CAPACITY_RATIO);
+  }
+
+  /**
+   * La défense du joueur vue par une IA : ce qu'il peut lui opposer, multiplié par ses fortifications
+   * sur leur frontière commune (une frontière entièrement fortifiée vaut ce que vaut une cellule
+   * fortifiée au combat). Voilà ce qui dissuade.
+   */
+  playerDefense(nation: number): number {
+    const player = this.player;
+    const share = this.borderForts.get(nation) ?? 0;
+    return this.availableStrength(player) * Math.exp(FORT_DEFENSE * share * this.mods[player].fortDefense);
+  }
+
+  /** Part fortifiée de la frontière terrestre du joueur avec chacun de ses voisins (moyenne des niveaux). */
+  private measureBorderForts(): void {
+    const { owners, forts, width: W, height: H, landCells } = this;
+    const player = this.player;
+    const border = new Map<number, number>();
+    const fortified = new Map<number, number>();
+    for (let k = 0; k < landCells.length; k++) {
+      const cell = landCells[k];
+      if (owners[cell] !== player) continue;
+      const x = cell % W;
+      const y = (cell - x) / W;
+      for (let j = 0; j < 4; j++) {
+        if ((j === 2 && y === 0) || (j === 3 && y === H - 1)) continue;
+        const next = j === 0 ? (x > 0 ? cell - 1 : cell + W - 1) : j === 1 ? (x < W - 1 ? cell + 1 : cell - W + 1) : j === 2 ? cell - W : cell + W;
+        const other = owners[next];
+        if (other === 0 || other === player) continue;
+        border.set(other, (border.get(other) ?? 0) + 1);
+        fortified.set(other, (fortified.get(other) ?? 0) + forts[cell] / 255);
+      }
+    }
+    this.borderForts.clear();
+    for (const [other, count] of border) this.borderForts.set(other, (fortified.get(other) ?? 0) / count);
+  }
+
+  /**
+   * La province que cette IA exige du joueur : la plus précieuse de leur frontière commune ; sans
+   * frontière terrestre, celle qui est la plus proche de ses terres (un territoire d'outre-mer, souvent).
+   */
+  private covetedProvince(nation: number): number {
+    let best = 0;
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] !== this.player) continue;
+      if (!this.provinceNeighborsOf(p).some((q) => this.controller[q] === nation)) continue;
+      if (best === 0 || this.startValue[p] > this.startValue[best]) best = p;
+    }
+    if (best !== 0) return best;
+    const theirs: number[] = [];
+    for (let q = 1; q < this.controller.length; q++) if (this.controller[q] === nation) theirs.push(q);
+    let bestDistance = Infinity;
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] !== this.player) continue;
+      for (const q of theirs) {
+        const d = this.provinceDistance(p, q);
+        if (d < bestDistance) [best, bestDistance] = [p, d];
+      }
+    }
+    return best;
+  }
+
+  /** Le tribut qu'un pays verserait : TRIBUTE_SHARE de son PIB, par semaine. */
+  private tributeOf(nation: number): number {
+    return TRIBUTE_SHARE * Math.max(0, this.output[nation]);
+  }
+
+  /**
+   * Menaces contre le joueur. Une IA qui le convoite (un motif : conquérante, ou face à un joueur
+   * agressif ; assez forte face à sa défense ; ni pacte, ni trêve, ni autre guerre en cours) fait monter sa tension au fil des semaines : elle masse des
+   * troupes (THREAT_WARNING), pose un ultimatum (THREAT_ULTIMATUM : céder une province de leur
+   * frontière, ou la guerre), puis attaque. Dissuadée, sa tension retombe, et elle y renonce.
+   */
+  private updateThreats(): void {
+    const player = this.player;
+    if (!player || !this.alive[player]) {
+      this.threats.clear();
+      return;
+    }
+    if (this.tick % TICKS_PER_WEEK === 0 || this.borderForts.size === 0) this.measureBorderForts();
+    const weeks = WAR_INTERVAL_TICKS / TICKS_PER_WEEK;
+    const cooling = this.tick < THREAT_GRACE_TICKS || this.tick - this.lastWarOnPlayer < PLAYER_WAR_COOLDOWN_TICKS;
+    const candidates = new Set<number>([...this.landNeighbors[player], ...this.seaNeighbors[player], ...this.threats.keys()]);
+    for (const n of candidates) {
+      if (n === player) continue;
+      const reachable = this.landNeighbors[player].includes(n) || (this.navy[n] > 0 && this.seaNeighbors[player].includes(n));
+      const blocked = !this.alive[n] || !reachable || this.isAllied(n, player) || this.hasTruce(n, player) || this.frontOf(n, player) !== null;
+      let threat = this.threats.get(n);
+      if (blocked) {
+        this.threats.delete(n);
+        continue;
+      }
+      const busy = this.fronts.some((front) => front.a === n || front.b === n);
+      // Un motif : un conquérant, ou un joueur qui s'est montré agressif.
+      const motive = (AI_PROFILES[this.profile[n]].conqueror && !this.isRestrained(n)) || this.aggression[player] >= THREAT_PROVOKED_AGGRESSION;
+      const covets = motive && !cooling && !busy && this.capacity[n] >= this.playerDefense(n) * this.playerWarRatio(n);
+      if (!threat) {
+        if (!covets) continue;
+        threat = { level: 0, stage: 0, province: 0, deadline: 0 };
+        this.threats.set(n, threat);
+      }
+      const growth = THREAT_GROWTH_PER_WEEK * Math.min(2, Math.max(0.4, Math.sqrt(AI_PROFILES[this.profile[n]].war)));
+      const delta = covets ? growth : busy ? 0 : -THREAT_DECAY_PER_WEEK;
+      threat.level = Math.max(0, Math.min(1, threat.level + delta * weeks));
+      if (threat.level <= 0) {
+        if (threat.stage >= 1) this.pendingEvents.push({ type: 'threatEased', tick: this.tick, from: n, to: player });
+        this.threats.delete(n);
+        continue;
+      }
+      if (threat.stage === 0 && threat.level >= THREAT_WARNING) {
+        threat.stage = 1;
+        this.pendingEvents.push({ type: 'threat', tick: this.tick, from: n, to: player });
+      }
+      if (threat.stage === 1 && threat.level >= THREAT_ULTIMATUM) {
+        threat.stage = 2;
+        threat.province = this.covetedProvince(n);
+        threat.deadline = this.tick + ULTIMATUM_TICKS;
+        if (threat.province) this.pendingEvents.push({ type: 'ultimatum', tick: this.tick, from: n, to: player, province: threat.province });
+      }
+      const expired = threat.stage >= 2 && threat.deadline > 0 && this.tick >= threat.deadline;
+      if ((threat.level >= 1 && (threat.stage === 3 || !threat.province)) || expired) {
+        // Dissuadée au dernier moment, elle attend : sa tension retombera.
+        if (!covets) continue;
+        this.threats.delete(n);
+        this.lastWarOnPlayer = this.tick;
+        this.declareWars([[n, player]]);
+      }
+    }
+  }
+
+  /**
+   * Le joueur répond à une menace. Céder (à l'ultimatum) : la province exigée lui revient. Tribut (dès
+   * que l'IA masse des troupes) : TRIBUTE_SHARE de son PIB, pendant TRIBUTE_TICKS. Dans les deux cas, elle
+   * renonce et une trêve d'un an est signée. Refuser l'ultimatum : la guerre sous une semaine, sauf
+   * si la défense du joueur la dissuade.
+   */
+  answerThreat(enemy: number, choice: ThreatAnswer): void {
+    const threat = this.threats.get(enemy);
+    const player = this.player;
+    if (!threat || threat.stage < 1) return;
+    if (choice === 'refuse') {
+      if (threat.stage !== 2) return;
+      threat.stage = 3;
+      threat.deadline = Math.min(threat.deadline, this.tick + ULTIMATUM_REFUSED_TICKS);
+      return;
+    }
+    if (choice === 'cede') {
+      const province = threat.province;
+      if (threat.stage < 2 || !province || this.controller[province] !== player) return;
+      this.cedeProvince(province, player, enemy);
+      this.pendingEvents.push({ type: 'ultimatumAccepted', tick: this.tick, from: enemy, to: player, province });
+    } else {
+      const until = this.tick + TRIBUTE_TICKS;
+      this.tributes.push({ from: player, to: enemy, share: TRIBUTE_SHARE, until });
+      this.capacityDirty = true;
+      this.pendingEvents.push({ type: 'tributePaid', tick: this.tick, from: player, to: enemy, until });
+    }
+    this.threats.delete(enemy);
+    this.truceUntil[player * this.stride + enemy] = this.tick + TRUCE_TICKS;
+    this.truceUntil[enemy * this.stride + player] = this.tick + TRUCE_TICKS;
+  }
+
+  /** Une province passe, sans combat, d'un pays à un autre, qui l'annexe. */
+  private cedeProvince(province: number, from: number, to: number): void {
+    const { owners, provinceGrid, landCells } = this;
+    const moved: number[] = [];
+    this.peacefulTransfer = true;
+    for (let k = 0; k < landCells.length; k++) {
+      const cell = landCells[k];
+      if (provinceGrid[cell] !== province || owners[cell] !== from) continue;
+      owners[cell] = to;
+      this.pocket[cell] = 0;
+      this.cellCounts[from]--;
+      this.cellCounts[to]++;
+      this.pendingCells.push(cell);
+      this.pendingOwners.push(to);
+      this.transferProvinceCell(province, from, to);
+      moved.push(cell);
+    }
+    this.peacefulTransfer = false;
+    this.provinceHome[province] = to;
+    this.homePortsStale = true;
+    this.consolidation[province] = 0;
+    const kept = this.annexedValueOf(to);
+    this.provinceValue[province] *= kept;
+    this.provinceGdp[province] *= kept;
+    this.provinceManpower[province] *= kept;
+    this.pendingHomes.push(province, to);
+    this.recomputeCapacity();
+    this.recomputeManpower();
+    for (const cell of moved) this.refreshAround(cell);
+    this.supplyDirty = ALL_SUPPLY_GROUPS;
+  }
+
+  /** Les menaces contre le joueur, pour son affichage. */
+  private threatsSnapshot(): ThreatSnapshot[] {
+    return [...this.threats].map(([nation, threat]) => ({
+      nation,
+      level: threat.level,
+      stage: threat.stage,
+      strength: this.capacity[nation],
+      defense: this.playerDefense(nation),
+      needed: this.playerWarRatio(nation),
+      province: threat.province,
+      deadline: threat.deadline,
+      tribute: this.tributeOf(this.player),
+    }));
   }
 
   /**
@@ -2685,6 +2975,15 @@ export class Simulation {
         output[home] += provinceGdp[p] * developed * LOST_PROVINCE_RETAINED;
       }
     }
+    // Les tributs : une part du PIB passe de qui paie à qui reçoit.
+    if (this.tributes.length > 0) {
+      this.tributes = this.tributes.filter((tribute) => tribute.until > this.tick && this.alive[tribute.from] && this.alive[tribute.to]);
+      for (const tribute of this.tributes) {
+        const amount = output[tribute.from] * tribute.share;
+        output[tribute.from] -= amount;
+        output[tribute.to] += amount;
+      }
+    }
     for (let n = 1; n < this.stride; n++) {
       output[n] *= this.tradeFactor[n];
       rawCapacity[n] = Math.max(0, rawCapacity[n] * (EFFORT_CAPACITY_BASE + this.effort[n]) * this.tradeFactor[n] * this.mods[n].capacity);
@@ -3356,6 +3655,29 @@ export class Simulation {
     return this.provinceGdp[p] * this.development[p] * (1 + FACTORY_BONUS * this.factories[p]);
   }
 
+  /**
+   * Gisements que l'autarcie relie d'elle-même au réseau, gratuitement (ils ne prennent pas de place de
+   * ville principale) : une part de ses gisements de pétrole et d'acier égale à sa position vers
+   * l'autarcie, les plus gros d'abord. Les terres annexées en font partie : le réseau grandit avec
+   * l'empire.
+   */
+  private resourceLinksOf(nation: number): number[] {
+    const autarky = Math.max(0, -this.doctrine[nation * DOCTRINE_AXIS_COUNT + 3]);
+    if (autarky <= 0) return [];
+    let worldOil = 0;
+    let worldSteel = 0;
+    const deposits: number[] = [];
+    for (let p = 1; p < this.controller.length; p++) {
+      worldOil += this.provinceOil[p];
+      worldSteel += this.provinceSteel[p];
+      if (this.controller[p] !== nation || this.provinceHome[p] !== nation) continue;
+      if (this.provinceOil[p] > 0 || this.provinceSteel[p] > 0) deposits.push(p);
+    }
+    const weight = (p: number) => this.provinceOil[p] / Math.max(1e-9, worldOil) + this.provinceSteel[p] / Math.max(1e-9, worldSteel);
+    deposits.sort((a, b) => weight(b) - weight(a) || a - b);
+    return deposits.slice(0, Math.round(autarky * deposits.length));
+  }
+
   /** Villes principales permises : la base, le territoire, la recherche (axe Échanges). */
   hubCapacityOf(nation: number): { base: number; territory: number; research: number; total: number } {
     let held = 0;
@@ -3375,6 +3697,10 @@ export class Simulation {
     if (!network) return true;
     if (network.capacity !== this.hubCapacityOf(nation).total) return true;
     if (network.principal.some((p) => this.controller[p] !== nation)) return true;
+    // L'autarcie avance ou recule, l'empire gagne ou perd un gisement : les routes vers eux suivent.
+    const resources = this.resourceLinksOf(nation);
+    const linked = network.resources ?? [];
+    if (resources.length !== linked.length || resources.some((p) => !linked.includes(p))) return true;
     const own = this.axes.filter((axis) => axis.auto && axis.nation === nation);
     if (own.some((axis) => !axis.active)) return true;
     if (network.hubs.length === 0) return false;
@@ -3399,6 +3725,7 @@ export class Simulation {
     const capacity = this.hubCapacityOf(nation).total;
     const hubs: number[] = [];
     const principal: number[] = [];
+    const resources: number[] = [];
     if (this.alive[nation]) {
       const candidates: number[] = [];
       for (let p = 1; p < this.controller.length; p++) if (this.controller[p] === nation && this.provinceHome[p] === nation) candidates.push(p);
@@ -3423,8 +3750,20 @@ export class Simulation {
         hubs.push(p);
         principal.push(p);
       }
+      // Les gisements que l'autarcie relie, gratuitement : chacun devient une ville du réseau.
+      for (const p of this.resourceLinksOf(nation)) {
+        resources.push(p);
+        if (principal.includes(p) || root === undefined) continue;
+        if (!onNetwork.has(p)) {
+          const plan = this.planAxis(nation, p, root);
+          if (!plan) continue;
+          this.axes.push({ id: this.nextAxisId++, nation, sea: plan.sea, provinces: plan.path, length: plan.length + plan.seaLength, active: true, seaLinks: plan.seaLinks, auto: true });
+          for (const q of plan.path) onNetwork.add(q);
+        }
+        principal.push(p);
+      }
     }
-    this.networks[nation] = { hubs, principal, capacity };
+    this.networks[nation] = { hubs, principal, capacity, resources };
     this.axesVersion++;
     if (nation === this.player) {
       const added = hubs.filter((p) => !before.includes(p));
@@ -3520,6 +3859,8 @@ export class Simulation {
         this.growth[n] = this.weekOutput[n] > 0 ? this.output[n] / this.weekOutput[n] - 1 : 0;
         this.weekOutput[n] = this.output[n];
       }
+      this.recoverAnnexed();
+      this.computeScores();
     }
     this.recomputeCapacity();
 
@@ -3554,7 +3895,12 @@ export class Simulation {
       this.updateStability(n, atWar[n] === 1, minutes, services[n]);
       // Alourdir impôts et levées use la stabilité ; les alléger la rétablit.
       const pressure = this.policyPressure(n);
-      if (pressure !== 0) this.stability[n] = Math.max(0, Math.min(1, this.stability[n] - REGION_POLICY_STABILITY * pressure * minutes));
+      if (pressure > 0) this.stability[n] = Math.max(0, this.stability[n] - REGION_POLICY_STABILITY * pressure * minutes);
+      // Alléger rapproche du niveau de paix, sans le dépasser : la stabilité ne s'achète pas à 100 %.
+      else if (pressure < 0) {
+        const ceiling = Math.max(this.stability[n], this.peaceStabilityOf(n));
+        this.stability[n] = Math.min(ceiling, this.stability[n] - REGION_POLICY_STABILITY * pressure * minutes);
+      }
       this.advanceConstruction(n, minutes);
     }
   }
@@ -3662,6 +4008,133 @@ export class Simulation {
 
   private steelFactor(nation: number): number {
     return STEEL_SHORTAGE_FLOOR + (1 - STEEL_SHORTAGE_FLOOR) * this.steelCoverage[nation];
+  }
+
+  /**
+   * Score de chaque pays, une fois par semaine. Quatre piliers, chacun mesuré en part du monde et
+   * rapporté à sa valeur de départ (1 au départ) : la croissance de tout le monde ne rapporte rien.
+   * - richesse : part du PIB mondial ;
+   * - puissance : moitié part des terres tenues à leur valeur d'origine (une province occupée pour
+   *   moitié), moitié part de la capacité militaire mondiale : l'armée et la dissuasion comptent ;
+   * - influence : sa sphère rapportée à lui-même (un quart du PIB de chaque partenaire et de chaque
+   *   pacte (un dixième pour un pacte), jamais plus que le sien), comparée à la moyenne du monde : si tout le monde signe
+   *   quatre accords, personne n'y gagne ;
+   * - solidité : stabilité rapportée à celle de départ, fois la part de son territoire d'origine tenue.
+   * Indice = 100 + 25 × somme des log₂ des piliers : doubler un pilier vaut +25, rendements décroissants.
+   * Un pays disparu garde son dernier score.
+   */
+  private computeScores(): void {
+    const { stride } = this;
+    let worldOutput = 0;
+    let worldCapacity = 0;
+    for (let n = 1; n < stride; n++) {
+      if (!this.alive[n]) continue;
+      worldOutput += Math.max(0, this.output[n]);
+      worldCapacity += Math.max(0, this.capacity[n]);
+    }
+    // Sphère d'influence de chaque pays, rapportée à lui-même, et sa moyenne sur le monde.
+    const reach = new Float64Array(stride);
+    let reachSum = 0;
+    let reachCount = 0;
+    for (let n = 1; n < stride; n++) {
+      if (!this.alive[n]) continue;
+      const output = Math.max(0, this.output[n]);
+      let sphere = output;
+      for (const m of this.dealsOf(n)) sphere += SCORE_PARTNER_SHARE * Math.min(output, Math.max(0, this.output[m]));
+      for (const m of this.alliesOf(n)) sphere += SCORE_PACT_SHARE * Math.min(output, Math.max(0, this.output[m]));
+      reach[n] = output > 0 ? sphere / output : 1;
+      reachSum += reach[n];
+      reachCount++;
+    }
+    const meanReach = reachCount > 0 ? reachSum / reachCount : 1;
+    const controlled = new Float64Array(stride);
+    const homeHeld = new Float64Array(stride);
+    const homeTotal = new Float64Array(stride);
+    let worldValue = 0;
+    for (let p = 1; p < this.controller.length; p++) {
+      const holder = this.controller[p];
+      const value = this.startValue[p] * (holder === this.provinceHome[p] ? 1 : SCORE_OCCUPIED_SHARE);
+      controlled[holder] += value;
+      worldValue += value;
+      const origin = this.startHome[p];
+      homeTotal[origin] += this.startValue[p];
+      if (holder === origin) homeHeld[origin] += this.startValue[p];
+    }
+    // Les mesures, chacune rapportée à sa valeur de départ : richesse, terres, armée, influence, solidité.
+    const raw = [0, 0, 0, 0, 0];
+    const ratio = [1, 1, 1, 1, 1];
+    for (let n = 1; n < stride; n++) {
+      if (!this.alive[n]) continue;
+      raw[0] = worldOutput > 0 ? Math.max(0, this.output[n]) / worldOutput : 0;
+      raw[1] = worldValue > 0 ? controlled[n] / worldValue : 0;
+      raw[2] = worldCapacity > 0 ? Math.max(0, this.capacity[n]) / worldCapacity : 0;
+      raw[3] = reach[n] / meanReach;
+      raw[4] = (this.stability[n] / START_STABILITY) * (homeTotal[n] > 0 ? homeHeld[n] / homeTotal[n] : 1);
+      for (let k = 0; k < SCORE_BASES; k++) {
+        const i = n * SCORE_BASES + k;
+        // Un pays né en cours de partie (une région) part de ce qu'il a à sa naissance.
+        if (this.scoreBase[i] <= 0) this.scoreBase[i] = raw[k];
+        ratio[k] = this.scoreBase[i] > 0 ? raw[k] / this.scoreBase[i] : 1;
+      }
+      const pillars = [ratio[0], (ratio[1] + ratio[2]) / 2, ratio[3], ratio[4]];
+      let index = 100;
+      for (let k = 0; k < 4; k++) {
+        const value = Math.max(SCORE_PILLAR_FLOOR, pillars[k]);
+        this.pillars[n * 4 + k] = value;
+        index += SCORE_POINTS_PER_DOUBLING * Math.log2(value);
+      }
+      this.scores[n] = index;
+    }
+  }
+
+  scoreOf(nation: number): number {
+    return this.scores[nation];
+  }
+
+  pillarsOf(nation: number): [number, number, number, number] {
+    const i = nation * 4;
+    return [this.pillars[i], this.pillars[i + 1], this.pillars[i + 2], this.pillars[i + 3]];
+  }
+
+  /** Score du joueur, son rang parmi les pays en vie, et les dix premiers. */
+  private scoreSnapshot(): ScoreSnapshot | undefined {
+    if (!this.player) return undefined;
+    const ranked: { id: number; score: number }[] = [];
+    for (let n = 1; n < this.stride; n++) {
+      if (!this.alive[n] || (n !== this.player && !this.ranked[n])) continue;
+      ranked.push({ id: n, score: this.scores[n] });
+    }
+    ranked.sort((x, y) => y.score - x.score || x.id - y.id);
+    const position = ranked.findIndex((entry) => entry.id === this.player);
+    return {
+      index: this.scores[this.player],
+      pillars: this.pillarsOf(this.player),
+      rank: position >= 0 ? position + 1 : ranked.length + 1,
+      of: ranked.length,
+      top: ranked.slice(0, 10),
+      endTick: SCORE_END_TICK,
+      ended: this.gameEnded,
+    };
+  }
+
+  /**
+   * Chaque semaine, une province annexée se relève si sa région est calme : sa valeur, son PIB et ses
+   * hommes remontent vers ANNEX_RECOVERY_CAP de leur niveau d'origine. La conquête finit par payer,
+   * à condition de pacifier ce qu'on a pris.
+   */
+  private recoverAnnexed(): void {
+    const unrest = new Map<number, number>();
+    for (const movement of this.movements) unrest.set(movement.parent * this.stride + movement.origin, movement.unrest);
+    for (let p = 1; p < this.controller.length; p++) {
+      const holder = this.controller[p];
+      if (holder === 0 || holder !== this.provinceHome[p] || holder === this.startHome[p]) continue;
+      const region = this.claimantOf(p, holder);
+      if ((unrest.get(holder * this.stride + region) ?? 0) >= ANNEX_RECOVERY_CALM) continue;
+      const step = ANNEX_RECOVERY_PER_WEEK;
+      this.provinceValue[p] = Math.min(this.provinceValue[p] + step * this.startValue[p], Math.max(this.provinceValue[p], ANNEX_RECOVERY_CAP * this.startValue[p]));
+      this.provinceGdp[p] = Math.min(this.provinceGdp[p] + step * this.startGdp[p], Math.max(this.provinceGdp[p], ANNEX_RECOVERY_CAP * this.startGdp[p]));
+      this.provinceManpower[p] = Math.min(this.provinceManpower[p] + step * this.startManpower[p], Math.max(this.provinceManpower[p], ANNEX_RECOVERY_CAP * this.startManpower[p]));
+    }
   }
 
   /** Niveau vers lequel la stabilité remonte en paix : plus bas quand ses régions s'agitent. */
@@ -5055,6 +5528,7 @@ export class Simulation {
       tick: this.tick,
       frontierSize: this.frontierCount,
       aliveNations: this.aliveCount,
+      score: this.scoreSnapshot(),
       fronts,
       nations: [...participants].map((id) => ({
         id,
@@ -5078,6 +5552,8 @@ export class Simulation {
         trade: this.tradeAccess[id],
         tradeFactor: this.tradeFactor[id],
         deals: id === this.player ? this.dealsOf(id) : [],
+        threats: id === this.player ? this.threatsSnapshot() : [],
+        tributes: id === this.player ? this.tributes.filter((tribute) => tribute.from === id).map(({ to, until }) => ({ to, until })) : [],
         dealReach: id === this.player ? this.dealReachOf(id) : [],
         embargoes: id === this.player ? this.embargoes.filter(([from]) => from === id).map(([, to]) => to) : [],
         embargoedBy: id === this.player ? this.embargoes.filter(([, to]) => to === id).map(([from]) => from) : [],
@@ -5107,7 +5583,7 @@ export class Simulation {
             ? (() => {
                 const { base, territory, research, total } = this.hubCapacityOf(id);
                 const network = this.networkOf(id);
-                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research };
+                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research, resources: (network.resources ?? []).slice() };
               })()
             : null,
         doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
@@ -5264,6 +5740,12 @@ export class Simulation {
         effortTarget: Array.from(this.effortTarget),
         growth: Array.from(this.growth),
         weekOutput: Array.from(this.weekOutput),
+        scoreBase: Array.from(this.scoreBase),
+        scores: Array.from(this.scores),
+        pillars: Array.from(this.pillars),
+        gameEnded: this.gameEnded,
+        tributes: this.tributes.map(({ from, to, share, until }) => [from, to, share, until] as [number, number, number, number]),
+        threats: [...this.threats].map(([nation, threat]) => [nation, threat.level, threat.stage, threat.province, threat.deadline] as [number, number, number, number, number]),
         axisBaseline: Array.from(this.axisBaseline),
         baselineSet: Array.from(this.baselineSet),
         consolidation: Array.from(this.consolidation),
@@ -5317,7 +5799,9 @@ export class Simulation {
         networkPhase: this.networkPhase,
         networks: Array.from({ length: this.stride }, (_, n) => {
           const network = this.networks[n];
-          return network ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity } : { hubs: [], principal: [], capacity: -1 };
+          return network
+            ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice() }
+            : { hubs: [], principal: [], capacity: -1 };
         }),
         doctrine: Array.from(this.doctrine),
         doctrineTarget: Array.from(this.doctrineTarget),
@@ -5379,6 +5863,12 @@ export class Simulation {
     restoreArray(this.effortTarget, legacy.effortTarget);
     restoreArray(this.growth, legacy.growth);
     restoreArray(this.weekOutput, legacy.weekOutput);
+    if (legacy.scoreBase?.length === this.scoreBase.length) restoreArray(this.scoreBase, legacy.scoreBase);
+    restoreArray(this.scores, legacy.scores);
+    restoreArray(this.pillars, legacy.pillars);
+    this.gameEnded = legacy.gameEnded ?? false;
+    this.tributes = (legacy.tributes ?? []).map(([from, to, share, until]) => ({ from, to, share, until }));
+    this.threats = new Map((legacy.threats ?? []).map(([nation, level, stage, province, deadline]) => [nation, { level, stage, province, deadline }]));
     restoreArray(this.consolidation, legacy.consolidation);
     restoreArray(this.manpower, legacy.manpower);
     restoreArray(this.armyAfterReinforce, legacy.armyAfterReinforce);
@@ -5421,7 +5911,7 @@ export class Simulation {
     // Un réseau jamais calculé (capacité -1) le sera à son tour.
     this.networks = [];
     (legacy.networks ?? []).forEach((network, n) => {
-      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity };
+      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice() };
     });
     this.networkPhase = legacy.networkPhase ?? 0;
     if (legacy.axisBaseline) {

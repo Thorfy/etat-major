@@ -2,6 +2,7 @@
 import { useLayoutEffect, useRef } from 'preact/hooks';
 import { GAME_SPEEDS, type GameClient, SPEED_LABELS } from '../game/GameClient.ts';
 import { MANPOWER_REGEN_PER_MINUTE } from '../sim/balance.ts';
+import { PILLARS, formatMultiple, ordinal } from './score.ts';
 import { formatDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapMode } from '../render/MapView.ts';
@@ -30,8 +31,17 @@ function Indicators({ game, nation }: { game: GameClient; nation: NationData }) 
   const manpower = stats.manpowerMax > 0 ? stats.manpower / stats.manpowerMax : 1;
   const change = stats.output / Math.max(1, nation.gdpMusd) - 1;
   const territory = stats.cells - game.startCells;
+  const score = game.snapshot?.score;
   return (
     <>
+      {score && (
+        <Indicator
+          label="Score"
+          value={`${Math.round(score.index)} · ${ordinal(score.rank)}`}
+          tone={score.index >= 100.5 ? 'ahead' : score.index <= 99.5 ? 'behind' : ''}
+          title={`Indice ${Math.round(score.index)} (100 au départ), ${ordinal(score.rank)} sur ${score.of}. ${PILLARS.map((pillar, i) => `${pillar.name} ${formatMultiple(score.pillars[i])}`).join(' · ')}`}
+        />
+      )}
       <Indicator
         label="Armée"
         value={`${troops(stats.army)} / ${troops(stats.capacity)}`}

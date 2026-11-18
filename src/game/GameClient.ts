@@ -6,6 +6,7 @@ import {
   BUILD_COST,
   PROVINCE_BUILDINGS,
   type ProvinceBuilding,
+  AI_PEACE_EFFORT,
   DEFAULT_OFFENSIVE_SHARE,
   GAME_SPEEDS,
   DEPOT_MIN_CONSOLIDATION,
@@ -33,6 +34,7 @@ import type {
   SimSave,
   SimSnapshot,
   Stance,
+  ThreatAnswer,
   ToWorker,
   WorkerInit,
   WorkerUpdate,
@@ -42,9 +44,10 @@ import { landingProblem, traceRoute } from '../sim/route.ts';
 import { findSeas } from '../sim/seas.ts';
 import { rebalance } from './allocation.ts';
 import { provinceTrend, provinceWealth } from './economy.ts';
-import { relationTint, stabilityTint } from './mapTints.ts';
+import { relationTint, stabilityTint, worldRelationTint } from './mapTints.ts';
 import { DEAL_REFUSALS, OFFENSIVE_ENDS, PEACE_REFUSALS, eventNations } from './events.ts';
 import { regionName } from './regionNames.ts';
+import { formatShortDate } from './time.ts';
 import { SAVE_VERSION, type SaveFile, type SaveMeta, encodeSave, hashGrid } from './saveFormat.ts';
 import { type SaveSlot, writeSave } from './saves.ts';
 
@@ -76,7 +79,9 @@ export interface BuildOption {
 export interface Popup {
   id: number;
   tick: number;
-  kind: 'war' | 'uprising' | 'demand' | 'peaceOffer';
+  kind: 'war' | 'uprising' | 'demand' | 'peaceOffer' | 'end' | 'ultimatum';
+  /** Ultimatum : la province exigée. */
+  province?: number;
   /** Attaquants, régions soulevées, région qui demande, ou pays qui propose la paix. */
   nations: number[];
   /** Soulèvement : les régions se sont coalisées. */
@@ -213,6 +218,9 @@ export class GameClient {
     this.post(init, [provinceGrid.buffer, ownerGrid.buffer, terrainGrid.buffer, riverGrid.buffer]);
 
     if (start.saved) this.applySave(start.saved);
+    // Une nouvelle partie part avec l'effort de paix de l'IA : sans y toucher, l'économie du joueur
+    // grandit comme celle des autres, au lieu de stagner à l'équilibre (50 %).
+    else this.setEffort(AI_PEACE_EFFORT);
     window.setInterval(() => {
       if (this.speed !== 0) void this.save('auto');
     }, AUTOSAVE_MS);
@@ -377,6 +385,24 @@ export class GameClient {
       case 'embargoLifted':
         if (event.to === me) this.notify(`${name(event.from)} lève son embargo.`);
         break;
+      case 'threat':
+        if (event.to === me) this.notify(`${name(event.from)} masse des troupes à ta frontière : renforce ta défense, fortifie, ou cherche des pactes (onglet Diplomatie).`);
+        break;
+      case 'ultimatum':
+        if (event.to === me) this.openPopup({ tick: event.tick, kind: 'ultimatum', nations: [event.from], province: event.province });
+        break;
+      case 'threatEased':
+        if (event.to === me) this.notify(`${name(event.from)} renonce : ta défense le dissuade.`);
+        break;
+      case 'tributePaid':
+        if (event.from === me) this.notify(`Tu verses un tribut à ${name(event.to)} jusqu'au ${formatShortDate(event.until)}. Une trêve d'un an est signée.`);
+        break;
+      case 'ultimatumAccepted':
+        if (event.to === me) this.notify(`Tu cèdes une province à ${name(event.from)}. Une trêve d'un an est signée.`);
+        break;
+      case 'gameEnd':
+        if (me) this.openPopup({ tick: event.tick, kind: 'end', nations: [me] });
+        break;
       case 'offensiveEnded':
         if (event.nation === me) this.notify(`${OFFENSIVE_ENDS[event.reason]}.`);
         break;
@@ -439,9 +465,12 @@ export class GameClient {
     const mode = this.view.mapMode;
     const count = this.world.data.nations.length;
     if (mode === 'relations') {
-      const subject = this.highlighted !== 0 ? this.highlighted : this.player;
+      const subject = this.highlighted;
       const wars = (this.snapshot?.fronts ?? []).map((front) => [front.a, front.b] as [number, number]);
-      this.view.setNationTint(relationTint(subject, count, this.economy, wars));
+      const threats = this.playerStats?.threats ?? [];
+      // Sans sélection, la vue d'ensemble du monde ; sinon, les liens du pays sélectionné.
+      if (subject === 0) this.view.setNationTint(worldRelationTint(count, this.economy, wars, threats));
+      else this.view.setNationTint(relationTint(subject, count, this.economy, wars, subject === this.player ? threats : []));
     } else if (mode === 'stability') {
       this.view.setNationTint(stabilityTint(count, this.economy));
       if (this.economy) this.view.setUnrest(this.economy.provinceUnrest);
@@ -478,9 +507,9 @@ export class GameClient {
     return tint;
   }
 
-  /** Pays dont la carte des relations montre les liens : le sélectionné, sinon le joueur. */
+  /** Pays dont la carte des relations montre les liens : le sélectionné ; sans sélection, 0 (vue d'ensemble). */
   get relationSubject(): number {
-    return this.highlighted !== 0 ? this.highlighted : this.player;
+    return this.highlighted;
   }
 
   /** Met en évidence sur la carte les alliés du pays sélectionné. */
@@ -547,6 +576,13 @@ export class GameClient {
   proposePeace(enemy: number): void {
     if (!this.canCommand || !this.isAtWarWith(enemy)) return;
     this.command({ type: 'proposePeace', nation: this.player, enemy });
+  }
+
+  /** Répondre à une menace : céder la province exigée, verser un tribut, ou refuser l'ultimatum. */
+  answerThreat(enemy: number, choice: ThreatAnswer): void {
+    if (!this.canCommand) return;
+    this.command({ type: 'answerThreat', nation: this.player, enemy, choice });
+    this.dropPopups((popup) => popup.kind === 'ultimatum' && popup.nations[0] === enemy);
   }
 
   answerPeace(enemy: number, accept: boolean): void {

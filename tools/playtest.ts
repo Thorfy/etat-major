@@ -15,7 +15,7 @@ import type { WorldData } from '../src/map/types.ts';
 import { describeEvent } from '../src/game/events.ts';
 import { formatDate } from '../src/game/time.ts';
 import { BUILD_NAMES } from '../src/game/buildings.ts';
-import { AI_PROFILES, TICKS_PER_WEEK } from '../src/sim/balance.ts';
+import { AI_PEACE_EFFORT, AI_PROFILES, TICKS_PER_WEEK } from '../src/sim/balance.ts';
 import { DOCTRINE_AXES, archetypeName } from '../src/sim/doctrine.ts';
 import type { BuildKind, SimEvent, SimSave, Stance } from '../src/sim/protocol.ts';
 import { Simulation } from '../src/sim/Simulation.ts';
@@ -114,6 +114,8 @@ function interrupts(event: SimEvent, player: number): boolean {
   if (event.type === 'peaceOffer' && event.to === player) return true;
   if (event.type === 'secession' && event.parent === player) return true;
   if (event.type === 'capitulation' && (event.loser === player || event.winner === player)) return true;
+  if (event.type === 'gameEnd') return true;
+  if ((event.type === 'threat' || event.type === 'ultimatum') && event.to === player) return true;
   return false;
 }
 
@@ -140,6 +142,11 @@ function report(sim: Simulation, meta: Meta): string {
   if (!sim.isAlive(p) || !me) {
     lines.push('TON PAYS N\'EXISTE PLUS : partie perdue.');
     return lines.join('\n');
+  }
+  const score = snap.score;
+  if (score) {
+    const pillars = ['richesse', 'puissance', 'influence', 'solidité'].map((name, i) => `${name} ×${score.pillars[i].toFixed(2)} (${Math.round(25 * Math.log2(score.pillars[i]))})`);
+    lines.push(`SCORE ${Math.round(score.index)} · rang ${score.rank}/${score.of} · ${pillars.join(', ')} · tête : ${score.top.slice(0, 3).map((e) => `${nameOf(e.id)} ${Math.round(e.score)}`).join(', ')}${score.ended ? ' · BILAN PASSÉ' : ''}`);
   }
   const output = sim.outputOf(p);
   lines.push(
@@ -193,6 +200,15 @@ function report(sim: Simulation, meta: Meta): string {
   for (const n of land.filter((n) => sim.isAlive(n))) lines.push(`  ${describe(n)}`);
   if (sea.length > 0) lines.push(`--- Voisins par la mer --- ${sea.filter((n) => sim.isAlive(n)).map(nameOf).join(', ')}`);
   lines.push(`Accords : ${me.deals.map(nameOf).join(', ') || 'aucun'} · à portée d'un accord : ${me.dealReach.length} pays · pactes : ${me.allies.map(nameOf).join(', ') || 'aucun'}`);
+  if (me.threats.length > 0) {
+    lines.push('--- MENACES ---');
+    const stages = ['te regarde', 'masse des troupes', 'POSE UN ULTIMATUM', 'ultimatum refusé : la guerre vient'];
+    for (const t of me.threats) {
+      lines.push(`  ${nameOf(t.nation)} : ${stages[t.stage]} · tension ${pct(t.level)} · sa force ${Math.round(t.strength)} contre ta défense ${Math.round(t.defense)} (il lui faut ${t.needed.toFixed(1)} contre 1)` +
+        (t.stage >= 2 ? ` · exige ${provinceName(t.province)} avant le ${formatDate(t.deadline)}` : '') +
+        (t.stage >= 1 ? ` · tribut possible : ${md(t.tribute)} par semaine, 6 mois (do menace "${nameOf(t.nation)}" ceder|tribut|refuser)` : ''));
+    }
+  }
   if (me.peaceOffers.length > 0) lines.push(`OFFRES DE PAIX REÇUES : ${me.peaceOffers.map((o) => nameOf(o.nation)).join(', ')} (do accepter-paix / refuser-paix)`);
   if (me.truces.length > 0) lines.push(`Trêves : ${me.truces.map((t) => `${nameOf(t.nation)} jusqu'au ${formatDate(t.until)}`).join(', ')}`);
 
@@ -305,7 +321,8 @@ const HELP = `Ordres (do <dossier> <ordre> ...). Les pays se désignent par leur
   recherche <axe 0..4>              recherche le niveau suivant de cet axe
   demande <id région> <oui|non>     répondre à la demande d'une région
   independance <id région>          lui rendre son indépendance
-  politique <id région> <impôts -2..2> <levée -2..2>`;
+  politique <id région> <impôts -2..2> <levée -2..2>
+  menace <pays> <ceder|tribut|refuser>  répondre à une menace (céder : à l'ultimatum seulement)`;
 
 function order(sim: Simulation, meta: Meta, args: string[]): string {
   const p = meta.player;
@@ -382,6 +399,11 @@ function order(sim: Simulation, meta: Meta, args: string[]): string {
     case 'independance':
       sim.apply({ type: 'grantIndependence', nation: p, origin: num(0) });
       return 'Indépendance accordée.';
+    case 'menace': {
+      const choice = rest[1] === 'ceder' ? 'cede' : rest[1] === 'tribut' ? 'tribute' : 'refuse';
+      sim.apply({ type: 'answerThreat', nation: p, enemy: nation(), choice });
+      return choice === 'cede' ? 'Province cédée (si l\'ultimatum tenait).' : choice === 'tribute' ? 'Tribut versé : trêve d\'un an.' : 'Ultimatum refusé : la guerre vient, sauf si ta défense le dissuade.';
+    }
     case 'politique':
       sim.apply({ type: 'setRegionPolicy', nation: p, origin: num(0), tax: num(1), levy: num(2) });
       return 'Politique régionale fixée.';
@@ -397,6 +419,8 @@ try {
     const player = idOf(args[0]);
     const seed = Number(args[1] ?? 1);
     const sim = makeSim(player, seed);
+    // Comme au navigateur : une nouvelle partie part avec l'effort de paix de l'IA.
+    sim.apply({ type: 'setEffort', nation: player, effort: AI_PEACE_EFFORT });
     const meta: Meta = { player, seed, start: { output: sim.outputOf(player), cells: sim.cellsOf(player), army: sim.armyOf(player), capacity: sim.capacityOf(player) }, log: [] };
     console.log(report(sim, meta));
     store(dir, sim, meta);

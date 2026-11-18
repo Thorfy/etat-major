@@ -82,6 +82,8 @@ export interface TradeAxis {
 export interface NetworkState {
   hubs: number[];
   principal: number[];
+  /** Gisements que l'autarcie relie d'elle-même au réseau, en plus des villes principales. */
+  resources?: number[];
   /** Villes principales permises au dernier calcul. */
   capacity: number;
 }
@@ -168,6 +170,8 @@ export type SimCommand =
   | { type: 'proposePeace'; nation: number; enemy: number }
   /** Répondre à une offre de paix reçue. */
   | { type: 'answerPeace'; nation: number; enemy: number; accept: boolean }
+  /** Répondre à une menace : céder la province exigée (à l'ultimatum), verser un tribut, ou refuser. */
+  | { type: 'answerThreat'; nation: number; enemy: number; choice: ThreatAnswer }
   /** Répondre à la demande d'une région agitée. */
   | { type: 'answerDemand'; nation: number; origin: number; accept: boolean }
   /** Impôts et levée d'hommes d'une région (−2 à +2 chacun). */
@@ -256,7 +260,7 @@ export interface NationSnapshot {
   /** Joueur seulement : terminus de son réseau commercial (axes en chantier compris). */
   axisTerminals: number;
   /** Joueur seulement : réseau automatique, et d'où vient le nombre de ses villes principales. */
-  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number } | null;
+  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number; resources: number[] } | null;
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
   doctrineTarget: number[];
   research: number[];
@@ -287,6 +291,9 @@ export interface NationSnapshot {
   peaceOffers: { nation: number; until: number }[];
   /** Régions rebelles soulevées ensemble contre cette nation. */
   coalition: number[];
+  /** Joueur seulement : les pays qui le menacent, et les tributs qu'il verse. */
+  threats: ThreatSnapshot[];
+  tributes: { to: number; until: number }[];
 }
 
 /** Économie du monde entier, envoyée moins souvent que le reste. */
@@ -349,6 +356,40 @@ export interface PocketSnapshot {
   cells: number;
 }
 
+/** Le score du joueur : son indice, ses quatre piliers, son rang, et la tête du classement. */
+export interface ScoreSnapshot {
+  index: number;
+  /** Richesse, puissance, influence, solidité : rapport à la valeur de départ (1 au départ). */
+  pillars: [number, number, number, number];
+  rank: number;
+  of: number;
+  top: { id: number; score: number }[];
+  /** Semaine de la date butoir, et si elle est passée. */
+  endTick: number;
+  ended: boolean;
+}
+
+/**
+ * Une menace contre le joueur. stage : 1 masse des troupes, 2 ultimatum posé, 3 ultimatum refusé.
+ * strength : sa capacité ; defense : ce qu'elle voit de la tienne (fortifications comprises) ;
+ * needed : le rapport qu'il lui faut pour attaquer.
+ */
+/** Réponses à une menace : céder la province exigée, verser un tribut, refuser. */
+export type ThreatAnswer = 'cede' | 'tribute' | 'refuse';
+
+export interface ThreatSnapshot {
+  nation: number;
+  level: number;
+  stage: number;
+  strength: number;
+  defense: number;
+  needed: number;
+  province: number;
+  deadline: number;
+  /** Le tribut qui l'apaiserait : millions de dollars par semaine, pendant 26 semaines. */
+  tribute: number;
+}
+
 export interface SimSnapshot {
   tick: number;
   frontierSize: number;
@@ -359,10 +400,20 @@ export interface SimSnapshot {
   pockets: PocketSnapshot[];
   /** Axes commerciaux du monde, seulement quand ils ont changé. */
   axes?: AxisSnapshot[];
+  /** Score du joueur (absent sans joueur). */
+  score?: ScoreSnapshot;
 }
 
 export type SimEvent =
   | { type: 'war'; tick: number; a: number; b: number }
+  /** La date butoir est atteinte : le bilan de la partie. */
+  | { type: 'gameEnd'; tick: number }
+  /** Menaces : un pays masse des troupes, pose un ultimatum, y renonce, ou obtient la province. */
+  | { type: 'threat'; tick: number; from: number; to: number }
+  | { type: 'ultimatum'; tick: number; from: number; to: number; province: number }
+  | { type: 'threatEased'; tick: number; from: number; to: number }
+  | { type: 'ultimatumAccepted'; tick: number; from: number; to: number; province: number }
+  | { type: 'tributePaid'; tick: number; from: number; to: number; until: number }
   | { type: 'capitulation'; tick: number; loser: number; winner: number }
   | { type: 'peace'; tick: number; a: number; b: number }
   | { type: 'peaceRefused'; tick: number; from: number; to: number; reason?: PeaceRefusal }
@@ -531,6 +582,15 @@ export interface SimSaveState {
   growth: number[];
   /** PIB au dernier relevé hebdomadaire (absent des sauvegardes d'avant). */
   weekOutput?: number[];
+  /** Score : valeurs de départ des piliers (4 par pays), indices, piliers, et si la date butoir est passée. */
+  scoreBase?: number[];
+  scores?: number[];
+  pillars?: number[];
+  gameEnded?: boolean;
+  /** Menaces contre le joueur : [pays, tension, étape, province exigée, échéance]. */
+  threats?: [number, number, number, number, number][];
+  /** Tributs en cours : [qui paie, qui reçoit, part du PIB, jusqu'à]. */
+  tributes?: [number, number, number, number][];
   /** Bonus du premier réseau de chaque province, et pays dont le premier réseau est fait. */
   axisBaseline?: number[];
   baselineSet?: number[];

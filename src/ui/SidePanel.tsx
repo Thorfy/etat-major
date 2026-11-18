@@ -1,11 +1,11 @@
 // Panneau de gauche, en onglets : chaque onglet garde ses lignes à la même place, et défile seul.
-import type { ComponentChildren } from 'preact';
+import { type ComponentChildren, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { type GameClient, LOW_SUPPLY } from '../game/GameClient.ts';
 import { BUILD_EFFECTS, BUILD_NAMES } from '../game/buildings.ts';
 import { POLE_EFFECTS, axisEffects, poleName } from '../game/doctrines.ts';
 import { effortEffect } from '../game/economy.ts';
-import { formatShortDate } from '../game/time.ts';
+import { TICKS_PER_WEEK, formatDate, formatShortDate } from '../game/time.ts';
 import type { NationData } from '../map/types.ts';
 import type { MapTool, MapView } from '../render/MapView.ts';
 import {
@@ -14,13 +14,9 @@ import {
   MANPOWER_REGEN_PER_MINUTE,
   DEMAND_INDEPENDENCE_AT,
   DEMAND_INVESTMENT_AT,
-  AUTO_TRANSIT_BONUS,
   INVESTMENT_WEEKS,
-  AUTO_HUBS_PER_PROVINCES,
-  HUB_BONUS,
   MAX_COUNTER_SHARE,
   MAX_TRADE_DEALS,
-  TRADE_DEPENDENCE,
   MAX_PRIORITY_ZONES,
 } from '../sim/balance.ts';
 import {
@@ -28,7 +24,6 @@ import {
   BALANCED_ARCHETYPE,
   DOCTRINE_AXES,
   DOCTRINE_REACH,
-  DOCTRINE_SPEED_PER_WEEK,
   MAX_RESEARCH_LEVEL,
   RESEARCH_COST,
   archetypeOf,
@@ -36,8 +31,9 @@ import {
 import type { FrontSnapshot, Stance } from '../sim/protocol.ts';
 import { Art, Blason, buildingArt } from './Art.tsx';
 import { formatAggression, formatChange, formatGdp, formatPercent, formatRatio, integer, weeksBelow } from './format.ts';
+import { PILLARS, formatMultiple, ordinal } from './score.ts';
 
-type Tab = 'fronts' | 'economy' | 'defense' | 'doctrine' | 'diplomacy';
+type Tab = 'fronts' | 'economy' | 'defense' | 'doctrine' | 'diplomacy' | 'score';
 
 const STANCES: { id: Stance; label: string }[] = [
   { id: 'attack', label: 'Attaquer' },
@@ -67,6 +63,73 @@ function Slider({ label, value, min, max, step, onChange }: { label: ComponentCh
       <span>{label}</span>
       <input type="range" min={min} max={max} step={step} value={value} onInput={(event) => onChange(Number(event.currentTarget.value))} />
     </label>
+  );
+}
+
+/** Étapes d'une menace, de la plus sourde à la plus pressante. */
+const THREAT_STAGES: Record<number, string> = {
+  0: 'te regarde',
+  1: 'masse des troupes',
+  2: 'pose un ultimatum',
+  3: 'ultimatum refusé : la guerre vient',
+};
+
+// ——— Score ———
+
+/** Ton indice, ses quatre piliers, la tête du classement et la date butoir. */
+function ScoreTab({ game }: { game: GameClient }) {
+  const score = game.snapshot?.score;
+  if (!score) return null;
+  const weeks = Math.max(0, Math.ceil((score.endTick - game.tick) / TICKS_PER_WEEK));
+  const inTop = score.top.some((entry) => entry.id === game.player);
+  return (
+    <>
+      <section>
+        <h3>Ton score</h3>
+        <dl class="wide">
+          <dt>Indice</dt>
+          <dd class={score.index >= 100.5 ? 'ahead' : score.index <= 99.5 ? 'behind' : ''}>{Math.round(score.index)}</dd>
+          <dt>Rang</dt>
+          <dd>
+            {ordinal(score.rank)} sur {score.of}
+          </dd>
+          <dt>Bilan</dt>
+          <dd>{score.ended ? 'passé : tu joues en bac à sable' : `${formatDate(score.endTick)} · dans ${weeks} sem.`}</dd>
+        </dl>
+      </section>
+      <section>
+        <h3>Piliers</h3>
+        <dl class="wide">
+          {PILLARS.map((pillar, i) => (
+            <Fragment key={pillar.name}>
+              <dt title={pillar.hint}>{pillar.name}</dt>
+              <dd class={score.pillars[i] > 1.005 ? 'ahead' : score.pillars[i] < 0.995 ? 'behind' : ''} title={pillar.hint}>
+                {formatMultiple(score.pillars[i])}
+              </dd>
+            </Fragment>
+          ))}
+        </dl>
+      </section>
+      <section>
+        <h3>Classement mondial</h3>
+        <ol class="ranking">
+          {score.top.map((entry, i) => (
+            <li key={entry.id} class={entry.id === game.player ? 'mine' : ''}>
+              <span>{ordinal(i + 1)}</span>
+              <span>{game.nameOf(entry.id)}</span>
+              <b>{Math.round(entry.score)}</b>
+            </li>
+          ))}
+          {!inTop && (
+            <li class="mine">
+              <span>{ordinal(score.rank)}</span>
+              <span>{game.nameOf(game.player)}</span>
+              <b>{Math.round(score.index)}</b>
+            </li>
+          )}
+        </ol>
+      </section>
+    </>
   );
 }
 
@@ -264,11 +327,6 @@ function TradeSection({ game }: { game: GameClient }) {
         <dt>Embargos subis</dt>
         <dd class={stats.embargoedBy.length > 0 ? 'behind' : ''}>{names(stats.embargoedBy)}</dd>
       </dl>
-      <Note lines={3}>
-        {`Tu commerces avec tes voisins, et par la mer avec tout pays qui borde une même mer. Guerre, embargo et ` +
-          `blocus coupent ces échanges : coupé de tous, tu perdrais ${formatPercent(TRADE_DEPENDENCE)} de ton PIB et tes ` +
-          `importations. Un accord (fiche d'un pays) en rapporte un peu plus.`}
-      </Note>
       <AutoNetwork game={game} />
     </section>
   );
@@ -308,14 +366,9 @@ function AutoNetwork({ game }: { game: GameClient }) {
         <dd>{integer.format(crossed.size)}</dd>
         <dt>Routes d'accords</dt>
         <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
+        <dt title="L'autarcie relie d'elle-même tes gisements au réseau, gratuitement, d'autant plus qu'elle est poussée.">Gisements reliés</dt>
+        <dd>{network.resources.length > 0 ? `${network.resources.length} · autarcie` : '—'}</dd>
       </dl>
-      <Note lines={4}>
-        {`Tes départements les plus riches sont reliés d'eux-mêmes au plus riche : ils gagnent ${formatPercent(HUB_BONUS)} ` +
-          `de PIB et de capacité, et les départements traversés ${formatPercent(AUTO_TRANSIT_BONUS)}. Un département déjà sur une route ` +
-          `laisse sa place au suivant, et garde le bonus. Le réseau se redessine quand un département en dépasse un autre. ` +
-          `Plus de villes : un territoire plus grand (une par ${AUTO_HUBS_PER_PROVINCES} départements), ou la recherche sur ` +
-          `les échanges (onglet Doctrine, deux par niveau).`}
-      </Note>
       {network.principal.length > 0 && (
         <ol class="builds axis-list">
           {shown.map((province, index) => (
@@ -323,7 +376,15 @@ function AutoNetwork({ game }: { game: GameClient }) {
               <div class="offensive-row">
                 <span>
                   {index + 1}. {city(province)}{' '}
-                  <small>{network.hubs.includes(province) ? (index === 0 ? '· centre du réseau' : '· reliée') : '· déjà sur la route'}</small>
+                  <small>
+                    {network.hubs.includes(province)
+                      ? index === 0
+                        ? '· centre du réseau'
+                        : '· reliée'
+                      : network.resources.includes(province)
+                        ? '· gisement'
+                        : '· déjà sur la route'}
+                  </small>
                 </span>
               </div>
             </li>
@@ -444,11 +505,6 @@ function BuildQueues({ game, military: showMilitary }: { game: GameClient; milit
         step={10}
         onChange={(value) => game.setMilitaryShare(value / 100)}
       />
-      <Note lines={2}>
-        {showMilitary
-          ? `La file militaire avance en même temps que la civile (onglet Économie, ${civil.length} en cours). Glisse un chantier pour changer son rang.`
-          : `La file civile avance en même temps que la militaire (onglet Défense, ${military.length} en cours). Glisse un chantier pour changer son rang.`}
-      </Note>
       {showMilitary
         ? list('Militaire', military, militaryRate, 'Fortifications, dépôts, routes du territoire conquis et recherche.')
         : list('Civil', civil, civilRate, 'Clique sur une de tes provinces pour bâtir.')}
@@ -581,7 +637,6 @@ function DoctrineTab({ game }: { game: GameClient }) {
   const doctrine = game.doctrineOf(game.player);
   const current = archetypeOfIndex(archetypeOf(doctrine));
   const aimed = archetypeOfIndex(archetypeOf(DOCTRINE_AXES.map((_, axis) => game.doctrineTarget(axis))));
-  const weeks = Math.round(1 / DOCTRINE_SPEED_PER_WEEK);
   return (
     <>
       <section>
@@ -592,11 +647,6 @@ function DoctrineTab({ game }: { game: GameClient }) {
             <small>{aimed.id !== current.id ? `En route vers : ${aimed.name}` : 'Ta doctrine'}</small>
           </div>
         </div>
-        <Note lines={4}>
-          {`Chaque axe va d'un pôle à l'autre : chacun apporte un gain et coûte quelque chose, le centre ne fait rien. ` +
-            `Ta doctrine glisse vers ta cible, du centre à un bout en ${weeks} semaines (deux fois plus en guerre). ` +
-            `La recherche repousse les bornes de chaque axe ; elle prend sur tes chantiers.`}
-        </Note>
       </section>
       {DOCTRINE_AXES.map((_, axis) => (
         <DoctrineAxis key={axis} game={game} axis={axis} current={doctrine[axis] ?? 0} />
@@ -684,8 +734,59 @@ function DiplomacyTab({ game, nations }: { game: GameClient; nations: NationData
   if (!stats) return null;
   const name = (id: number) => game.nameOf(id);
   const list = (ids: number[], empty: string) => (ids.length > 0 ? ids.map(name).join(', ') : empty);
+  const threats = [...stats.threats].sort((a, b) => b.level - a.level);
   return (
     <>
+      <section>
+        <h3>Menaces</h3>
+        {threats.length === 0 ? (
+          <p class="note">Aucun voisin ne te menace : ta défense le dissuade, ou il est occupé ailleurs.</p>
+        ) : (
+          threats.map((threat) => {
+            const odds = threat.defense > 0 ? threat.strength / threat.defense : Infinity;
+            const province = threat.province ? game.worldData.provinces[threat.province - 1]?.name : '';
+            return (
+              <div key={threat.nation} class="threat">
+                <dl class="wide">
+                  <dt>{name(threat.nation)}</dt>
+                  <dd class="behind">{THREAT_STAGES[threat.stage] ?? 'te regarde'}</dd>
+                  <dt>Tension</dt>
+                  <dd>{formatPercent(threat.level)}</dd>
+                  <dt title="Sa capacité militaire, contre ce qu'il voit de ta défense (armée disponible et fortifications de votre frontière).">
+                    Rapport de force
+                  </dt>
+                  <dd class={odds >= threat.needed ? 'behind' : 'ahead'}>
+                    {formatRatio(odds)} · il lui faut {formatRatio(threat.needed)}
+                  </dd>
+                  {threat.stage >= 2 && (
+                    <>
+                      <dt>Échéance</dt>
+                      <dd>{formatShortDate(threat.deadline)}</dd>
+                    </>
+                  )}
+                </dl>
+                {threat.stage >= 1 && threat.stage <= 2 && (
+                  <div class="card-actions">
+                    {threat.stage === 2 && threat.province > 0 && (
+                      <button class="action quiet" onClick={() => game.answerThreat(threat.nation, 'cede')}>
+                        Céder {province}
+                      </button>
+                    )}
+                    <button class="action quiet" title="Une part de ton PIB pendant six mois ; il renonce, trêve d'un an." onClick={() => game.answerThreat(threat.nation, 'tribute')}>
+                      Tribut · {formatGdp(threat.tribute)} / sem.
+                    </button>
+                    {threat.stage === 2 && (
+                      <button class="action quiet" onClick={() => game.answerThreat(threat.nation, 'refuse')}>
+                        Refuser
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </section>
       <section>
         <h3>Relations</h3>
         <dl class="wide">
@@ -705,11 +806,7 @@ function DiplomacyTab({ game, nations }: { game: GameClient; nations: NationData
           <dt>Nations en vie</dt>
           <dd>{game.snapshot?.aliveNations ?? '—'}</dd>
         </dl>
-        <Note alert={stats.coalition.length > 0}>
-          {stats.coalition.length > 0
-            ? 'Des régions de ton pays se sont soulevées ensemble : rends-leur la paix, ou reprends-les.'
-            : 'Une agressivité élevée fait refuser tes pactes. Clique sur un pays pour lui proposer un pacte ou la paix.'}
-        </Note>
+        {stats.coalition.length > 0 && <Note alert>{'Des régions de ton pays se sont soulevées ensemble : rends-leur la paix, ou reprends-les.'}</Note>}
       </section>
       <RegionsSection game={game} nations={nations} />
       <section>
@@ -757,11 +854,6 @@ function RegionsSection({ game, nations }: { game: GameClient; nations: NationDa
   return (
     <section>
       <h3>Régions</h3>
-      <Note lines={3}>
-        {`Régions annexées et régions historiques de ton pays. Leur agitation tend vers un plafond (le trait blanc) : ` +
-          `bas si tu les équipes, haut si ton pays est instable ou en guerre, et plus haut pour une identité forte. ` +
-          `Elles demandent des investissements, puis l'indépendance ; à 100 %, elles se soulèvent.`}
-      </Note>
       {movements.length === 0 && <Note lines={1}>Aucune région ne s'agite.</Note>}
       {movements.map((movement) => (
         <div class={`region ${movement.demand ? 'offer' : ''}`} key={movement.origin}>
@@ -859,6 +951,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
       badge: offers ? String(offers) : stats?.coalition.length ? '!' : '',
       alert: offers > 0 || (stats?.coalition.length ?? 0) > 0,
     },
+    { id: 'score', label: 'Score', badge: '', alert: false },
   ];
   const nation = nations[game.player - 1];
   return (
@@ -874,6 +967,7 @@ export function SidePanel({ game, nations, view, tool }: SidePanelProps) {
       <div class="tab-body" role="tabpanel">
         {tab === 'fronts' && <FrontsTab game={game} nations={nations} view={view} tool={tool} />}
         {tab === 'economy' && <EconomyTab game={game} nation={nation} />}
+        {tab === 'score' && <ScoreTab game={game} />}
         {tab === 'defense' && <DefenseTab game={game} view={view} tool={tool} />}
         {tab === 'doctrine' && <DoctrineTab game={game} />}
         {tab === 'diplomacy' && <DiplomacyTab game={game} nations={nations} />}

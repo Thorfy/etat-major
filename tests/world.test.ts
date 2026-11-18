@@ -384,7 +384,7 @@ describe('guerres de l\'IA', () => {
   });
 
   it('fait attaquer un voisin plus faible, jamais un plus fort', () => {
-    const sim = new Simulation({ ...line(), ai: true, seed: 3 });
+    const sim = new Simulation({ ...line(), ai: true, seed: 3, restraint: false });
     let wars = 0;
     for (let t = 0; t < 20000 && wars < 1; t++) {
       sim.step();
@@ -416,6 +416,7 @@ describe('guerres de l\'IA', () => {
       ai: true,
       seed: 11,
       doctrines: false,
+      restraint: false,
     });
     let declared = false;
     let landed = false;

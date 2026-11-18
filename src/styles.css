@@ -252,7 +252,9 @@ canvas {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* Six onglets sur 330 px : chacun prend la largeur de son nom. */
+  grid-template-columns: repeat(6, auto);
+  justify-content: space-between;
   border-bottom: 1px solid var(--panel-line);
 }
 
@@ -260,13 +262,13 @@ canvas {
   position: relative;
   white-space: nowrap;
   min-height: 40px;
-  padding: 10px 2px 4px;
+  padding: 10px 4px 4px;
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
   color: var(--ink-soft);
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
@@ -278,6 +280,35 @@ canvas {
 .tabs button.on {
   border-bottom-color: var(--accent);
   color: var(--ink);
+  font-weight: 600;
+}
+
+.ranking {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.ranking li {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 6px;
+  padding: 3px 4px;
+  border-bottom: 1px solid var(--panel-line);
+}
+
+.ranking li span:first-child {
+  color: var(--ink-soft);
+}
+
+.ranking li b {
+  font-family: var(--mono);
+  font-weight: 400;
+}
+
+.ranking li.mine {
+  color: var(--accent);
   font-weight: 600;
 }
 

@@ -39,6 +39,14 @@ export function eventNations(event: SimEvent): number[] {
       return [event.parent, event.rebel];
     case 'demand':
       return [event.parent, event.origin];
+    case 'gameEnd':
+      return [];
+    case 'threat':
+    case 'ultimatum':
+    case 'threatEased':
+    case 'ultimatumAccepted':
+    case 'tributePaid':
+      return [event.from, event.to];
   }
 }
 
@@ -73,6 +81,18 @@ export function describeEvent(event: SimEvent, nameOf: (id: number) => string): 
   switch (event.type) {
     case 'war':
       return `Guerre : ${nameOf(event.a)} et ${nameOf(event.b)}`;
+    case 'gameEnd':
+      return 'Date butoir : le bilan de la partie';
+    case 'threat':
+      return `${nameOf(event.from)} masse des troupes à la frontière de ${nameOf(event.to)}`;
+    case 'ultimatum':
+      return `${nameOf(event.from)} pose un ultimatum à ${nameOf(event.to)}`;
+    case 'threatEased':
+      return `${nameOf(event.from)} renonce à menacer ${nameOf(event.to)}`;
+    case 'ultimatumAccepted':
+      return `${nameOf(event.to)} cède une province à ${nameOf(event.from)}`;
+    case 'tributePaid':
+      return `${nameOf(event.from)} verse un tribut à ${nameOf(event.to)}`;
     case 'capitulation':
       return `${nameOf(event.loser)} capitule devant ${nameOf(event.winner)}`;
     case 'peace':

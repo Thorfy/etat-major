@@ -118,14 +118,12 @@ export const WAR_CHANCE = 0.3;
 export const MAX_WAR_SHARE = 0.2;
 export const WAR_CAPACITY_RATIO = 1.4;
 /**
- * Le joueur doit pouvoir se consacrer à son économie : l'IA ne l'attaque qu'à ce rapport de
- * force, jamais deux fois de suite à moins de PLAYER_WAR_COOLDOWN_TICKS (26 semaines), et un
- * joueur pacifique (agressivité sous PEACEFUL_AGGRESSION) est épargné la plupart du temps.
+ * Le joueur doit pouvoir se consacrer à son économie : l'IA ne le menace qu'à ce rapport de force
+ * face à sa défense, et jamais à moins de PLAYER_WAR_COOLDOWN_TICKS (26 semaines) de la dernière
+ * guerre qu'une IA lui a déclarée. La menace monte d'abord, visible (voir THREAT_GROWTH_PER_WEEK).
  */
 export const PLAYER_WAR_RATIO = 2;
 export const PLAYER_WAR_COOLDOWN_TICKS = 26 * 600;
-export const PEACEFUL_AGGRESSION = 0.15;
-export const PEACEFUL_PLAYER_SPARED = 0.6;
 /**
  * L'IA juge la force qu'un voisin peut vraiment lui opposer : ce qu'il engage déjà sur
  * d'autres fronts n'en fait pas partie (sans descendre sous ce plancher), et un pays las ou à
@@ -662,3 +660,75 @@ export const MAX_REBEL_COALITION = 4;
 export const REBEL_STABILITY = 0.7;
 export const REBEL_EFFORT = 0.65;
 export const REBEL_MOBILIZATION = 0.6;
+
+// ---------------------------------------------------------------------------
+// Score : quatre piliers, mesurés en part du monde et rapportés à leur valeur de départ
+// ---------------------------------------------------------------------------
+
+/** Points par doublement d'un pilier : doubler vaut +25, quadrupler +50, perdre la moitié −25. */
+export const SCORE_POINTS_PER_DOUBLING = 25;
+/** Un pilier ne descend pas sous ce rapport à son départ (−100 points au plus par pilier). */
+export const SCORE_PILLAR_FLOOR = 1 / 16;
+/** Une province occupée, pas encore annexée, compte pour cette part de sa valeur dans la puissance. */
+export const SCORE_OCCUPIED_SHARE = 0.5;
+/** Part du PIB d'un partenaire commercial comptée dans la sphère d'influence (jamais plus que son propre PIB). */
+export const SCORE_PARTNER_SHARE = 0.25;
+/** Part du PIB d'un pays sous pacte : un pacte protège plus qu'il n'influence. */
+export const SCORE_PACT_SHARE = 0.1;
+/**
+ * Au classement, seuls comptent les pays présents au départ et pesant au moins ce PIB (en millions
+ * de dollars) : un micro-État ou une région née en cours de partie double ses piliers trop aisément.
+ * Le joueur y figure toujours.
+ */
+export const SCORE_MIN_RANKED_OUTPUT = 20_000;
+/**
+ * Une province annexée et calme se relève peu à peu : sa valeur, son PIB et ses hommes remontent de
+ * tant de leur niveau d'origine par semaine, jusqu'à ANNEX_RECOVERY_CAP, si sa région s'agite moins
+ * que ANNEX_RECOVERY_CALM.
+ */
+export const ANNEX_RECOVERY_PER_WEEK = 0.008;
+export const ANNEX_RECOVERY_CAP = 0.75;
+export const ANNEX_RECOVERY_CALM = 0.3;
+/** Date butoir : le 1er janvier 2028, deux ans de jeu (730 jours). */
+export const SCORE_END_TICK = Math.ceil((730 * WEEK) / 7);
+
+// ---------------------------------------------------------------------------
+// Menaces contre le joueur : une IA ne l'attaque jamais d'un coup
+// ---------------------------------------------------------------------------
+
+/**
+ * Une IA qui convoite le joueur (assez forte face à sa défense, ses fortifications de frontière
+ * comprises) fait monter sa tension, de tant par semaine (fois la racine de son goût pour la guerre,
+ * entre 0,4 et 2) ; elle retombe d'autant quand la défense la dissuade. Aucune pendant les six
+ * premiers mois. Il lui faut aussi un motif : un joueur pacifique (agressivité sous
+ * THREAT_PROVOKED_AGGRESSION) n'est menacé que par un conquérant ; les autres ne menacent qu'un
+ * joueur qui s'est montré agressif.
+ */
+export const THREAT_GRACE_TICKS = 26 * WEEK;
+export const THREAT_GROWTH_PER_WEEK = 0.06;
+export const THREAT_PROVOKED_AGGRESSION = 0.15;
+export const THREAT_DECAY_PER_WEEK = 0.15;
+/** Seuils de la tension : elle masse des troupes, puis pose un ultimatum ; à 1, c'est la guerre. */
+export const THREAT_WARNING = 0.35;
+export const THREAT_ULTIMATUM = 0.7;
+/** Délai d'un ultimatum ; refusé, la guerre vient une semaine plus tard si la menace tient. */
+export const ULTIMATUM_TICKS = 4 * WEEK;
+export const ULTIMATUM_REFUSED_TICKS = WEEK;
+
+/**
+ * Retenue des puissances en bonne santé : un pays qui pèse au moins RESTRAINT_MIN_SHARE du PIB
+ * mondial, dont la richesse ne décline pas (son pilier au moins RESTRAINT_WEALTH de son départ) et
+ * qui reste stable (RESTRAINT_STABILITY), étend son influence par l'économie et la diplomatie : il ne
+ * déclare pas de guerre d'agression, et ne menace un joueur que si celui-ci s'est montré agressif,
+ * même conquérant. Les petits pays, et les puissances en déclin ou instables, gardent les mains libres.
+ */
+export const RESTRAINT_MIN_SHARE = 0.01;
+export const RESTRAINT_WEALTH = 0.9;
+export const RESTRAINT_STABILITY = 0.6;
+
+/**
+ * Tribut : pour apaiser une menace (dès que l'IA masse des troupes, ou à l'ultimatum), le joueur lui
+ * verse cette part de son PIB pendant TRIBUTE_TICKS ; elle renonce, et une trêve d'un an est signée.
+ */
+export const TRIBUTE_SHARE = 0.1;
+export const TRIBUTE_TICKS = 26 * WEEK;

@@ -81,6 +81,172 @@ les pays bien plus faibles, le choix du pays en cliquant sur la carte, des sauve
 jour d'une version à l'autre, et une nouvelle gestion du temps (l'ancien ×4 devient la vitesse
 normale, et le temps se compte en dates).
 
+## But, score et voies de jeu (conception, à valider)
+
+Constat de la flotte de testeurs : la conquête donne du plaisir mais ne rapporte pas, la paix ne
+propose rien, et personne ne sait s'il a bien joué. But : **plusieurs façons de jouer, qui se
+valent**, jugées par un même score.
+
+### Les quatre voies
+
+Chaque voie a son moteur, sa faiblesse, et une voie qu'elle contre : aucune ne domine.
+
+| Voie | Moteur | Ce qui la menace | Ce qu'elle contre |
+|---|---|---|---|
+| **Conquête** | Territoire, ressources et population prises | Son agressivité : embargos, garanties et coalitions défensives, régions agitées | Le commerçant sans protection |
+| **Prospérité** | Croissance, usines, accords | Blocus, embargo, guerre chez ses partenaires, crises économiques | La forteresse, qui grandit lentement |
+| **Influence** | Sa sphère : partenaires, protégés, garanties | La chute d'un protégé, un rival plus influent | Le conquérant, en dressant des garanties contre lui |
+| **Forteresse** | Stabilité, dissuasion, intégrité | La stagnation | Le conquérant, qui s'y casse les dents |
+
+### Le score
+
+Un indice par pays, **100 au départ**, recalculé chaque semaine et affiché en permanence, avec le
+rang mondial. Il mesure la **progression relative au monde** : si tout le monde grandit de 100 %,
+personne ne gagne de points. La Belgique et les États-Unis partent donc à égalité.
+
+Quatre piliers, chacun un rapport à sa propre valeur de départ (1 au départ) :
+
+| Pilier | Mesure |
+|---|---|
+| **Richesse** | Part du PIB mondial |
+| **Puissance** | Part de la valeur mondiale contrôlée (provinces tenues, annexées comprises) et de la capacité militaire, moitié-moitié |
+| **Influence** | Part du PIB mondial dans sa sphère : soi, ses protégés en entier, un quart de ses partenaires commerciaux et de ses pactes |
+| **Solidité** | Stabilité, part de son territoire d'origine tenue, guerres conclues plutôt qu'ouvertes ou perdues |
+
+**Indice = 100 + 25 × somme des log₂ des quatre piliers**, plus le bonus d'ambition. Doubler un
+pilier rapporte +25, le quadrupler +50 : **rendements décroissants**. Se spécialiser plafonne, une
+partie équilibrée reste bonne, et quadrupler son territoire en jungle ne vaut plus une victoire
+écrasante. Reculer coûte autant : la moitié d'un pilier, −25.
+
+### Les ambitions
+
+Au départ, le joueur choisit une ambition (le jeu en suggère une selon son pays). Chacune a trois
+objectifs, adaptés à la taille du pays, et rapporte **le même bonus au plus : +15, +15, +20**.
+Exemples :
+
+| Ambition | Grand pays | Petit pays |
+|---|---|---|
+| Conquête | Doubler la valeur contrôlée ; dominer sa région ; garder les conquêtes calmes | Annexer deux voisins ; tenir deux ans ; ne perdre aucune conquête |
+| Prospérité | Première économie de sa région ; part du PIB mondial +30 % ; aucune crise subie sans réponse | PIB par habitant dans le top 20 ; 4 accords tenus ; part du PIB mondial +50 % |
+| Influence | Une sphère de 10 pays ; trois protégés ; arrêter une guerre d'agression | Être garanti par une puissance ; deux protégés ; sphère +100 % |
+| Forteresse | Aucun territoire perdu ; repousser une attaque ; stabilité au-dessus de 70 % | Survivre à un ultimatum ; aucune guerre perdue ; stabilité au-dessus de 70 % |
+
+Les IA ont aussi une ambition, tirée de leur tempérament (belliqueux → conquête, commerçant →
+prospérité ou influence, bâtisseur → prospérité, prudent → forteresse) : elle guide leur
+comportement, et donne au joueur de vrais rivaux.
+
+### Les mécaniques nouvelles
+
+- **Menaces qui montent.** Remplace le répit et l'« épargne » du joueur pacifique. Une IA
+  conquérante choisit une cible et le montre : sa **tension** monte à la frontière, visible sur la
+  fiche du pays (« masse des troupes », « revendique la Silésie »), pendant plusieurs semaines. À
+  son comble, un **ultimatum** : céder une province, payer (des points de chantier), accepter de
+  devenir son protégé, ou refuser et voir la guerre venir. La **dissuasion** compte : l'IA mesure ta
+  défense réelle (armée, fortifications de la frontière, garanties) avant d'attaquer. Les
+  fortifications et la posture défensive deviennent utiles même en paix.
+- **Influence et garanties.** Garantir un petit pays menacé : il entre dans ta sphère, et quiconque
+  l'attaque entre en guerre contre toi. Une garantie est **toujours visible** (fiche du pays,
+  bouton de guerre qui l'annonce) : c'est le contre de la conquête. L'IA garantit aussi, surtout les
+  pays d'influence. Un protégé (garanti depuis longtemps, ou qui l'a demandé dans un ultimatum)
+  compte en entier dans ta sphère, mais te suit dans tes guerres défensives.
+- **Crises économiques.** Une à deux par an et par région : choc pétrolier, krach, pénurie
+  d'acier. Elles frappent surtout les économies dépendantes du commerce (le libre-échange gagne plus
+  et risque plus, l'autarcie se protège mais plafonne). Une fenêtre propose une réponse : relance
+  (les chantiers paient la reprise), austérité (la stabilité paie), protectionnisme (le commerce
+  paie). Le joueur économique a enfin des décisions en cours de partie.
+- **Coalitions défensives, lisibles.** Au-delà d'une agressivité donnée, les pays que tu menaces
+  peuvent se coaliser contre toi. Une jauge l'annonce des semaines avant (« coalition en formation :
+  3 pays, se déclare à 70 % »), et elle retombe si tu te calmes. **C'est un retour en arrière** : les
+  coalitions avaient été retirées parce qu'elles tombaient sans prévenir. Elles reviennent seulement
+  annoncées et évitables. À valider.
+
+### Fin de partie
+
+**Date butoir : 1er janvier 2028**, deux ans de jeu, soit 1 h 45 à ×1. Un écran de bilan montre
+l'indice, le rang mondial, les quatre piliers et les ambitions tenues. On peut ensuite continuer en
+bac à sable.
+
+### Équilibre : le critère
+
+On le mesure avec la flotte de testeurs (`tools/playtest.ts`) : chaque voie jouée par des agents
+sur un petit et un grand pays, plusieurs graines. **Critère : le score médian de chaque voie reste
+dans ±15 % des autres**, et aucune n'est notée sous 5/10 pour le plaisir. Si une voie sort devant,
+on renforce ses contres ; si elle est à la traîne, son moteur. On recommence jusqu'à l'équilibre.
+
+### Ordre de réalisation
+
+1. **Score et classement** : les quatre piliers, l'indice, le rang mondial, l'onglet Classement, la
+   date butoir et l'écran de bilan. Première passe de la flotte, pour mesurer l'écart actuel entre
+   les voies.
+2. **Ambitions** : choix au départ, objectifs, ambitions des IA.
+3. **Menaces et dissuasion** : tension, ultimatums, défense mesurée par l'IA.
+4. **Influence et garanties.**
+5. **Crises économiques.**
+6. **Équilibrage de la conquête** (un petit pays tombe aujourd'hui en quelques jours) et
+   coalitions défensives, puis la boucle de la flotte jusqu'au critère.
+
+### Fait : score, classement, bilan
+
+- **Indice** dans la barre du haut (avec son rang), **onglet Score** (piliers, classement mondial,
+  date du bilan), **fenêtre de bilan** au 1er janvier 2028, puis bac à sable.
+- **Première passe de la flotte** (quatre voies, un grand et un petit pays chacune) : médianes de
+  136 (conquête) à 166 (influence), mais presque tout venait de l'influence, cliquée au premier jour
+  (4 accords : +25). Corrigé (**score v2**) :
+  - **influence comparée à la moyenne du monde** (si tout le monde signe quatre accords, personne n'y
+    gagne), un pacte n'y comptant que pour un dixième du PIB du partenaire ;
+  - **puissance** : moitié terres tenues à leur valeur d'origine, moitié capacité militaire mondiale
+    (l'armée et la dissuasion comptent, au prix de la richesse) ;
+  - **conquêtes qui se relèvent** : une province annexée et calme retrouve 0,8 % de sa valeur par
+    semaine, jusqu'aux trois quarts ;
+  - **impôts allégés** : ils ramènent la stabilité au niveau de paix, sans le dépasser ;
+  - **classement** limité aux pays présents au départ, d'au moins 20 Md $ de PIB (plus le joueur) ;
+  - une nouvelle partie part avec l'effort de paix de l'IA (35 %) au lieu de l'équilibre (50 %), où
+    l'économie ne grandit pas.
+
+### Fait : menaces et dissuasion
+
+L'IA n'attaque plus jamais le joueur d'un coup (fin du « joueur pacifique épargné six fois sur
+dix »). Une IA qui le convoite, assez forte face à **sa défense** (armée disponible, multipliée par
+les fortifications de leur frontière commune : une frontière entièrement fortifiée compte autant
+qu'une cellule fortifiée au combat), fait monter sa **tension** au fil des semaines : elle **masse des
+troupes** (35 %, message), puis pose un **ultimatum** (70 % : céder la province la plus précieuse de
+leur frontière, et une trêve d'un an, ou refuser), puis attaque à l'échéance (quatre semaines, une
+seule après un refus). Dissuadée, sa tension retombe et elle **renonce** (message). Onglet Diplomatie :
+chaque menace, sa tension, le rapport de force vu par l'IA et celui qu'il lui faut, l'échéance et les
+boutons de l'ultimatum. Un petit pays face à un géant ne peut pas dissuader seul : il cède, ou il lui
+faudra un protecteur (l'influence et les garanties, prochaine étape).
+
+**Premier essai du joueur** (« je me fais agresser par les États-Unis dès la première année sans
+rien pouvoir faire ») : les menaces étaient venues avant les moyens de s'en protéger. Désormais :
+
+- **aucune menace pendant les six premiers mois**, et une montée deux fois plus lente (une dizaine
+  de semaines entre les troupes massées et la guerre) ;
+- **un motif** : un joueur pacifique (agressivité sous 15 %) n'est menacé que par un conquérant ;
+  les autres ne menacent qu'un joueur qui s'est montré agressif ;
+- **retenue des puissances en bonne santé** (« un pays en bonne santé financière doit privilégier
+  les solutions économiques et diplomatiques, les petits pays ont plus de latitude ») : un pays qui
+  pèse au moins 1 % du PIB mondial, sans déclin de sa richesse face au monde et stable (60 %), ne
+  déclare aucune guerre d'agression, contre une IA comme contre le joueur, même conquérant ; il ne
+  menace qu'un joueur agressif. Les petits pays, et les puissances en déclin ou instables, gardent
+  les mains libres.
+
+**Deuxième essai** (la France, agressive, menacée par les États-Unis : « il y a écrit pose un
+ultimatum, mais aucune proposition, aucun moyen de négocier ; sur la carte des relations, pas de vue
+d'ensemble ; trop d'infos écrites partout ») :
+
+- **un ultimatum porte toujours une demande** : sans frontière terrestre, la province du joueur la
+  plus proche de ses terres (un territoire d'outre-mer, souvent) ;
+- **négocier** : céder la province (à l'ultimatum), ou verser un **tribut** dès que l'IA masse des
+  troupes (un dixième de son PIB pendant six mois, qui passe à l'IA) ; dans les deux cas elle
+  renonce, et une trêve d'un an est signée ; refuser l'ultimatum, c'est la guerre sous une semaine,
+  sauf dissuasion. Fenêtre à trois choix, mêmes boutons dans l'onglet Diplomatie ;
+- **carte des relations** : les pays qui te menacent, en orange (« Te menace ») ; **sans pays
+  sélectionné** (un clic sur la mer), la **vue d'ensemble du monde** : qui est en guerre, sous
+  pacte, en trêve, sous embargo, qui te menace, qui est en paix ;
+- **moins de texte** : les paragraphes d'explication des règles (onglets, légendes des cartes) sont
+  supprimés ; restent les alertes, les états et les chiffres. (Un bouton « ? » pour les afficher,
+  essayé, a été retiré : « ce n'est pas ce que j'ai demandé ».)
+
 ## État du jalon 10
 
 Le plan prévoyait deux doctrines. Le joueur a demandé **un spectre complet** : la doctrine d'un pays
@@ -215,6 +381,14 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   revérifie son réseau toutes les dix passes d'économie, et le redessine si un département hors
   réseau dépasse de 10 % la plus petite ville principale, si une ville est perdue, une route coupée,
   ou si le nombre permis change.
+- **Routes de l'autarcie** (demandé : « les routes vers nos propres ressources sont toujours
+  gratuites en mode autarcie, progressif, de sorte que quand l'empire grandit nos routes se créent
+  d'elles-mêmes ») : l'autarcie relie d'elle-même au réseau une part de ses gisements de pétrole et
+  d'acier égale à sa position sur l'axe Échanges (la moitié des gisements à mi-chemin, tous à fond),
+  les plus gros d'abord, terres annexées comprises. Ils ne prennent pas de place de ville principale
+  et deviennent des villes du réseau (avec leur bonus) ; le réseau se redessine quand la doctrine
+  avance ou qu'un gisement est gagné ou perdu. L'IA en profite de même. Onglet Économie :
+  « Gisements reliés ».
 - **Cartes en familles**, chacune avec ses sous-cartes (touches P, E, T, R ; appuyer encore passe à
   la sous-carte suivante) :
   - Pays : Pays, Régions, Stabilité ;
