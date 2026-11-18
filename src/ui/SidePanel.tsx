@@ -352,18 +352,19 @@ function AutoNetwork({ game }: { game: GameClient }) {
   const shown = open ? network.principal : network.principal.slice(0, 6);
   // Ce que le réseau prend sur sa capacité : chaque ville en autarcie, chaque bout de route en
   // libre-échange, un mélange entre les deux.
-  const used = (1 - network.freeTrade) * network.hubs.length + network.freeTrade * network.termini;
+  const used = (1 - network.freeTrade) * network.hubs.length + (network.freeTrade * network.termini * network.capacity) / network.terminusBudget;
+  const deposits = network.linkedDeposits.length + network.unlinked.length;
   return (
     <>
       <h3>Réseau commercial</h3>
       <dl>
-        <dt title="En autarcie, chaque ville reliée compte ; en libre-échange, seuls les bouts de route ; entre les deux, un mélange.">Capacité</dt>
+        <dt title="En autarcie, chaque ville reliée compte ; en libre-échange, seuls les bouts de route, jusqu'à trois par place ; entre les deux, un mélange.">Capacité</dt>
         <dd>
           {used.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} / {network.capacity}
         </dd>
         <dt>Villes reliées</dt>
         <dd>
-          {network.hubs.length} · {network.termini} terminus
+          {network.hubs.length} · {network.termini} / {Math.floor(network.terminusBudget)} terminus
         </dd>
         <dt>D'où</dt>
         <dd>
@@ -374,10 +375,20 @@ function AutoNetwork({ game }: { game: GameClient }) {
         <dt>Routes d'accords</dt>
         <dd>{partners.length > 0 ? partners.map((id) => game.nameOf(id)).join(', ') : 'aucune'}</dd>
         <dt title="L'autarcie relie gratuitement une part de tes gisements : tous à fond, la moitié au centre, aucun en libre-échange à fond.">Gisements reliés</dt>
-        <dd class={network.resources.length < network.resourceTargets ? 'behind' : ''}>
-          {network.resourceTargets > 0 ? `${network.resources.length} / ${network.resourceTargets} · gratuits` : '—'}
-        </dd>
+        <dd class={network.unlinked.length > 0 ? 'behind' : ''}>{deposits > 0 ? `${network.linkedDeposits.length} / ${deposits}` : '—'}</dd>
       </dl>
+      {network.unlinked.length > 0 && (
+        <ul class="builds axis-list unlinked-deposits">
+          {network.unlinked.map(({ province, cut }) => (
+            <li key={province}>
+              <button class="link-button" title="Voir sur la carte" onClick={() => game.focusProvince(province)}>
+                {city(province)}
+              </button>{' '}
+              <small>{cut ? '· coupé : aucune route possible' : '· laissé par ta doctrine'}</small>
+            </li>
+          ))}
+        </ul>
+      )}
       {network.principal.length > 0 && (
         <ol class="builds axis-list">
           {shown.map((province, index) => (

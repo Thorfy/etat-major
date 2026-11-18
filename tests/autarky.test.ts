@@ -12,7 +12,7 @@ const B = 2;
  * A en haut (deux rangées de dix provinces de 20 × 20 cellules), B en bas. Quatre gisements de pétrole
  * de A, de tailles 4, 3, 2 et 1, dans des provinces pauvres de la rangée du haut.
  */
-function world(): SimConfig {
+function world(enclave = false): SimConfig {
   const ownerGrid = new Uint16Array(W * H);
   const provinceGrid = new Uint16Array(W * H);
   const ids = new Map<string, number>();
@@ -24,10 +24,12 @@ function world(): SimConfig {
     ['9,0', 1],
     // Un gisement de B, sur sa rangée du bas.
     ['4,3', 5],
+    // Une enclave de A au milieu de B, avec son gisement : aucune route n'y mène.
+    ...(enclave ? ([['8,3', 2]] as const) : []),
   ]);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const n = y < 40 ? A : B;
+      const n = y < 40 || (enclave && Math.floor(x / 20) === 8 && Math.floor(y / 20) === 3) ? A : B;
       ownerGrid[y * W + x] = n;
       const key = `${Math.floor(x / 20)},${Math.floor(y / 20)}`;
       let id = ids.get(key);
@@ -58,8 +60,8 @@ function world(): SimConfig {
 }
 
 /** Fixe la position de A sur l'axe Échanges (−1 : autarcie, +1 : libre-échange), et l'y tient. */
-function withExchange(position: number): Simulation {
-  const sim = new Simulation(world());
+function withExchange(position: number, enclave = false): Simulation {
+  const sim = new Simulation(world(enclave));
   const internals = sim as unknown as { doctrine: Float64Array; doctrineTarget: Float64Array };
   for (let t = 0; t < 600; t++) {
     internals.doctrine[A * DOCTRINE_AXIS_COUNT + 3] = position;
@@ -100,7 +102,8 @@ describe("réseau : de l'autarcie au libre-échange", () => {
     const middle = withExchange(0).networkOf(A);
     const free = withExchange(1).networkOf(A);
     expect(free.capacity).toBe(autarky.capacity);
-    expect(free.termini ?? 0).toBeLessThanOrEqual(free.capacity);
+    // À fond, jusqu'à trois bouts de route par place de la capacité.
+    expect(free.termini ?? 0).toBeLessThanOrEqual(3 * free.capacity);
     expect(free.hubs.length).toBeGreaterThan(autarky.hubs.length);
     // Le centre est entre les deux.
     expect(middle.hubs.length).toBeGreaterThanOrEqual(autarky.hubs.length);
@@ -129,5 +132,25 @@ describe("réseau : de l'autarcie au libre-échange", () => {
     expect(sim.controllerOf(taken)).toBe(A);
     expect(network.resourceTargets).toContain(taken);
     expect(network.resources).toContain(taken);
+  });
+
+  it("nomme les gisements hors réseau : laissés par la doctrine, ou coupés", () => {
+    // En autarcie à fond, seul le gisement enclavé reste dehors, coupé : aucune route n'y mène.
+    const autarky = withExchange(-1, true).depositsOffNetwork(A);
+    expect(autarky.unlinked).toHaveLength(1);
+    expect(autarky.unlinked[0].cut).toBe(true);
+    expect(autarky.linkedDeposits).toHaveLength(4);
+    // Au centre, ceux que la doctrine laisse ne sont pas coupés, et tous sont comptés.
+    const middle = withExchange(0, true).depositsOffNetwork(A);
+    expect(middle.unlinked.length + middle.linkedDeposits.length).toBe(5);
+    expect(middle.unlinked.filter((entry) => !entry.cut).length).toBeGreaterThan(0);
+  });
+
+  it('un réseau bâti ne se redessine pas sans raison, même avec un département impossible à relier', () => {
+    for (const position of [-1, 0, 1]) {
+      const sim = withExchange(position, true);
+      const internals = sim as unknown as { networkNeedsRebuild(nation: number): boolean };
+      expect(internals.networkNeedsRebuild(A)).toBe(false);
+    }
   });
 });

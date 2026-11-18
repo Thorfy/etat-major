@@ -274,6 +274,11 @@ import {
   HUB_SWAP_MARGIN,
   NETWORK_CHECK_GROUPS,
   NETWORK_MAX_REFUSED,
+  NETWORK_FREE_TRADE_TERMINI,
+  NETWORK_CLUSTER_POLES,
+  NETWORK_CLUSTER_WEIGHT,
+  NETWORK_CLUSTER_RADIUS,
+  NETWORK_LAYOUT,
   RESOURCE_ROUTE_MAX_CELLS,
   MAX_AXIS_CELLS,
   AXIS_COST_BASE,
@@ -3704,6 +3709,26 @@ export class Simulation {
     return this.networks[nation] ?? { hubs: [], principal: [], capacity: 0 };
   }
 
+  /**
+   * Gisements tenus, desservis ou non par le réseau automatique. Un gisement hors réseau l'est par la
+   * doctrine (l'autarcie n'en relie qu'une part, le libre-échange aucun) ou coupé : l'autarcie le
+   * vise, mais aucune route n'y mène (enclave, île hors de portée, passage tenu par l'ennemi).
+   */
+  depositsOffNetwork(nation: number): { unlinked: { province: number; cut: boolean }[]; linkedDeposits: number[] } {
+    const network = this.networkOf(nation);
+    const reached = new Set<number>(network.hubs);
+    for (const axis of this.axes) if (axis.auto && axis.nation === nation && axis.active) for (const p of axis.provinces) reached.add(p);
+    const targets = new Set(network.resourceTargets ?? []);
+    const unlinked: { province: number; cut: boolean }[] = [];
+    const linkedDeposits: number[] = [];
+    for (let p = 1; p < this.controller.length; p++) {
+      if (this.controller[p] !== nation || (this.provinceOil[p] === 0 && this.provinceSteel[p] === 0)) continue;
+      if (reached.has(p)) linkedDeposits.push(p);
+      else unlinked.push({ province: p, cut: targets.has(p) });
+    }
+    return { unlinked, linkedDeposits };
+  }
+
   /** Faut-il redessiner le réseau : capacité changée, ville perdue, route coupée, ou un département qui détrône une ville principale. */
   private networkNeedsRebuild(nation: number): boolean {
     const network = this.networks[nation];
@@ -3719,25 +3744,53 @@ export class Simulation {
     const own = this.axes.filter((axis) => axis.auto && axis.nation === nation);
     if (own.some((axis) => !axis.active)) return true;
     if (network.hubs.length === 0) return false;
+    if (network.layout !== NETWORK_LAYOUT) return true;
     const onNetwork = new Set(own.flatMap((axis) => axis.provinces));
     for (const p of network.hubs) onNetwork.add(p);
-    const weakest = Math.min(...network.hubs.map((p) => this.hubWealth(p)));
-    for (let p = 1; p < this.controller.length; p++) {
-      if (this.controller[p] !== nation || this.provinceHome[p] !== nation || onNetwork.has(p)) continue;
-      if (this.hubWealth(p) > weakest * HUB_SWAP_MARGIN) return true;
-    }
+    // Un département déjà essayé et laissé ne relance rien : il le serait encore.
+    for (const p of network.skipped ?? []) onNetwork.add(p);
+    const held: number[] = [];
+    for (let p = 1; p < this.controller.length; p++) if (this.controller[p] === nation && this.provinceHome[p] === nation) held.push(p);
+    const score = this.hubScorer(this.freeTradeShareOf(nation), this.richestOf(held));
+    const weakest = Math.min(...network.hubs.map(score));
+    for (const p of held) if (!onNetwork.has(p) && score(p) > weakest * HUB_SWAP_MARGIN) return true;
     return false;
+  }
+
+  /** Les départements les plus riches d'une liste : les pôles autour desquels le libre-échange resserre le réseau. */
+  private richestOf(provinces: readonly number[]): number[] {
+    const poles: number[] = [];
+    for (const p of provinces) {
+      poles.push(p);
+      poles.sort((a, b) => this.hubWealth(b) - this.hubWealth(a) || a - b);
+      if (poles.length > NETWORK_CLUSTER_POLES) poles.pop();
+    }
+    return poles;
+  }
+
+  /**
+   * Poids d'un département dans le choix des villes du réseau : sa richesse, et à mesure du
+   * libre-échange sa proximité de l'une des régions les plus fortes (les pôles).
+   */
+  private hubScorer(freeTrade: number, poles: readonly number[]): (p: number) => number {
+    return (p) => {
+      let near = 0;
+      if (freeTrade > 0) for (const q of poles) near = Math.max(near, Math.exp(-this.provinceDistance(p, q) / NETWORK_CLUSTER_RADIUS));
+      return this.hubWealth(p) * (1 + NETWORK_CLUSTER_WEIGHT * freeTrade * near);
+    };
   }
 
   /**
    * Redessine le réseau d'une nation : du département le plus riche au moins riche, chacun relié au
-   * plus riche par le plus court chemin (qui reprend volontiers les routes tracées). Un département
+   * réseau par le plus court chemin (qui reprend volontiers les routes tracées). Un département
    * déjà traversé est sauté, mais compte comme ville principale.
    *
    * Ce que chaque ville coûte sur la capacité dépend de l'axe Échanges : en autarcie, chaque ville
    * reliée compte ; en libre-échange, seuls comptent les terminus, les bouts de route (une route qui
-   * enfile plusieurs villes ne coûte qu'un terminus) ; entre les deux, un mélange des deux, à
-   * proportion. L'autarcie relie en plus ses gisements, gratuitement.
+   * enfile plusieurs villes ne coûte qu'un terminus), jusqu'à trois fois la capacité ; entre les
+   * deux, un mélange des deux, à proportion. À mesure du libre-échange, le réseau se resserre autour
+   * des régions les plus fortes et se ramifie de proche en proche ; l'autarcie file vers la capitale,
+   * et relie en plus ses gisements, gratuitement.
    */
   private rebuildNetwork(nation: number): void {
     const before = this.networks[nation]?.hubs ?? [];
@@ -3750,11 +3803,20 @@ export class Simulation {
     const resourceTargets = this.alive[nation] ? this.resourceLinksOf(nation) : [];
     // Le réseau comme graphe de provinces : un terminus est une province où une seule route arrive.
     const links = new Map<number, Set<number>>();
+    const skipped: number[] = [];
     let termini = 0;
     if (this.alive[nation]) {
       const candidates: number[] = [];
       for (let p = 1; p < this.controller.length; p++) if (this.controller[p] === nation && this.provinceHome[p] === nation) candidates.push(p);
       candidates.sort((a, b) => this.hubWealth(b) - this.hubWealth(a) || a - b);
+      // Le plus riche reste la racine ; après lui, à mesure du libre-échange, ceux qui sont près des
+      // régions les plus fortes passent devant : le réseau s'y resserre au lieu de s'étirer en étoile.
+      if (freeTrade > 0 && candidates.length > 2) {
+        const score = this.hubScorer(freeTrade, candidates.slice(0, NETWORK_CLUSTER_POLES));
+        const weights = new Map(candidates.map((p) => [p, score(p)]));
+        const rest = candidates.slice(1).sort((a, b) => weights.get(b)! - weights.get(a)! || a - b);
+        for (let k = 0; k < rest.length; k++) candidates[k + 1] = rest[k];
+      }
       const onNetwork = new Set<number>();
       const root = candidates[0];
       if (root !== undefined) {
@@ -3787,7 +3849,22 @@ export class Simulation {
         }
         return count;
       };
-      const usage = (cities: number, ends: number) => (1 - freeTrade) * cities + freeTrade * ends;
+      // En libre-échange, les terminus pèsent moins que des villes : jusqu'à trois fois plus à fond.
+      const usage = (cities: number, ends: number) => (1 - freeTrade) * cities + (freeTrade * ends) / (1 + NETWORK_FREE_TRADE_TERMINI * freeTrade);
+      /**
+       * Où brancher un département : le point du réseau qui le rapproche le plus de la racine en
+       * autarcie (la route file vers la capitale), le plus proche de lui en libre-échange (le réseau
+       * se ramifie de proche en proche, sans nouveau bout de route quand il prolonge l'un d'eux).
+       */
+      const anchorFor = (p: number): number => {
+        let best = root;
+        let bestCost = Infinity;
+        for (const q of onNetwork) {
+          const cost = this.provinceDistance(p, q) + (1 - freeTrade) * this.provinceDistance(q, root);
+          if (cost < bestCost) [best, bestCost] = [q, cost];
+        }
+        return best;
+      };
       // Un tracé refusé (il coûterait trop) laisse sa chance aux suivants, dans une limite : d'autant
       // plus large que le libre-échange compte, lui qui cherche des villes au bout des routes.
       const patience = Math.max(2, Math.round(NETWORK_MAX_REFUSED * freeTrade));
@@ -3799,10 +3876,15 @@ export class Simulation {
           principal.push(p);
           continue;
         }
-        const plan = this.planAxis(nation, p, root);
-        if (!plan) continue;
+        const anchor = anchorFor(p);
+        const plan = this.planAxis(nation, p, anchor) ?? (anchor !== root ? this.planAxis(nation, p, root) : null);
+        if (!plan) {
+          skipped.push(p);
+          continue;
+        }
         const ends = terminiWith(plan.path);
         if (usage(hubs.length + 1, ends) > capacity + 1e-9) {
+          skipped.push(p);
           refused++;
           continue;
         }
@@ -3837,7 +3919,7 @@ export class Simulation {
     }
     // Le mélange autarcie / libre-échange retenu, au dixième près : le réseau se redessine quand il change.
     const blend = Math.round(freeTrade * 10) / 10;
-    this.networks[nation] = { hubs, principal, capacity, resources, resourceTargets, termini, blend };
+    this.networks[nation] = { hubs, principal, capacity, resources, resourceTargets, termini, blend, skipped, layout: NETWORK_LAYOUT };
     this.axesVersion++;
     if (nation === this.player) {
       const added = hubs.filter((p) => !before.includes(p));
@@ -5657,7 +5739,9 @@ export class Simulation {
             ? (() => {
                 const { base, territory, research, total } = this.hubCapacityOf(id);
                 const network = this.networkOf(id);
-                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).length, termini: network.termini ?? 0, freeTrade: this.freeTradeShareOf(id) };
+                const freeTrade = this.freeTradeShareOf(id);
+                const { unlinked, linkedDeposits } = this.depositsOffNetwork(id);
+                return { principal: network.principal.slice(), hubs: network.hubs.slice(), capacity: total, base, territory, research, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).length, termini: network.termini ?? 0, terminusBudget: total * (1 + NETWORK_FREE_TRADE_TERMINI * freeTrade), freeTrade, unlinked, linkedDeposits };
               })()
             : null,
         doctrineTarget: id === this.player ? Array.from(this.doctrineTarget.subarray(id * DOCTRINE_AXIS_COUNT, (id + 1) * DOCTRINE_AXIS_COUNT)) : [],
@@ -5874,7 +5958,7 @@ export class Simulation {
         networks: Array.from({ length: this.stride }, (_, n) => {
           const network = this.networks[n];
           return network
-            ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend }
+            ? { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend, skipped: (network.skipped ?? []).slice(), layout: network.layout }
             : { hubs: [], principal: [], capacity: -1 };
         }),
         doctrine: Array.from(this.doctrine),
@@ -5985,7 +6069,7 @@ export class Simulation {
     // Un réseau jamais calculé (capacité -1) le sera à son tour.
     this.networks = [];
     (legacy.networks ?? []).forEach((network, n) => {
-      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend };
+      if (network && network.capacity >= 0) this.networks[n] = { hubs: network.hubs.slice(), principal: network.principal.slice(), capacity: network.capacity, resources: (network.resources ?? []).slice(), resourceTargets: (network.resourceTargets ?? []).slice(), termini: network.termini, blend: network.blend, skipped: (network.skipped ?? []).slice(), layout: network.layout };
     });
     this.networkPhase = legacy.networkPhase ?? 0;
     if (legacy.axisBaseline) {

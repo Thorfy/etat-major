@@ -302,6 +302,8 @@ export class GameClient {
         this.view.setAxes(this.axes);
       }
       this.view.setTradePartners(this.playerStats?.deals ?? []);
+      const network = this.playerStats?.network;
+      this.view.setDepositLinks(network?.linkedDeposits ?? [], network?.unlinked.map((entry) => entry.province) ?? []);
       this.onChange();
     }
   }
@@ -818,6 +820,13 @@ export class GameClient {
 
   get worldData() {
     return this.world.data;
+  }
+
+  /** Centre la carte sur une province. */
+  focusProvince(province: number): void {
+    const target = this.world.data.provinces[province - 1];
+    if (!target) return;
+    this.view.focus(target.x, target.y, 240);
   }
 
   get playerStats(): NationSnapshot | undefined {

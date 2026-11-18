@@ -79,6 +79,8 @@ export class MapView {
   private readonly keys = new Set<string>();
   private mode: MapMode = 'political';
   private resourceMarkers: ResourceMarker[] = [];
+  private linkedDeposits = new Set<number>();
+  private unlinkedDeposits = new Set<number>();
 
   private dpr = 1;
   private dirty = true;
@@ -179,6 +181,15 @@ export class MapView {
   /** Gisements de pétrole et d'acier, montrés sur la carte économique. */
   setResourceMarkers(markers: ResourceMarker[]): void {
     this.resourceMarkers = markers;
+    if (this.mode === 'economic') this.dirty = true;
+  }
+
+  /** Gisements du joueur desservis par son réseau, et ceux qui en restent dehors (cerclés de rouge). */
+  setDepositLinks(linked: readonly number[], unlinked: readonly number[]): void {
+    const same = (set: Set<number>, list: readonly number[]) => set.size === list.length && list.every((p) => set.has(p));
+    if (same(this.linkedDeposits, linked) && same(this.unlinkedDeposits, unlinked)) return;
+    this.linkedDeposits = new Set(linked);
+    this.unlinkedDeposits = new Set(unlinked);
     if (this.mode === 'economic') this.dirty = true;
   }
 
@@ -577,7 +588,7 @@ export class MapView {
     }
     if (this.player !== 0 && sprites) drawFlows(ctx, this.camera, this.flowEdges, time / 1000);
     this.labels.draw(this.camera, false);
-    if (this.mode === 'economic') drawResources(ctx, this.camera, this.resourceMarkers);
+    if (this.mode === 'economic') drawResources(ctx, this.camera, this.resourceMarkers, this.linkedDeposits, this.unlinkedDeposits);
     if (this.player === 0) return;
     drawPriorityZones(ctx, this.camera, this.priorityZones, PRIORITY_RADIUS);
     drawCampaign(ctx, this.camera, this.player, this.atWar, this.offensives, this.pockets, this.draft, this.fronts, time / 1000, sprites);

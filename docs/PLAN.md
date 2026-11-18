@@ -406,6 +406,29 @@ défense en profondeur), et l'équilibre au-delà de 120 semaines, quand l'IA a 
   Onglet Économie : capacité utilisée, villes reliées et terminus, gisements gratuits. Coût : les
   réseaux se redessinent plus souvent (les doctrines de l'IA glissent) ; une semaine de jeu prend
   environ 1,7 s de calcul, et le pic du premier jour 240 ms.
+- **Libre-échange : bien plus de terminus, un réseau serré autour des régions fortes.** Demandé :
+  « tous les gisements ne sont toujours pas reliés ; en libre-échange il faut vraiment augmenter le
+  nombre de terminaisons possibles et maximiser les réseaux proches des régions puissantes ».
+  - **terminus** : sur la capacité, un terminus compte 1 / (1 + 2f) : jusqu'à trois bouts de route
+    par place en libre-échange à fond, deux au centre ;
+  - **réseau serré** : après la racine, chaque département pèse sa richesse × (1 + 4 f × proximité),
+    la proximité valant exp(−distance / 100 cellules) à la plus proche des trois régions les plus
+    riches. Il se branche au point du réseau qui minimise distance(lui, point) + (1 − f) ×
+    distance(point, racine) : vers la capitale en autarcie, au plus proche en libre-échange (le
+    réseau se ramifie, et prolonger un bout de route n'en crée pas de nouveau) ;
+  - un département essayé et laissé (route impossible ou trop chère) est retenu et ne relance plus le
+    calcul ; un réseau bâti à l'ancienne (sauvegarde) se redessine une fois ;
+  - **gisements hors réseau, nommés** : en simulation, à −1, tous les gisements du territoire sont
+    reliés (8 grands pays, puis 40 semaines du monde entier : 1 ou 2 sur 78 dehors, une province
+    occupée isolée). Pour voir ce qui manque dans une vraie partie, l'onglet Économie liste chaque
+    gisement tenu hors du réseau, avec sa raison (« laissé par ta doctrine » ou « coupé : aucune route
+    possible »), et un clic y centre la carte ; sur la carte économique, les gisements du joueur sont
+    cerclés d'or s'ils sont reliés, de rouge pointillé sinon.
+  Sur la vraie carte, en libre-échange à fond : France 63 villes reliées (15 avant), États-Unis 96
+  (23), Chine 80 (33), Canada 131 (38) ; l'autarcie ne change pas. Sur 26 semaines, la production
+  monte de +38 % en moyenne en libre-échange (+31 % avant) contre +20 % en autarcie : l'écart se
+  creuse, l'autarcie gardant pour elle ses gisements, la résistance aux blocus et aux embargos.
+  Calcul : le monde entier en libre-échange à fond, p99 d'un tick 23 ms (55 avant), maximum 125 ms.
 - **Cartes en familles**, chacune avec ses sous-cartes (touches P, E, T, R ; appuyer encore passe à
   la sous-carte suivante) :
   - Pays : Pays, Régions, Stabilité ;

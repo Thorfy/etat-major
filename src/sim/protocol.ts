@@ -90,6 +90,10 @@ export interface NetworkState {
   termini?: number;
   /** Part du libre-échange (0 à 1, au dixième) avec laquelle il a été bâti. */
   blend?: number;
+  /** Départements essayés et laissés (route impossible ou trop coûteuse) : ils ne relancent pas le calcul. */
+  skipped?: number[];
+  /** Façon de bâtir (NETWORK_LAYOUT) : un réseau bâti autrement se redessine. */
+  layout?: number;
   /** Villes principales permises au dernier calcul. */
   capacity: number;
 }
@@ -266,7 +270,24 @@ export interface NationSnapshot {
   /** Joueur seulement : terminus de son réseau commercial (axes en chantier compris). */
   axisTerminals: number;
   /** Joueur seulement : réseau automatique, et d'où vient le nombre de ses villes principales. */
-  network: { principal: number[]; hubs: number[]; capacity: number; base: number; territory: number; research: number; resources: number[]; resourceTargets: number; termini: number; freeTrade: number } | null;
+  network: {
+    principal: number[];
+    hubs: number[];
+    capacity: number;
+    base: number;
+    territory: number;
+    research: number;
+    resources: number[];
+    resourceTargets: number;
+    termini: number;
+    /** Terminus permis : la capacité, et davantage à mesure du libre-échange. */
+    terminusBudget: number;
+    freeTrade: number;
+    /** Gisements tenus hors du réseau : laissés par la doctrine, ou coupés (aucune route possible). */
+    unlinked: { province: number; cut: boolean }[];
+    /** Gisements tenus que le réseau dessert. */
+    linkedDeposits: number[];
+  } | null;
   /** Joueur seulement : doctrine visée et niveaux de recherche de chaque axe. */
   doctrineTarget: number[];
   research: number[];

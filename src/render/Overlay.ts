@@ -60,19 +60,39 @@ function drawArrow(
 }
 
 export interface ResourceMarker {
+  province: number;
   x: number;
   y: number;
   oil: number;
   steel: number;
 }
 
-/** Gisements, sur la carte économique : goutte noire pour le pétrole, carré d'acier pour l'acier. */
-export function drawResources(ctx: CanvasRenderingContext2D, camera: Camera, markers: readonly ResourceMarker[]): void {
+/**
+ * Gisements, sur la carte économique : goutte noire pour le pétrole, carré d'acier pour l'acier.
+ * Ceux du joueur sont cerclés : d'or s'ils sont sur son réseau, de rouge pointillé s'ils en sont dehors.
+ */
+export function drawResources(
+  ctx: CanvasRenderingContext2D,
+  camera: Camera,
+  markers: readonly ResourceMarker[],
+  linked: ReadonlySet<number> = new Set(),
+  unlinked: ReadonlySet<number> = new Set(),
+): void {
   const { viewWidth, viewHeight, zoom } = camera;
   for (const marker of markers) {
     const x = wrapDeltaX(camera.x, marker.x) * zoom + viewWidth / 2;
     const y = (marker.y - camera.y) * zoom + viewHeight / 2;
     if (x < -20 || x > viewWidth + 20 || y < -20 || y > viewHeight + 20) continue;
+    const off = unlinked.has(marker.province);
+    if (off || linked.has(marker.province)) {
+      ctx.beginPath();
+      ctx.arc(x, y, 14, 0, Math.PI * 2);
+      ctx.setLineDash(off ? [4, 3] : []);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = off ? `rgba(${ENEMY_COLOR}, 0.95)` : 'rgba(214, 178, 92, 0.95)';
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     const both = marker.oil > 0 && marker.steel > 0;
     if (marker.oil > 0) {
       const r = Math.min(9, 3 + Math.sqrt(marker.oil) * 2);

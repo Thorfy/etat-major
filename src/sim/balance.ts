@@ -405,6 +405,21 @@ export const HUB_SWAP_MARGIN = 1.1;
 export const NETWORK_CHECK_GROUPS = 10;
 /** En redessinant un réseau, on cesse d'essayer d'autres villes après tant de tracés trop coûteux. */
 export const NETWORK_MAX_REFUSED = 24;
+/**
+ * En libre-échange, la capacité compte les terminus avec ce supplément : jusqu'à 1 + 2 = 3 fois plus
+ * de bouts de route que de villes permises à fond, à proportion entre les deux.
+ */
+export const NETWORK_FREE_TRADE_TERMINI = 2;
+/**
+ * En libre-échange, le réseau se resserre autour des régions les plus fortes : un département pèse
+ * jusqu'à 1 + 4 fois sa richesse près de l'une des trois plus riches, moins à mesure qu'il s'en
+ * éloigne (rayon en cellules, environ trois départements).
+ */
+export const NETWORK_CLUSTER_POLES = 3;
+export const NETWORK_CLUSTER_WEIGHT = 4;
+export const NETWORK_CLUSTER_RADIUS = 100;
+/** Façon de bâtir le réseau : un réseau bâti autrement (une ancienne sauvegarde) se redessine. */
+export const NETWORK_LAYOUT = 2;
 /** Une route vers un gisement va jusqu'au point le plus proche du réseau, sur cette longueur au plus (en cellules). */
 export const RESOURCE_ROUTE_MAX_CELLS = 4000;
 export const MAX_AXES = 30;

@@ -120,8 +120,8 @@ async function start(): Promise<void> {
   view.setEconomy(provinceWealth(world.data.provinces.map((province) => province.areaKm2), gdp));
   view.setResourceMarkers(
     world.data.provinces
-      .filter((province) => province.oil > 0 || province.steel > 0)
-      .map(({ x, y, oil, steel }) => ({ x, y, oil, steel })),
+      .map(({ x, y, oil, steel }, index) => ({ province: index + 1, x, y, oil, steel }))
+      .filter((marker) => marker.oil > 0 || marker.steel > 0),
   );
 
   window.addEventListener('keydown', (event) => {
